@@ -14,6 +14,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
+import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
 import { Route as MasterSalesProductRouteImport } from './routes/master.sales.product'
 
 const DashboardRoute = DashboardRouteImport.update({
@@ -41,6 +42,11 @@ const MasterSplatRoute = MasterSplatRouteImport.update({
   path: '/master/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterSalesZoneRoute = MasterSalesZoneRouteImport.update({
+  id: '/master/sales/zone',
+  path: '/master/sales/zone',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MasterSalesProductRoute = MasterSalesProductRouteImport.update({
   id: '/master/sales/product',
   path: '/master/sales/product',
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/master/sales/product': typeof MasterSalesProductRoute
+  '/master/sales/zone': typeof MasterSalesZoneRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +69,7 @@ export interface FileRoutesByTo {
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/master/sales/product': typeof MasterSalesProductRoute
+  '/master/sales/zone': typeof MasterSalesZoneRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,6 +79,7 @@ export interface FileRoutesById {
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/master/sales/product': typeof MasterSalesProductRoute
+  '/master/sales/zone': typeof MasterSalesZoneRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -81,6 +90,7 @@ export interface FileRouteTypes {
     | '/reports/$'
     | '/transaction/$'
     | '/master/sales/product'
+    | '/master/sales/zone'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -89,6 +99,7 @@ export interface FileRouteTypes {
     | '/reports/$'
     | '/transaction/$'
     | '/master/sales/product'
+    | '/master/sales/zone'
   id:
     | '__root__'
     | '/'
@@ -97,6 +108,7 @@ export interface FileRouteTypes {
     | '/reports/$'
     | '/transaction/$'
     | '/master/sales/product'
+    | '/master/sales/zone'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -106,6 +118,7 @@ export interface RootRouteChildren {
   ReportsSplatRoute: typeof ReportsSplatRoute
   TransactionSplatRoute: typeof TransactionSplatRoute
   MasterSalesProductRoute: typeof MasterSalesProductRoute
+  MasterSalesZoneRoute: typeof MasterSalesZoneRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -145,6 +158,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/sales/zone': {
+      id: '/master/sales/zone'
+      path: '/master/sales/zone'
+      fullPath: '/master/sales/zone'
+      preLoaderRoute: typeof MasterSalesZoneRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/master/sales/product': {
       id: '/master/sales/product'
       path: '/master/sales/product'
@@ -162,17 +182,8 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsSplatRoute: ReportsSplatRoute,
   TransactionSplatRoute: TransactionSplatRoute,
   MasterSalesProductRoute: MasterSalesProductRoute,
+  MasterSalesZoneRoute: MasterSalesZoneRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
