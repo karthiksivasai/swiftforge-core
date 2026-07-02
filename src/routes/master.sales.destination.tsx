@@ -717,21 +717,11 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Branch Manifest">
-                  <Select
-                    value={form.branchManifest || undefined}
-                    onValueChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select Manifest Branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MANIFEST_BRANCHES.map((b) => (
-                        <SelectItem key={b} value={b}>
-                          {b}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <BranchCombobox
+                    value={form.branchManifest || ""}
+                    onChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
+                    placeholder="Select Manifest Branch"
+                  />
                 </FieldWrapper>
 
                 <FieldWrapper label="Status">
