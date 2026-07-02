@@ -187,7 +187,7 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="gap-2 px-3 py-4">
+      <SidebarContent className="gap-2 px-3 py-4 group-data-[collapsible=icon]:px-1.5">
         <SidebarMenu className="gap-2">
           {NAVIGATION.map((section) => (
             <SidebarMenuItem key={section.slug}>
