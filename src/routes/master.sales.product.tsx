@@ -111,7 +111,7 @@ function emptyProduct(): Omit<Product, "id"> {
     type: "",
     service: "",
     fuelCharge: false,
-    gstReverse: true,
+    gstReverse: false,
     shipmentType: "DOX",
     status: "Active",
     groupType: "",
@@ -427,24 +427,28 @@ function ProductPage() {
               />
             </FieldWrapper>
 
-            <label className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-sm">
-              <Checkbox
-                checked={form.fuelCharge}
-                onCheckedChange={(v) => setForm((f) => ({ ...f, fuelCharge: v === true }))}
-              />
-              Fuel Charge
-            </label>
+            <FieldWrapper label="Fuel Charge">
+              <label className="flex h-10 items-center gap-2 rounded-md border bg-background px-3 text-sm">
+                <Checkbox
+                  checked={form.fuelCharge}
+                  onCheckedChange={(v) => setForm((f) => ({ ...f, fuelCharge: v === true }))}
+                />
+                Fuel Charge
+              </label>
+            </FieldWrapper>
 
-            <label className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-sm">
-              <Checkbox
-                checked={form.gstReverse}
-                onCheckedChange={(v) => setForm((f) => ({ ...f, gstReverse: v === true }))}
-              />
-              GST Reverse
-            </label>
+            <FieldWrapper label="GST Reverse">
+              <label className="flex h-10 items-center gap-2 rounded-md border bg-background px-3 text-sm">
+                <Checkbox
+                  checked={form.gstReverse}
+                  onCheckedChange={(v) => setForm((f) => ({ ...f, gstReverse: v === true }))}
+                />
+                GST Reverse
+              </label>
+            </FieldWrapper>
 
             <FieldWrapper label="Type">
-              <div className="inline-flex overflow-hidden rounded-md border">
+              <div className="flex h-10 w-full overflow-hidden rounded-md border">
                 {(["DOX", "NDOX"] as ShipmentType[]).map((t) => {
                   const active = form.shipmentType === t;
                   return (
@@ -452,7 +456,7 @@ function ProductPage() {
                       key={t}
                       type="button"
                       onClick={() => setForm((f) => ({ ...f, shipmentType: t }))}
-                      className={`px-4 py-2 text-sm font-medium transition-colors ${
+                      className={`flex-1 px-4 text-sm font-medium transition-colors ${
                         active
                           ? "bg-emerald-600 text-white"
                           : "bg-background text-foreground hover:bg-accent"
