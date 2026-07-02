@@ -1,8 +1,11 @@
-import { useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { Check, ChevronDown, Search } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Input } from "@/components/ui/input";
+import { useEffect, useState } from "react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 interface BranchSelectProps {
@@ -13,6 +16,9 @@ interface BranchSelectProps {
   className?: string;
 }
 
+const INITIAL_CHUNK = 200;
+const CHUNK_SIZE = 400;
+
 export function BranchSelect({
   value,
   onChange,
@@ -21,102 +27,50 @@ export function BranchSelect({
   className,
 }: BranchSelectProps) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const parentRef = useRef<HTMLDivElement>(null);
+  const [rendered, setRendered] = useState(INITIAL_CHUNK);
 
-  const filtered = useMemo(() => {
-    if (!query.trim()) return options;
-    const q = query.toLowerCase();
-    return options.filter((o) => o.toLowerCase().includes(q));
-  }, [query, options]);
+  // Ensure the currently selected value is always rendered so Radix can show it.
+  const selectedIndex = value ? options.indexOf(value) : -1;
+  const effectiveCount = Math.max(rendered, selectedIndex + 1);
+  const visible = options.slice(0, Math.min(effectiveCount, options.length));
 
-  const rowVirtualizer = useVirtualizer({
-    count: filtered.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 32,
-    overscan: 10,
-  });
+  // Progressively expand the list after opening so the popover paints fast,
+  // then fills the rest in the background — the auto-scroll arrows still work.
+  useEffect(() => {
+    if (!open) {
+      setRendered(INITIAL_CHUNK);
+      return;
+    }
+    if (rendered >= options.length) return;
+    const idle: (cb: () => void) => number =
+      (window as unknown as { requestIdleCallback?: (cb: () => void) => number })
+        .requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 16));
+    const cancel: (id: number) => void =
+      (window as unknown as { cancelIdleCallback?: (id: number) => void })
+        .cancelIdleCallback ?? ((id: number) => window.clearTimeout(id));
+    const id = idle(() => {
+      setRendered((r) => Math.min(options.length, r + CHUNK_SIZE));
+    });
+    return () => cancel(id);
+  }, [open, rendered, options.length]);
 
   return (
-    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(""); }}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-            !value && "text-muted-foreground",
-            className,
-          )}
-        >
-          <span className="truncate">{value || placeholder}</span>
-          <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="p-0 w-[--radix-popover-trigger-width]"
-        align="start"
-        onWheel={(e) => e.stopPropagation()}
-        onTouchMove={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center border-b px-2">
-          <Search className="h-4 w-4 opacity-50" />
-          <Input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search..."
-            className="h-9 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
-          />
-        </div>
-        <div
-          ref={parentRef}
-          className="max-h-72 overflow-y-auto overscroll-contain"
-          style={{ contain: "strict" }}
-        >
-          {filtered.length === 0 ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">No results</div>
-          ) : (
-            <div
-              style={{
-                height: rowVirtualizer.getTotalSize(),
-                width: "100%",
-                position: "relative",
-              }}
-            >
-              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const opt = filtered[virtualRow.index];
-                const isSelected = opt === value;
-                return (
-                  <button
-                    type="button"
-                    key={virtualRow.key}
-                    onClick={() => {
-                      onChange(opt);
-                      setOpen(false);
-                    }}
-                    className={cn(
-                      "absolute top-0 left-0 w-full flex items-center px-3 text-sm hover:bg-accent hover:text-accent-foreground text-left",
-                      isSelected && "bg-accent/50",
-                    )}
-                    style={{
-                      height: virtualRow.size,
-                      transform: `translateY(${virtualRow.start}px)`,
-                    }}
-                  >
-                    <Check
-                      className={cn(
-                        "mr-2 h-4 w-4 shrink-0",
-                        isSelected ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                    <span className="truncate">{opt}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
+    <Select
+      value={value || undefined}
+      onValueChange={onChange}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <SelectTrigger className={cn("h-10", className)}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {visible.map((opt) => (
+          <SelectItem key={opt} value={opt}>
+            {opt}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
