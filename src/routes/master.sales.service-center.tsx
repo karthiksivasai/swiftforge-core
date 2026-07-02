@@ -322,7 +322,7 @@ function ServiceCentrePage() {
               <div className="flex items-center gap-1.5">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-9 w-9" onClick={exportCsv}>
+                    <Button variant="outline" size="icon" className="h-9 w-9 bg-background" onClick={exportCsv} aria-label="Export">
                       <Download className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
@@ -331,10 +331,11 @@ function ServiceCentrePage() {
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="icon"
-                      className="h-9 w-9"
+                      className="h-9 w-9 bg-background"
                       onClick={() => importInputRef.current?.click()}
+                      aria-label="Import"
                     >
                       <Upload className="h-4 w-4" />
                     </Button>
@@ -344,10 +345,11 @@ function ServiceCentrePage() {
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="icon"
-                      className="h-9 w-9"
+                      className="h-9 w-9 bg-background"
                       onClick={() => setRows(SEED)}
+                      aria-label="Refresh"
                     >
                       <RefreshCw className="h-4 w-4" />
                     </Button>
