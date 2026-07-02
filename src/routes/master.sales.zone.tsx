@@ -119,6 +119,7 @@ function ZonePage() {
   const [editing, setEditing] = useState<Zone | null>(null);
   const [form, setForm] = useState<Omit<Zone, "id">>(emptyZone());
   const [deleteTarget, setDeleteTarget] = useState<Zone | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
