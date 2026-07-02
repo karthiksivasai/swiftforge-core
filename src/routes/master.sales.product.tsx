@@ -51,6 +51,16 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 
 type ProductType = "Domestic" | "International" | "Local" | "Import";
@@ -125,6 +135,7 @@ function ProductPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState<Omit<Product, "id">>(emptyProduct());
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -169,9 +180,12 @@ function ProductPage() {
     setOpen(false);
   };
 
-  const handleDelete = (row: Product) => {
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const row = deleteTarget;
     setRows((prev) => prev.filter((r) => r.id !== row.id));
     toast.success(`Deleted ${row.code}`);
+    setDeleteTarget(null);
   };
 
   const handleExport = () => {
@@ -320,7 +334,7 @@ function ProductPage() {
                           size="icon"
                           variant="ghost"
                           className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(r)}
+                          onClick={() => setDeleteTarget(r)}
                           aria-label={`Delete ${r.code}`}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -516,6 +530,28 @@ function ProductPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete product?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove{" "}
+              <span className="font-medium text-foreground">{deleteTarget?.code}</span>
+              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the product master. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
