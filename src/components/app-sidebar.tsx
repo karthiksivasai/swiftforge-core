@@ -70,7 +70,7 @@ export function AppSidebar() {
                   <SidebarMenu>
                     <SidebarMenuItem>
                       <SidebarMenuButton asChild isActive={sectionActive} tooltip={section.label}>
-                        <Link to={section.path}>
+                        <Link to={asPath(section.path)}>
                           <Icon />
                           <span>{section.label}</span>
                         </Link>
@@ -96,7 +96,7 @@ export function AppSidebar() {
                         tooltip={leaf.label}
                         size="sm"
                       >
-                        <Link to={leaf.path}>
+                        <Link to={asPath(leaf.path)}>
                           <span className="ml-1 h-1 w-1 rounded-full bg-current opacity-50" />
                           <span>{leaf.label}</span>
                         </Link>
@@ -131,7 +131,7 @@ export function AppSidebar() {
                                     asChild
                                     isActive={pathname === leaf.path}
                                   >
-                                    <Link to={leaf.path}>{leaf.label}</Link>
+                                    <Link to={asPath(leaf.path)}>{leaf.label}</Link>
                                   </SidebarMenuSubButton>
                                 </SidebarMenuSubItem>
                               ))}
