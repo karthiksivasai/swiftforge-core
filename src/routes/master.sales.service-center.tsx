@@ -828,12 +828,17 @@ function ServiceCentreForm({
       </Section>
 
       <div className="flex justify-end gap-2 pb-6">
-        <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={onSave}>
-          <Check className="h-4 w-4 mr-1" /> {editing ? "Update" : "Save"}
+        <Button
+          onClick={onSave}
+          className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+        >
+          {editing ? "Update" : "Save"}
         </Button>
         <Button variant="destructive" onClick={onCancel}>
-          <X className="h-4 w-4 mr-1" /> Cancel
+          Cancel
         </Button>
+
+
       </div>
     </div>
   );
