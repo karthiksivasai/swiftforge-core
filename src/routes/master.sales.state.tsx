@@ -532,16 +532,20 @@ function StatePage() {
               />
             </FieldWrapper>
 
-            <div className="flex items-center gap-2 md:col-span-2 lg:col-span-4">
-              <Checkbox
-                id="ut"
-                checked={form.unionTerritory}
-                onCheckedChange={(v) => setForm((f) => ({ ...f, unionTerritory: v === true }))}
-              />
-              <Label htmlFor="ut" className="cursor-pointer text-sm font-medium">
-                Union Territory
-              </Label>
+            <div className="md:col-span-2 lg:col-span-4">
+              <label
+                htmlFor="ut"
+                className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2 cursor-pointer hover:bg-accent/40 transition-colors w-fit"
+              >
+                <Checkbox
+                  id="ut"
+                  checked={form.unionTerritory}
+                  onCheckedChange={(v) => setForm((f) => ({ ...f, unionTerritory: v === true }))}
+                />
+                <span className="text-sm font-medium">Union Territory</span>
+              </label>
             </div>
+
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
