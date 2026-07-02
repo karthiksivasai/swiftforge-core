@@ -54,6 +54,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BRANCHES } from "@/lib/branches-data";
 import { DOMESTIC_DESTINATIONS } from "@/lib/destinations-data";
+import { INTERNATIONAL_DESTINATIONS } from "@/lib/destinations-international-data";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -180,26 +181,13 @@ const SERVICE_TYPES = ["REGULAR", "METRO", "REMOTE"];
 // Main Branch and Branch Manifest share the same seeded list (from Main_Branch_List.xlsx).
 const BRANCH_OPTIONS = BRANCHES.map((b) => b.name);
 
-const INTERNATIONAL_SEED: Omit<Destination, "id" | "type">[] = [
-  { code: "AD", name: "Andorra", country: "AD", state: "", serviceType: "", status: "Active" },
-  { code: "AE", name: "United Arab Emirates", country: "AE", state: "", serviceType: "", status: "Active" },
-  { code: "AER", name: "AUSTRALIA REGION", country: "AU", state: "", serviceType: "REGULAR", status: "In-Active" },
-  { code: "AF", name: "Afghanistan", country: "AF", state: "", serviceType: "", status: "Active" },
-  { code: "AG", name: "Antigua and Barbuda", country: "AG", state: "", serviceType: "", status: "Active" },
-  { code: "AI", name: "Anguilla", country: "AI", state: "", serviceType: "", status: "Active" },
-  { code: "AL", name: "Albania", country: "AL", state: "", serviceType: "", status: "Active" },
-  { code: "AM", name: "Armenia", country: "AM", state: "", serviceType: "", status: "Active" },
-  { code: "AN", name: "Netherlands Antilles", country: "AN", state: "", serviceType: "", status: "Active" },
-  { code: "AO", name: "Angola", country: "AO", state: "", serviceType: "", status: "Active" },
-];
-
 const SEED: Destination[] = [
   ...DOMESTIC_DESTINATIONS.map((d, i) => ({
     id: `dom-${i + 1}`,
     type: "Domestic" as DestinationType,
     ...d,
   })),
-  ...INTERNATIONAL_SEED.map((d, i) => ({
+  ...INTERNATIONAL_DESTINATIONS.map((d, i) => ({
     id: `intl-${i + 1}`,
     type: "International" as DestinationType,
     ...d,
