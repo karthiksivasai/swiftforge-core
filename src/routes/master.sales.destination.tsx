@@ -13,6 +13,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -249,6 +250,19 @@ function emptyForm(type: DestinationType): Omit<Destination, "id"> {
   };
 }
 
+function getPageItems(current: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const items: (number | "…")[] = [1];
+  const left = Math.max(2, current - 1);
+  const right = Math.min(total - 1, current + 1);
+  if (left > 2) items.push("…");
+  for (let i = left; i <= right; i++) items.push(i);
+  if (right < total - 1) items.push("…");
+  items.push(total);
+  return items;
+}
+
+
 function DestinationPage() {
   const [rows, setRows] = useState<Destination[]>(SEED);
   const [type, setType] = useState<DestinationType>("Domestic");
@@ -258,6 +272,8 @@ function DestinationPage() {
   const [editing, setEditing] = useState<Destination | null>(null);
   const [form, setForm] = useState<Omit<Destination, "id">>(emptyForm("Domestic"));
   const [deleteTarget, setDeleteTarget] = useState<Destination | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const scoped = useMemo(() => rows.filter((r) => r.type === type), [rows, type]);
@@ -315,8 +331,42 @@ function DestinationPage() {
     if (!deleteTarget) return;
     const row = deleteTarget;
     setRows((prev) => prev.filter((r) => r.id !== row.id));
+    setSelected((prev) => {
+      const n = new Set(prev);
+      n.delete(row.id);
+      return n;
+    });
     toast.success(`Deleted ${row.code}`);
     setDeleteTarget(null);
+  };
+
+  const confirmBulkDelete = () => {
+    const ids = selected;
+    if (ids.size === 0) return;
+    setRows((prev) => prev.filter((r) => !ids.has(r.id)));
+    toast.success(`Deleted ${ids.size} destination${ids.size === 1 ? "" : "s"}`);
+    setSelected(new Set());
+    setBulkDeleteOpen(false);
+  };
+
+  const pageIds = pageRows.map((r) => r.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const somePageSelected = pageIds.some((id) => selected.has(id));
+  const togglePageAll = (checked: boolean) => {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (checked) pageIds.forEach((id) => n.add(id));
+      else pageIds.forEach((id) => n.delete(id));
+      return n;
+    });
+  };
+  const toggleOne = (id: string, checked: boolean) => {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (checked) n.add(id);
+      else n.delete(id);
+      return n;
+    });
   };
 
   const handleExport = () => {
@@ -486,6 +536,17 @@ function DestinationPage() {
           </TooltipProvider>
 
           <div className="flex items-center gap-2">
+            {selected.size > 0 && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => setBulkDeleteOpen(true)}
+                className="h-9 gap-1.5"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete Selected ({selected.size})
+              </Button>
+            )}
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -509,6 +570,14 @@ function DestinationPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
+                <TableHead className="w-10 text-sidebar-foreground">
+                  <Checkbox
+                    checked={allPageSelected ? true : somePageSelected ? "indeterminate" : false}
+                    onCheckedChange={(v) => togglePageAll(v === true)}
+                    aria-label="Select all on page"
+                    className="border-sidebar-foreground/60 data-[state=checked]:bg-primary data-[state=indeterminate]:bg-primary"
+                  />
+                </TableHead>
                 <TableHead className="text-sidebar-foreground">Destination Code</TableHead>
                 <TableHead className="text-sidebar-foreground">Destination Name</TableHead>
                 <TableHead className="text-sidebar-foreground">Country</TableHead>
@@ -521,13 +590,20 @@ function DestinationPage() {
             <TableBody>
               {pageRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-32 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={8} className="h-32 text-center text-sm text-muted-foreground">
                     No data available in table.
                   </TableCell>
                 </TableRow>
               ) : (
                 pageRows.map((r) => (
-                  <TableRow key={r.id}>
+                  <TableRow key={r.id} data-state={selected.has(r.id) ? "selected" : undefined}>
+                    <TableCell className="w-10">
+                      <Checkbox
+                        checked={selected.has(r.id)}
+                        onCheckedChange={(v) => toggleOne(r.id, v === true)}
+                        aria-label={`Select ${r.code}`}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">{r.code}</TableCell>
                     <TableCell>{r.name}</TableCell>
                     <TableCell>{r.country}</TableCell>
@@ -574,21 +650,28 @@ function DestinationPage() {
             <PagerButton disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
               <ChevronLeft className="h-4 w-4" />
             </PagerButton>
-            {Array.from({ length: totalPages }).map((_, i) => {
-              const n = i + 1;
-              const active = n === currentPage;
-              return (
+            {getPageItems(currentPage, totalPages).map((item, i) =>
+              item === "…" ? (
+                <span
+                  key={`e${i}`}
+                  className="h-8 min-w-8 px-2 text-sm text-muted-foreground grid place-items-center"
+                >
+                  …
+                </span>
+              ) : (
                 <button
-                  key={n}
-                  onClick={() => setPage(n)}
+                  key={item}
+                  onClick={() => setPage(item)}
                   className={`h-8 min-w-8 rounded-md px-2 text-sm font-medium transition-colors ${
-                    active ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-accent"
+                    item === currentPage
+                      ? "bg-primary text-primary-foreground"
+                      : "text-foreground hover:bg-accent"
                   }`}
                 >
-                  {n}
+                  {item}
                 </button>
-              );
-            })}
+              ),
+            )}
             <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>
               <ChevronRight className="h-4 w-4" />
             </PagerButton>
@@ -771,6 +854,26 @@ function DestinationPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selected.size} destination{selected.size === 1 ? "" : "s"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove the selected destinations from the destination master. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmBulkDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
