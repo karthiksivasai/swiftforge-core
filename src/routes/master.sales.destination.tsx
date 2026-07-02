@@ -714,22 +714,14 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Main Branch">
-                  <Select
-                    value={form.mainBranch || undefined}
-                    onValueChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select Main Branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BRANCH_OPTIONS.map((b) => (
-                        <SelectItem key={b} value={b}>
-                          {b}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <BranchSelect
+                    value={form.mainBranch}
+                    onChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
+                    options={BRANCH_OPTIONS}
+                    placeholder="Select Main Branch"
+                  />
                 </FieldWrapper>
+
 
 
                 <FieldWrapper label="State">
