@@ -16,6 +16,7 @@ import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
 import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
 import { Route as MasterSalesProductRouteImport } from './routes/master.sales.product'
+import { Route as MasterSalesDestinationRouteImport } from './routes/master.sales.destination'
 import { Route as MasterSalesCountryRouteImport } from './routes/master.sales.country'
 
 const DashboardRoute = DashboardRouteImport.update({
@@ -53,6 +54,11 @@ const MasterSalesProductRoute = MasterSalesProductRouteImport.update({
   path: '/master/sales/product',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterSalesDestinationRoute = MasterSalesDestinationRouteImport.update({
+  id: '/master/sales/destination',
+  path: '/master/sales/destination',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MasterSalesCountryRoute = MasterSalesCountryRouteImport.update({
   id: '/master/sales/country',
   path: '/master/sales/country',
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
+  '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
 }
@@ -76,6 +83,7 @@ export interface FileRoutesByTo {
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
+  '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
 }
@@ -87,6 +95,7 @@ export interface FileRoutesById {
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
+  '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
 }
@@ -99,6 +108,7 @@ export interface FileRouteTypes {
     | '/reports/$'
     | '/transaction/$'
     | '/master/sales/country'
+    | '/master/sales/destination'
     | '/master/sales/product'
     | '/master/sales/zone'
   fileRoutesByTo: FileRoutesByTo
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/reports/$'
     | '/transaction/$'
     | '/master/sales/country'
+    | '/master/sales/destination'
     | '/master/sales/product'
     | '/master/sales/zone'
   id:
@@ -119,6 +130,7 @@ export interface FileRouteTypes {
     | '/reports/$'
     | '/transaction/$'
     | '/master/sales/country'
+    | '/master/sales/destination'
     | '/master/sales/product'
     | '/master/sales/zone'
   fileRoutesById: FileRoutesById
@@ -130,6 +142,7 @@ export interface RootRouteChildren {
   ReportsSplatRoute: typeof ReportsSplatRoute
   TransactionSplatRoute: typeof TransactionSplatRoute
   MasterSalesCountryRoute: typeof MasterSalesCountryRoute
+  MasterSalesDestinationRoute: typeof MasterSalesDestinationRoute
   MasterSalesProductRoute: typeof MasterSalesProductRoute
   MasterSalesZoneRoute: typeof MasterSalesZoneRoute
 }
@@ -185,6 +198,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSalesProductRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/sales/destination': {
+      id: '/master/sales/destination'
+      path: '/master/sales/destination'
+      fullPath: '/master/sales/destination'
+      preLoaderRoute: typeof MasterSalesDestinationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/master/sales/country': {
       id: '/master/sales/country'
       path: '/master/sales/country'
@@ -202,6 +222,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsSplatRoute: ReportsSplatRoute,
   TransactionSplatRoute: TransactionSplatRoute,
   MasterSalesCountryRoute: MasterSalesCountryRoute,
+  MasterSalesDestinationRoute: MasterSalesDestinationRoute,
   MasterSalesProductRoute: MasterSalesProductRoute,
   MasterSalesZoneRoute: MasterSalesZoneRoute,
 }
