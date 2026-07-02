@@ -273,7 +273,7 @@ function ZonePage() {
               <TableRow className="bg-sidebar hover:bg-sidebar">
                 <TableHead className="text-sidebar-foreground">Zone Code</TableHead>
                 <TableHead className="text-sidebar-foreground">Zone Name</TableHead>
-                <TableHead className="w-28 text-right text-sidebar-foreground">Action</TableHead>
+                <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
