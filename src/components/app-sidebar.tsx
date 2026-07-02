@@ -51,6 +51,7 @@ function SectionCard({
         to={asPath(section.path)}
         className={cn(
           "flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors",
+          "group-data-[collapsible=icon]:h-9 group-data-[collapsible=icon]:w-9 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:mx-auto",
           active
             ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
             : "text-sidebar-foreground hover:bg-white/5",
@@ -63,11 +64,19 @@ function SectionCard({
   }
 
   return (
-    <Collapsible defaultOpen={active} className="group/section rounded-xl data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground data-[state=open]:shadow-sm overflow-hidden">
+    <Collapsible
+      defaultOpen={active}
+      className={cn(
+        "group/section rounded-xl overflow-hidden",
+        "data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground data-[state=open]:shadow-sm",
+        "group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:shadow-none",
+      )}
+    >
       <CollapsibleTrigger
         className={cn(
           "flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors",
           "group-data-[state=closed]/section:text-sidebar-foreground group-data-[state=closed]/section:hover:bg-white/5",
+          "group-data-[collapsible=icon]:h-9 group-data-[collapsible=icon]:w-9 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:text-sidebar-foreground group-data-[collapsible=icon]:hover:bg-white/5",
         )}
       >
         <Icon className="h-5 w-5 shrink-0" />
@@ -178,7 +187,7 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="gap-2 px-3 py-4">
+      <SidebarContent className="gap-2 px-3 py-4 group-data-[collapsible=icon]:px-1.5">
         <SidebarMenu className="gap-2">
           {NAVIGATION.map((section) => (
             <SidebarMenuItem key={section.slug}>
