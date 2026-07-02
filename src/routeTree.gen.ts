@@ -9,38 +9,91 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
+import { Route as ReportsSplatRouteImport } from './routes/reports.$'
+import { Route as MasterSplatRouteImport } from './routes/master.$'
 
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TransactionSplatRoute = TransactionSplatRouteImport.update({
+  id: '/transaction/$',
+  path: '/transaction/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsSplatRoute = ReportsSplatRouteImport.update({
+  id: '/reports/$',
+  path: '/reports/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterSplatRoute = MasterSplatRouteImport.update({
+  id: '/master/$',
+  path: '/master/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/dashboard': typeof DashboardRoute
+  '/master/$': typeof MasterSplatRoute
+  '/reports/$': typeof ReportsSplatRoute
+  '/transaction/$': typeof TransactionSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/dashboard': typeof DashboardRoute
+  '/master/$': typeof MasterSplatRoute
+  '/reports/$': typeof ReportsSplatRoute
+  '/transaction/$': typeof TransactionSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/dashboard': typeof DashboardRoute
+  '/master/$': typeof MasterSplatRoute
+  '/reports/$': typeof ReportsSplatRoute
+  '/transaction/$': typeof TransactionSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/dashboard' | '/master/$' | '/reports/$' | '/transaction/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/dashboard' | '/master/$' | '/reports/$' | '/transaction/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/dashboard'
+    | '/master/$'
+    | '/reports/$'
+    | '/transaction/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DashboardRoute: typeof DashboardRoute
+  MasterSplatRoute: typeof MasterSplatRoute
+  ReportsSplatRoute: typeof ReportsSplatRoute
+  TransactionSplatRoute: typeof TransactionSplatRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,11 +101,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/transaction/$': {
+      id: '/transaction/$'
+      path: '/transaction/$'
+      fullPath: '/transaction/$'
+      preLoaderRoute: typeof TransactionSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports/$': {
+      id: '/reports/$'
+      path: '/reports/$'
+      fullPath: '/reports/$'
+      preLoaderRoute: typeof ReportsSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/$': {
+      id: '/master/$'
+      path: '/master/$'
+      fullPath: '/master/$'
+      preLoaderRoute: typeof MasterSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DashboardRoute: DashboardRoute,
+  MasterSplatRoute: MasterSplatRoute,
+  ReportsSplatRoute: ReportsSplatRoute,
+  TransactionSplatRoute: TransactionSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
