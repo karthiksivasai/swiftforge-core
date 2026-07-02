@@ -203,8 +203,6 @@ export function AppSidebar() {
           <div className="truncate">{tenant.primaryBranch}</div>
         </div>
       </SidebarFooter>
-      {/* Preserve unused import to satisfy strict TS */}
-      <SidebarMenuButton className="hidden" />
     </Sidebar>
   );
 }
