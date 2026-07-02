@@ -201,7 +201,7 @@ function ZonePage() {
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-6 md:px-6 md:py-8">
+    <div className="flex w-full flex-col gap-5 px-4 py-6 md:px-8 md:py-8">
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
