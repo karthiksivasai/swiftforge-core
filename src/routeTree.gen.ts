@@ -15,6 +15,7 @@ import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
 import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
+import { Route as MasterSalesStateRouteImport } from './routes/master.sales.state'
 import { Route as MasterSalesServiceCenterRouteImport } from './routes/master.sales.service-center'
 import { Route as MasterSalesProductRouteImport } from './routes/master.sales.product'
 import { Route as MasterSalesDestinationRouteImport } from './routes/master.sales.destination'
@@ -50,6 +51,11 @@ const MasterSalesZoneRoute = MasterSalesZoneRouteImport.update({
   path: '/master/sales/zone',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterSalesStateRoute = MasterSalesStateRouteImport.update({
+  id: '/master/sales/state',
+  path: '/master/sales/state',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MasterSalesServiceCenterRoute =
   MasterSalesServiceCenterRouteImport.update({
     id: '/master/sales/service-center',
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/service-center': typeof MasterSalesServiceCenterRoute
+  '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
 }
 export interface FileRoutesByTo {
@@ -94,6 +101,7 @@ export interface FileRoutesByTo {
   '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/service-center': typeof MasterSalesServiceCenterRoute
+  '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
 }
 export interface FileRoutesById {
@@ -107,6 +115,7 @@ export interface FileRoutesById {
   '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/service-center': typeof MasterSalesServiceCenterRoute
+  '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
 }
 export interface FileRouteTypes {
@@ -121,6 +130,7 @@ export interface FileRouteTypes {
     | '/master/sales/destination'
     | '/master/sales/product'
     | '/master/sales/service-center'
+    | '/master/sales/state'
     | '/master/sales/zone'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -133,6 +143,7 @@ export interface FileRouteTypes {
     | '/master/sales/destination'
     | '/master/sales/product'
     | '/master/sales/service-center'
+    | '/master/sales/state'
     | '/master/sales/zone'
   id:
     | '__root__'
@@ -145,6 +156,7 @@ export interface FileRouteTypes {
     | '/master/sales/destination'
     | '/master/sales/product'
     | '/master/sales/service-center'
+    | '/master/sales/state'
     | '/master/sales/zone'
   fileRoutesById: FileRoutesById
 }
@@ -158,6 +170,7 @@ export interface RootRouteChildren {
   MasterSalesDestinationRoute: typeof MasterSalesDestinationRoute
   MasterSalesProductRoute: typeof MasterSalesProductRoute
   MasterSalesServiceCenterRoute: typeof MasterSalesServiceCenterRoute
+  MasterSalesStateRoute: typeof MasterSalesStateRoute
   MasterSalesZoneRoute: typeof MasterSalesZoneRoute
 }
 
@@ -205,6 +218,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSalesZoneRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/sales/state': {
+      id: '/master/sales/state'
+      path: '/master/sales/state'
+      fullPath: '/master/sales/state'
+      preLoaderRoute: typeof MasterSalesStateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/master/sales/service-center': {
       id: '/master/sales/service-center'
       path: '/master/sales/service-center'
@@ -246,6 +266,7 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSalesDestinationRoute: MasterSalesDestinationRoute,
   MasterSalesProductRoute: MasterSalesProductRoute,
   MasterSalesServiceCenterRoute: MasterSalesServiceCenterRoute,
+  MasterSalesStateRoute: MasterSalesStateRoute,
   MasterSalesZoneRoute: MasterSalesZoneRoute,
 }
 export const routeTree = rootRouteImport
