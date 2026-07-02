@@ -318,8 +318,42 @@ function DestinationPage() {
     if (!deleteTarget) return;
     const row = deleteTarget;
     setRows((prev) => prev.filter((r) => r.id !== row.id));
+    setSelected((prev) => {
+      const n = new Set(prev);
+      n.delete(row.id);
+      return n;
+    });
     toast.success(`Deleted ${row.code}`);
     setDeleteTarget(null);
+  };
+
+  const confirmBulkDelete = () => {
+    const ids = selected;
+    if (ids.size === 0) return;
+    setRows((prev) => prev.filter((r) => !ids.has(r.id)));
+    toast.success(`Deleted ${ids.size} destination${ids.size === 1 ? "" : "s"}`);
+    setSelected(new Set());
+    setBulkDeleteOpen(false);
+  };
+
+  const pageIds = pageRows.map((r) => r.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const somePageSelected = pageIds.some((id) => selected.has(id));
+  const togglePageAll = (checked: boolean) => {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (checked) pageIds.forEach((id) => n.add(id));
+      else pageIds.forEach((id) => n.delete(id));
+      return n;
+    });
+  };
+  const toggleOne = (id: string, checked: boolean) => {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (checked) n.add(id);
+      else n.delete(id);
+      return n;
+    });
   };
 
   const handleExport = () => {
