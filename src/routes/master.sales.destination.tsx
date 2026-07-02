@@ -557,6 +557,14 @@ function DestinationPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
+                <TableHead className="w-10 text-sidebar-foreground">
+                  <Checkbox
+                    checked={allPageSelected ? true : somePageSelected ? "indeterminate" : false}
+                    onCheckedChange={(v) => togglePageAll(v === true)}
+                    aria-label="Select all on page"
+                    className="border-sidebar-foreground/60 data-[state=checked]:bg-primary data-[state=indeterminate]:bg-primary"
+                  />
+                </TableHead>
                 <TableHead className="text-sidebar-foreground">Destination Code</TableHead>
                 <TableHead className="text-sidebar-foreground">Destination Name</TableHead>
                 <TableHead className="text-sidebar-foreground">Country</TableHead>
