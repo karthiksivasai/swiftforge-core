@@ -273,7 +273,7 @@ function ZonePage() {
               <TableRow className="bg-sidebar hover:bg-sidebar">
                 <TableHead className="text-sidebar-foreground">Zone Code</TableHead>
                 <TableHead className="text-sidebar-foreground">Zone Name</TableHead>
-                <TableHead className="w-28 text-right text-sidebar-foreground">Action</TableHead>
+                <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -288,8 +288,9 @@ function ZonePage() {
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{r.code}</TableCell>
                     <TableCell>{r.name}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
+                    <TableCell className="text-center">
+                      <div className="flex justify-center gap-1">
+
                         <Button
                           size="icon"
                           variant="ghost"
