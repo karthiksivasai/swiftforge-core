@@ -190,26 +190,88 @@ function ProductPage() {
   };
 
   const handleExport = () => {
-    const header = ["Product Code", "Product Name", "Product Type", "Product Service", "Status", "Group Type"];
+    const header = ["Product Code", "Product Name", "Product Type", "Product Service", "Fuel Charge", "GST Reverse", "Shipment Type", "Status", "Group Type"];
     const csv = [
       header.join(","),
       ...rows.map((r) =>
-        [r.code, r.name, r.type, r.service, r.status, r.groupType]
+        [r.code, r.name, r.type, r.service, r.fuelCharge ? "Yes" : "No", r.gstReverse ? "Yes" : "No", r.shipmentType, r.status, r.groupType]
           .map((v) => `"${String(v).replace(/"/g, '""')}"`)
           .join(","),
       ),
     ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = "products.csv";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
     toast.success("Exported products.csv");
   };
 
-  const handleImport = () => toast.info("Import: connect to backend in a future phase");
+  const handleImport = () => importInputRef.current?.click();
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length < 2) {
+        toast.error("File is empty");
+        return;
+      }
+      const parseRow = (line: string) => {
+        const out: string[] = [];
+        let cur = "";
+        let inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const c = line[i];
+          if (inQ) {
+            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+            else if (c === '"') inQ = false;
+            else cur += c;
+          } else {
+            if (c === '"') inQ = true;
+            else if (c === ",") { out.push(cur); cur = ""; }
+            else cur += c;
+          }
+        }
+        out.push(cur);
+        return out;
+      };
+      const imported: Product[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = parseRow(lines[i]);
+        const [code, name, type, service, fuelCharge, gstReverse, shipmentType, status, groupType] = cols;
+        if (!code?.trim()) continue;
+        imported.push({
+          id: crypto.randomUUID(),
+          code: code.trim(),
+          name: (name || "").trim(),
+          type: (PRODUCT_TYPES.includes(type as ProductType) ? (type as ProductType) : "") as ProductType | "",
+          service: (service || "").trim(),
+          fuelCharge: /^(yes|true|1)$/i.test((fuelCharge || "").trim()),
+          gstReverse: /^(yes|true|1)$/i.test((gstReverse || "").trim()),
+          shipmentType: (shipmentType === "NDOX" ? "NDOX" : "DOX") as ShipmentType,
+          status: (status === "In-Active" ? "In-Active" : "Active") as Status,
+          groupType: (GROUP_TYPES.includes(groupType as GroupType) ? (groupType as GroupType) : "") as GroupType | "",
+        });
+      }
+      if (imported.length === 0) {
+        toast.error("No valid rows found");
+        return;
+      }
+      setRows((prev) => [...imported, ...prev]);
+      toast.success(`Imported ${imported.length} product${imported.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error("Failed to import file");
+    }
+  };
+
   const handleRefresh = () => {
     setSearch("");
     setPage(1);
