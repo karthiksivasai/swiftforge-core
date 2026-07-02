@@ -291,7 +291,7 @@ function ProductPage() {
                 <TableHead className="text-sidebar-foreground">Product Type</TableHead>
                 <TableHead className="text-sidebar-foreground">Product Service</TableHead>
                 <TableHead className="text-sidebar-foreground">Status</TableHead>
-                <TableHead className="w-28 text-right text-sidebar-foreground">Action</TableHead>
+                <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
