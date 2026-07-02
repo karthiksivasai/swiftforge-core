@@ -1,11 +1,10 @@
-import { Link as TypedLink, useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 
-// Sidebar links are driven by a config array whose paths resolve through splat
-// routes, so bypass the file-based Link typing.
-const Link = TypedLink as unknown as (props: {
-  to: string;
-  children?: React.ReactNode;
-}) => React.ReactElement;
+// Sidebar link targets come from a config array and resolve through splat
+// routes; TanStack's typed `to` prop only accepts registered literal paths,
+// so widen dynamic strings here.
+type AnyPath = Parameters<typeof Link>[0]["to"];
+const asPath = (p: string) => p as AnyPath;
 import { ChevronRight } from "lucide-react";
 
 import {
