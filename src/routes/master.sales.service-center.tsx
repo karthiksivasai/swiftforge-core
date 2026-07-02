@@ -1,0 +1,927 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMemo, useRef, useState } from "react";
+import {
+  Download,
+  Upload,
+  RefreshCw,
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Check,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
+import { BRANCHES } from "@/lib/branches-data";
+import { cn } from "@/lib/utils";
+
+type ServiceCentre = {
+  id: string;
+  code: string;
+  name: string;
+  subName?: string;
+  branch: string;
+  address1?: string;
+  address2?: string;
+  address3?: string;
+  address4?: string;
+  destination?: string;
+  state?: string;
+  stateCode?: string;
+  telephone?: string;
+  email?: string;
+  gstNo?: string;
+  gstTelephone?: string;
+  panNo?: string;
+  icnNo?: string;
+  stNo?: string;
+  pinCode?: string;
+  // Terms
+  terms1?: string;
+  terms2?: string;
+  terms3?: string;
+  terms4?: string;
+  terms5?: string;
+  terms6?: string;
+  terms7?: string;
+  terms8?: string;
+  terms9?: string;
+  terms10?: string;
+  // Bank
+  bankName?: string;
+  accountNo?: string;
+  accountName?: string;
+  bankAddress?: string;
+  rtgsIfsc?: string;
+  micr?: string;
+  // Last Invoice / Voucher
+  lastInvoicePrefix?: string;
+  lastInvoiceNo?: string;
+  lastInvoiceSuffix?: string;
+  freeFormPrefix?: string;
+  lastFreeFormInvoiceNo?: string;
+  freeFormSuffix?: string;
+  debitNotePrefix?: string;
+  debitNoteLastInvoiceNo?: string;
+  debitNoteSuffix?: string;
+  creditNotePrefix?: string;
+  creditNoteLastInvoiceNo?: string;
+  creditNoteSuffix?: string;
+  rcpLastNo?: string;
+};
+
+const SEED: ServiceCentre[] = [
+  { id: "sc-1", code: "AKL", name: "AUCKLAND", branch: "AKL" },
+  { id: "sc-2", code: "AM", name: "AUSTRALIA METRO", branch: "AUM" },
+  { id: "sc-3", code: "BAN", name: "Bangalore", branch: "BLR" },
+  { id: "sc-4", code: "CAN", name: "CANADA", branch: "CA" },
+  { id: "sc-5", code: "GUN", name: "GUNTUR", branch: "GUN" },
+  { id: "sc-6", code: "HYD", name: "HYD", branch: "HYD" },
+  { id: "sc-7", code: "KUL", name: "KUALA LUMPUR", branch: "MY" },
+  { id: "sc-8", code: "MAH", name: "MAHARASHTRA", branch: "MAH" },
+  { id: "sc-9", code: "MNL", name: "MANILA (PHILIPPINES)", branch: "PH" },
+  { id: "sc-10", code: "MEL", name: "MELBOURNE", branch: "MEL" },
+  { id: "sc-11", code: "MUM", name: "MUMBAI COURIERWALA", branch: "BOM" },
+  { id: "sc-12", code: "PER", name: "PERTH", branch: "PER" },
+  { id: "sc-13", code: "SYD", name: "SYDNEY", branch: "AER" },
+  { id: "sc-14", code: "UK", name: "UNITED KINGDOM", branch: "GB" },
+  { id: "sc-15", code: "USA", name: "UNITED STATES OF AMERICA", branch: "US" },
+];
+
+const PAGE_SIZE = 10;
+
+export const Route = createFileRoute("/master/sales/service-center")({
+  head: () => ({
+    meta: [
+      { title: "Service Centre — Master — Courier ERP" },
+      {
+        name: "description",
+        content: "Manage service centre master records including bank, terms, and voucher settings.",
+      },
+    ],
+  }),
+  component: ServiceCentrePage,
+});
+
+function emptyForm(): Omit<ServiceCentre, "id"> {
+  return {
+    code: "",
+    name: "",
+    branch: "",
+  };
+}
+
+function getPageItems(current: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const items: (number | "…")[] = [1];
+  const left = Math.max(2, current - 1);
+  const right = Math.min(total - 1, current + 1);
+  if (left > 2) items.push("…");
+  for (let i = left; i <= right; i++) items.push(i);
+  if (right < total - 1) items.push("…");
+  items.push(total);
+  return items;
+}
+
+function ServiceCentrePage() {
+  const [rows, setRows] = useState<ServiceCentre[]>(SEED);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [view, setView] = useState<"list" | "form">("list");
+  const [editing, setEditing] = useState<ServiceCentre | null>(null);
+  const [form, setForm] = useState<Omit<ServiceCentre, "id">>(emptyForm());
+  const [deleteTarget, setDeleteTarget] = useState<ServiceCentre | null>(null);
+  const [branchDialogOpen, setBranchDialogOpen] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (r) =>
+        r.code.toLowerCase().includes(q) ||
+        r.name.toLowerCase().includes(q) ||
+        r.branch.toLowerCase().includes(q),
+    );
+  }, [rows, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  function openAdd() {
+    setEditing(null);
+    setForm(emptyForm());
+    setView("form");
+  }
+
+  function openEdit(row: ServiceCentre) {
+    setEditing(row);
+    const { id: _, ...rest } = row;
+    setForm(rest);
+    setView("form");
+  }
+
+  function save() {
+    if (!form.code.trim() || !form.name.trim()) {
+      toast.error("Code and Name are required");
+      return;
+    }
+    if (editing) {
+      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
+      toast.success("Service centre updated");
+    } else {
+      const id = `sc-${Date.now()}`;
+      setRows((prev) => [{ id, ...form }, ...prev]);
+      toast.success("Service centre added");
+    }
+    setView("list");
+  }
+
+  function confirmDelete() {
+    if (!deleteTarget) return;
+    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+    toast.success("Deleted");
+    setDeleteTarget(null);
+  }
+
+  function exportCsv() {
+    const headers = ["Code", "Name", "Branch"];
+    const lines = [headers.join(",")];
+    for (const r of rows) {
+      lines.push([r.code, r.name, r.branch].map((v) => `"${(v ?? "").replace(/"/g, '""')}"`).join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "service-centre.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Exported CSV");
+  }
+
+  function importCsv(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) return;
+      const parsed: ServiceCentre[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cells = parseCsvLine(lines[i]);
+        if (cells.length < 3) continue;
+        parsed.push({
+          id: `sc-imp-${Date.now()}-${i}`,
+          code: cells[0] ?? "",
+          name: cells[1] ?? "",
+          branch: cells[2] ?? "",
+        });
+      }
+      setRows((prev) => [...parsed, ...prev]);
+      toast.success(`Imported ${parsed.length} rows`);
+    };
+    reader.readAsText(file);
+  }
+
+  return (
+    <div className="p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link to="/">Home</Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>Master · Sales · Service Centre</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+          <h1 className="text-2xl font-semibold mt-1">Service Centre</h1>
+        </div>
+      </div>
+
+      {view === "list" ? (
+        <Card className="p-4 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <TooltipProvider>
+              <div className="flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" size="icon" onClick={exportCsv}>
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Export CSV</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => importInputRef.current?.click()}
+                    >
+                      <Upload className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Import CSV</TooltipContent>
+                </Tooltip>
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) importCsv(f);
+                    e.target.value = "";
+                  }}
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" size="icon" onClick={() => setRows(SEED)}>
+                      <RefreshCw className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Reset</TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
+                  placeholder="Search"
+                  className="h-10 pl-8 w-64"
+                />
+              </div>
+              <Button onClick={openAdd}>
+                <Plus className="h-4 w-4 mr-1" /> Add
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-md border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Service Centre Code</TableHead>
+                  <TableHead>Service Centre Name</TableHead>
+                  <TableHead>Branch</TableHead>
+                  <TableHead className="text-center w-28">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                      No records
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  pageRows.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell>{r.code}</TableCell>
+                      <TableCell>{r.name}</TableCell>
+                      <TableCell>{r.branch}</TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <Button variant="ghost" size="icon" onClick={() => openEdit(r)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setDeleteTarget(r)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <div>
+              Showing {(currentPage - 1) * PAGE_SIZE + 1} to{" "}
+              {Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length} entries
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" disabled={currentPage === 1} onClick={() => setPage(1)}>
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={currentPage === 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              {getPageItems(currentPage, totalPages).map((it, i) =>
+                it === "…" ? (
+                  <span key={`e-${i}`} className="px-2">
+                    …
+                  </span>
+                ) : (
+                  <Button
+                    key={it}
+                    variant={it === currentPage ? "default" : "ghost"}
+                    size="icon"
+                    onClick={() => setPage(it)}
+                  >
+                    {it}
+                  </Button>
+                ),
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={currentPage === totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={currentPage === totalPages}
+                onClick={() => setPage(totalPages)}
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : (
+        <ServiceCentreForm
+          form={form}
+          setForm={setForm}
+          editing={editing}
+          onCancel={() => setView("list")}
+          onSave={save}
+          openBranchDialog={() => setBranchDialogOpen(true)}
+        />
+      )}
+
+      <BranchPickerDialog
+        open={branchDialogOpen}
+        onOpenChange={setBranchDialogOpen}
+        onSelect={(b) => {
+          setForm((f) => ({ ...f, destination: b.name, branch: b.code || f.branch }));
+          setBranchDialogOpen(false);
+        }}
+      />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete service centre?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. {deleteTarget?.name} will be removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        cur += ch;
+      }
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ",") {
+        out.push(cur);
+        cur = "";
+      } else cur += ch;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+function Field({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("space-y-1.5", className)}>
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className="p-5 space-y-4">
+      <div className="inline-flex items-center px-3 py-1 rounded-full bg-sidebar text-sidebar-foreground text-xs font-medium">
+        {title}
+      </div>
+      {children}
+    </Card>
+  );
+}
+
+function ServiceCentreForm({
+  form,
+  setForm,
+  editing,
+  onCancel,
+  onSave,
+  openBranchDialog,
+}: {
+  form: Omit<ServiceCentre, "id">;
+  setForm: React.Dispatch<React.SetStateAction<Omit<ServiceCentre, "id">>>;
+  editing: ServiceCentre | null;
+  onCancel: () => void;
+  onSave: () => void;
+  openBranchDialog: () => void;
+}) {
+  const set = <K extends keyof Omit<ServiceCentre, "id">>(k: K, v: Omit<ServiceCentre, "id">[K]) =>
+    setForm((f) => ({ ...f, [k]: v }));
+
+  return (
+    <div className="space-y-4">
+      <Section title="Service Center Details">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Field label="Code">
+            <Input value={form.code} onChange={(e) => set("code", e.target.value)} />
+          </Field>
+          <Field label="Name">
+            <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
+          </Field>
+          <Field label="SubName">
+            <Input value={form.subName ?? ""} onChange={(e) => set("subName", e.target.value)} />
+          </Field>
+          <Field label="Address1">
+            <Input value={form.address1 ?? ""} onChange={(e) => set("address1", e.target.value)} />
+          </Field>
+          <Field label="Address2">
+            <Input value={form.address2 ?? ""} onChange={(e) => set("address2", e.target.value)} />
+          </Field>
+          <Field label="Address3">
+            <Input value={form.address3 ?? ""} onChange={(e) => set("address3", e.target.value)} />
+          </Field>
+          <Field label="Address4">
+            <Input value={form.address4 ?? ""} onChange={(e) => set("address4", e.target.value)} />
+          </Field>
+          <Field label="Destination">
+            <div className="flex gap-2">
+              <Input
+                value={form.destination ?? ""}
+                onChange={(e) => set("destination", e.target.value)}
+                readOnly
+              />
+              <Button type="button" variant="outline" size="icon" onClick={openBranchDialog}>
+                <Search className="h-4 w-4" />
+              </Button>
+            </div>
+          </Field>
+          <Field label="State">
+            <div className="flex gap-2">
+              <Input value={form.state ?? ""} onChange={(e) => set("state", e.target.value)} />
+              <Input
+                className="w-20"
+                value={form.stateCode ?? ""}
+                onChange={(e) => set("stateCode", e.target.value)}
+              />
+            </div>
+          </Field>
+          <Field label="Telephone">
+            <Input value={form.telephone ?? ""} onChange={(e) => set("telephone", e.target.value)} />
+          </Field>
+          <Field label="Email Address">
+            <Input value={form.email ?? ""} onChange={(e) => set("email", e.target.value)} />
+          </Field>
+          <Field label="GST No.">
+            <Input value={form.gstNo ?? ""} onChange={(e) => set("gstNo", e.target.value)} />
+          </Field>
+          <Field label="GST Telephone">
+            <Input
+              value={form.gstTelephone ?? ""}
+              onChange={(e) => set("gstTelephone", e.target.value)}
+            />
+          </Field>
+          <Field label="PAN No.">
+            <Input value={form.panNo ?? ""} onChange={(e) => set("panNo", e.target.value)} />
+          </Field>
+          <Field label="ICN No.">
+            <Input value={form.icnNo ?? ""} onChange={(e) => set("icnNo", e.target.value)} />
+          </Field>
+          <Field label="ST No.">
+            <Input value={form.stNo ?? ""} onChange={(e) => set("stNo", e.target.value)} />
+          </Field>
+          <Field label="Pin Code">
+            <Input value={form.pinCode ?? ""} onChange={(e) => set("pinCode", e.target.value)} />
+          </Field>
+          <Field label="Company Logo">
+            <Input type="file" />
+          </Field>
+          <Field label="Signatory Logo">
+            <Input type="file" />
+          </Field>
+        </div>
+      </Section>
+
+      <Section title="Terms">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {(
+            [
+              "terms1",
+              "terms2",
+              "terms3",
+              "terms4",
+              "terms5",
+              "terms6",
+              "terms7",
+              "terms8",
+              "terms9",
+              "terms10",
+            ] as const
+          ).map((k, i) => (
+            <Field key={k} label={`Terms ${i + 1}`}>
+              <Input value={form[k] ?? ""} onChange={(e) => set(k, e.target.value)} />
+            </Field>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Bank Details">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Field label="Bank Name">
+            <Input value={form.bankName ?? ""} onChange={(e) => set("bankName", e.target.value)} />
+          </Field>
+          <Field label="Account No">
+            <Input value={form.accountNo ?? ""} onChange={(e) => set("accountNo", e.target.value)} />
+          </Field>
+          <Field label="Account Name">
+            <Input
+              value={form.accountName ?? ""}
+              onChange={(e) => set("accountName", e.target.value)}
+            />
+          </Field>
+          <Field label="Bank Address">
+            <Input
+              value={form.bankAddress ?? ""}
+              onChange={(e) => set("bankAddress", e.target.value)}
+            />
+          </Field>
+          <Field label="RTGS / NEFT IFSC">
+            <Input value={form.rtgsIfsc ?? ""} onChange={(e) => set("rtgsIfsc", e.target.value)} />
+          </Field>
+          <Field label="MICR">
+            <Input value={form.micr ?? ""} onChange={(e) => set("micr", e.target.value)} />
+          </Field>
+        </div>
+      </Section>
+
+      <Section title="Last Invoice / Voucher No.">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Field label="Last Invoice Prefix">
+            <Input
+              value={form.lastInvoicePrefix ?? ""}
+              onChange={(e) => set("lastInvoicePrefix", e.target.value)}
+            />
+          </Field>
+          <Field label="Last Invoice No.">
+            <Input
+              value={form.lastInvoiceNo ?? ""}
+              onChange={(e) => set("lastInvoiceNo", e.target.value)}
+            />
+          </Field>
+          <Field label="Last Invoice Suffix">
+            <Input
+              value={form.lastInvoiceSuffix ?? ""}
+              onChange={(e) => set("lastInvoiceSuffix", e.target.value)}
+            />
+          </Field>
+          <Field label="Free Form Prefix">
+            <Input
+              value={form.freeFormPrefix ?? ""}
+              onChange={(e) => set("freeFormPrefix", e.target.value)}
+            />
+          </Field>
+          <Field label="Last Free Form Invoice No.">
+            <Input
+              value={form.lastFreeFormInvoiceNo ?? ""}
+              onChange={(e) => set("lastFreeFormInvoiceNo", e.target.value)}
+            />
+          </Field>
+          <Field label="Free Form Suffix">
+            <Input
+              value={form.freeFormSuffix ?? ""}
+              onChange={(e) => set("freeFormSuffix", e.target.value)}
+            />
+          </Field>
+          <Field label="Debit Note Prefix">
+            <Input
+              value={form.debitNotePrefix ?? ""}
+              onChange={(e) => set("debitNotePrefix", e.target.value)}
+            />
+          </Field>
+          <Field label="Debit Note Last Invoice No.">
+            <Input
+              value={form.debitNoteLastInvoiceNo ?? ""}
+              onChange={(e) => set("debitNoteLastInvoiceNo", e.target.value)}
+            />
+          </Field>
+          <Field label="Debit Note Suffix">
+            <Input
+              value={form.debitNoteSuffix ?? ""}
+              onChange={(e) => set("debitNoteSuffix", e.target.value)}
+            />
+          </Field>
+          <Field label="Credit Note Prefix">
+            <Input
+              value={form.creditNotePrefix ?? ""}
+              onChange={(e) => set("creditNotePrefix", e.target.value)}
+            />
+          </Field>
+          <Field label="Credit Note Last Invoice No.">
+            <Input
+              value={form.creditNoteLastInvoiceNo ?? ""}
+              onChange={(e) => set("creditNoteLastInvoiceNo", e.target.value)}
+            />
+          </Field>
+          <Field label="Credit Note Suffix">
+            <Input
+              value={form.creditNoteSuffix ?? ""}
+              onChange={(e) => set("creditNoteSuffix", e.target.value)}
+            />
+          </Field>
+          <Field label="RCP Last No.">
+            <Input value={form.rcpLastNo ?? ""} onChange={(e) => set("rcpLastNo", e.target.value)} />
+          </Field>
+        </div>
+      </Section>
+
+      <div className="flex justify-end gap-2 pb-6">
+        <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={onSave}>
+          <Check className="h-4 w-4 mr-1" /> {editing ? "Update" : "Save"}
+        </Button>
+        <Button variant="destructive" onClick={onCancel}>
+          <X className="h-4 w-4 mr-1" /> Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+const BRANCH_PAGE_SIZE = 10;
+
+function BranchPickerDialog({
+  open,
+  onOpenChange,
+  onSelect,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onSelect: (b: { code: string; name: string }) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return BRANCHES;
+    return BRANCHES.filter(
+      (b) => b.name.toLowerCase().includes(s) || (b.code ?? "").toLowerCase().includes(s),
+    );
+  }, [q]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / BRANCH_PAGE_SIZE));
+  const cp = Math.min(page, totalPages);
+  const rows = filtered.slice((cp - 1) * BRANCH_PAGE_SIZE, cp * BRANCH_PAGE_SIZE);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>Branch</DialogTitle>
+        </DialogHeader>
+        <div className="flex justify-end">
+          <div className="flex items-center gap-2">
+            <Label className="text-sm">Search</Label>
+            <Input
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setPage(1);
+              }}
+              className="h-9 w-64"
+            />
+          </div>
+        </div>
+        <div className="rounded-md border overflow-hidden max-h-[60vh] overflow-y-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead className="w-32">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((b, i) => (
+                <TableRow key={`${b.code}-${i}`}>
+                  <TableCell>{b.name}</TableCell>
+                  <TableCell>{b.code}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-emerald-600 hover:text-emerald-700"
+                      onClick={() => onSelect({ code: b.code ?? "", name: b.name })}
+                    >
+                      <Check className="h-4 w-4 mr-1" /> Select
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <div>
+            Showing {(cp - 1) * BRANCH_PAGE_SIZE + 1} to{" "}
+            {Math.min(cp * BRANCH_PAGE_SIZE, filtered.length)} of {filtered.length} entries
+          </div>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" disabled={cp === 1} onClick={() => setPage(1)}>
+              <ChevronsLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={cp === 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            {getPageItems(cp, totalPages).map((it, i) =>
+              it === "…" ? (
+                <span key={`e-${i}`} className="px-2">
+                  …
+                </span>
+              ) : (
+                <Button
+                  key={it}
+                  variant={it === cp ? "default" : "ghost"}
+                  size="icon"
+                  onClick={() => setPage(it)}
+                >
+                  {it}
+                </Button>
+              ),
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={cp === totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={cp === totalPages}
+              onClick={() => setPage(totalPages)}
+            >
+              <ChevronsRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
