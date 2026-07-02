@@ -259,6 +259,8 @@ function DestinationPage() {
   const [editing, setEditing] = useState<Destination | null>(null);
   const [form, setForm] = useState<Omit<Destination, "id">>(emptyForm("Domestic"));
   const [deleteTarget, setDeleteTarget] = useState<Destination | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const scoped = useMemo(() => rows.filter((r) => r.type === type), [rows, type]);
