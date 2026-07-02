@@ -95,15 +95,15 @@
   --chart-4: oklch(0.6 0.09 220);
   --chart-5: oklch(0.5 0.1 300);
 
-  /* Sidebar — slightly warmer surface */
-  --sidebar: oklch(0.968 0.012 82);
-  --sidebar-foreground: oklch(0.28 0.014 60);
-  --sidebar-primary: oklch(0.42 0.06 150);
-  --sidebar-primary-foreground: oklch(0.98 0.006 85);
-  --sidebar-accent: oklch(0.93 0.014 82);
-  --sidebar-accent-foreground: oklch(0.28 0.014 60);
-  --sidebar-border: oklch(0.9 0.012 80);
-  --sidebar-ring: oklch(0.55 0.05 150);
+  /* Sidebar — deep navy with white card items */
+  --sidebar: oklch(0.24 0.04 260);
+  --sidebar-foreground: oklch(0.96 0.008 250);
+  --sidebar-primary: oklch(1 0 0);
+  --sidebar-primary-foreground: oklch(0.24 0.04 260);
+  --sidebar-accent: oklch(1 0 0);
+  --sidebar-accent-foreground: oklch(0.24 0.04 260);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.7 0.08 250);
 }
 
 .dark {
