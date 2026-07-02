@@ -60,11 +60,40 @@ type Zone = {
   name: string;
 };
 
-const SEED: Zone[] = Array.from({ length: 32 }, (_, i) => ({
-  id: String(i + 1),
-  code: String(i + 1),
-  name: `INTERNATIONAL ZONE ${i + 1}`,
-}));
+const SEED: Zone[] = [
+  { code: "1", name: "INTERNATIONAL ZONE 1" },
+  { code: "2", name: "INTERNATIONAL ZONE 2" },
+  { code: "3", name: "INTERNATIONAL ZONE 3" },
+  { code: "4", name: "INTERNATIONAL ZONE 4" },
+  { code: "5", name: "INTERNATIONAL ZONE 5" },
+  { code: "6", name: "INTERNATIONAL ZONE 6" },
+  { code: "6A", name: "INTERNATIONAL ZONE 6A" },
+  { code: "7", name: "INTERNATIONAL ZONE 7" },
+  { code: "7A", name: "INTERNATIONAL ZONE 7A" },
+  { code: "8", name: "INTERNATIONAL ZONE 8" },
+  { code: "9", name: "INTERNATIONAL ZONE 9" },
+  { code: "10", name: "INTERNATIONAL ZONE 10" },
+  { code: "11", name: "INTERNATIONAL ZONE 11" },
+  { code: "12", name: "INTERNATIONAL ZONE 12" },
+  { code: "13", name: "INTERNATIONAL ZONE 13" },
+  { code: "14", name: "INTERNATIONAL ZONE 14" },
+  { code: "15", name: "INTERNATIONAL ZONE 15" },
+  { code: "16", name: "INTERNATIONAL ZONE 16" },
+  { code: "17", name: "INTERNATIONAL ZONE 17" },
+  { code: "18", name: "INTERNATIONAL ZONE 18" },
+  { code: "AU", name: "INTERNATIONAL ZONE AU" },
+  { code: "CA", name: "INTERNATIONAL ZONE CA" },
+  { code: "CZ", name: "INTERNATIONAL ZONE CZ" },
+  { code: "DE", name: "INTERNATIONAL ZONE DE" },
+  { code: "DO", name: "DOMESTIC" },
+  { code: "HU", name: "INTERNATIONAL ZONE HU" },
+  { code: "I", name: "INTERNATIONAL" },
+  { code: "NZ", name: "INTERNATIONAL ZONE NZ" },
+  { code: "PL", name: "INTERNATIONAL ZONE PL" },
+  { code: "RO", name: "INTERNATIONAL ZONE RO" },
+  { code: "SG", name: "INTERNATIONAL ZONE SG" },
+  { code: "US", name: "INTERNATIONAL ZONE US" },
+].map((z, i) => ({ id: String(i + 1), ...z }));
 
 const PAGE_SIZE = 10;
 
