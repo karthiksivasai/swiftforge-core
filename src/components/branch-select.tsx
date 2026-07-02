@@ -64,7 +64,7 @@ export function BranchSelect({
       <SelectTrigger className={cn("h-10", className)}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="h-80 [&>[data-radix-select-viewport]]:h-full">
         {visible.map((opt) => (
           <SelectItem key={opt} value={opt}>
             {opt}
