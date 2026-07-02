@@ -14,12 +14,18 @@ import {
   SidebarHeader,
   SidebarMenu,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { NAVIGATION, type NavGroup, type NavSection, type NavLeaf } from "@/lib/navigation";
 import { useTenant } from "@/lib/tenant";
 import { cn } from "@/lib/utils";
