@@ -637,21 +637,28 @@ function DestinationPage() {
             <PagerButton disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
               <ChevronLeft className="h-4 w-4" />
             </PagerButton>
-            {Array.from({ length: totalPages }).map((_, i) => {
-              const n = i + 1;
-              const active = n === currentPage;
-              return (
+            {getPageItems(currentPage, totalPages).map((item, i) =>
+              item === "…" ? (
+                <span
+                  key={`e${i}`}
+                  className="h-8 min-w-8 px-2 text-sm text-muted-foreground grid place-items-center"
+                >
+                  …
+                </span>
+              ) : (
                 <button
-                  key={n}
-                  onClick={() => setPage(n)}
+                  key={item}
+                  onClick={() => setPage(item)}
                   className={`h-8 min-w-8 rounded-md px-2 text-sm font-medium transition-colors ${
-                    active ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-accent"
+                    item === currentPage
+                      ? "bg-primary text-primary-foreground"
+                      : "text-foreground hover:bg-accent"
                   }`}
                 >
-                  {n}
+                  {item}
                 </button>
-              );
-            })}
+              ),
+            )}
             <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>
               <ChevronRight className="h-4 w-4" />
             </PagerButton>
