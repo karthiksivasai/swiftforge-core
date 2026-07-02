@@ -334,7 +334,7 @@ function ProductPage() {
                           size="icon"
                           variant="ghost"
                           className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(r)}
+                          onClick={() => setDeleteTarget(r)}
                           aria-label={`Delete ${r.code}`}
                         >
                           <Trash2 className="h-4 w-4" />
