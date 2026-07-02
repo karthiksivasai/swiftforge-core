@@ -17,6 +17,7 @@ import { Route as MasterSplatRouteImport } from './routes/master.$'
 import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
 import { Route as MasterSalesStateRouteImport } from './routes/master.sales.state'
 import { Route as MasterSalesServiceCenterRouteImport } from './routes/master.sales.service-center'
+import { Route as MasterSalesSalesExecutiveRouteImport } from './routes/master.sales.sales-executive'
 import { Route as MasterSalesProductRouteImport } from './routes/master.sales.product'
 import { Route as MasterSalesDestinationRouteImport } from './routes/master.sales.destination'
 import { Route as MasterSalesCountryRouteImport } from './routes/master.sales.country'
@@ -62,6 +63,12 @@ const MasterSalesServiceCenterRoute =
     path: '/master/sales/service-center',
     getParentRoute: () => rootRouteImport,
   } as any)
+const MasterSalesSalesExecutiveRoute =
+  MasterSalesSalesExecutiveRouteImport.update({
+    id: '/master/sales/sales-executive',
+    path: '/master/sales/sales-executive',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const MasterSalesProductRoute = MasterSalesProductRouteImport.update({
   id: '/master/sales/product',
   path: '/master/sales/product',
@@ -87,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/master/sales/country': typeof MasterSalesCountryRoute
   '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/product': typeof MasterSalesProductRoute
+  '/master/sales/sales-executive': typeof MasterSalesSalesExecutiveRoute
   '/master/sales/service-center': typeof MasterSalesServiceCenterRoute
   '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
@@ -100,6 +108,7 @@ export interface FileRoutesByTo {
   '/master/sales/country': typeof MasterSalesCountryRoute
   '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/product': typeof MasterSalesProductRoute
+  '/master/sales/sales-executive': typeof MasterSalesSalesExecutiveRoute
   '/master/sales/service-center': typeof MasterSalesServiceCenterRoute
   '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
@@ -114,6 +123,7 @@ export interface FileRoutesById {
   '/master/sales/country': typeof MasterSalesCountryRoute
   '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/product': typeof MasterSalesProductRoute
+  '/master/sales/sales-executive': typeof MasterSalesSalesExecutiveRoute
   '/master/sales/service-center': typeof MasterSalesServiceCenterRoute
   '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
@@ -129,6 +139,7 @@ export interface FileRouteTypes {
     | '/master/sales/country'
     | '/master/sales/destination'
     | '/master/sales/product'
+    | '/master/sales/sales-executive'
     | '/master/sales/service-center'
     | '/master/sales/state'
     | '/master/sales/zone'
@@ -142,6 +153,7 @@ export interface FileRouteTypes {
     | '/master/sales/country'
     | '/master/sales/destination'
     | '/master/sales/product'
+    | '/master/sales/sales-executive'
     | '/master/sales/service-center'
     | '/master/sales/state'
     | '/master/sales/zone'
@@ -155,6 +167,7 @@ export interface FileRouteTypes {
     | '/master/sales/country'
     | '/master/sales/destination'
     | '/master/sales/product'
+    | '/master/sales/sales-executive'
     | '/master/sales/service-center'
     | '/master/sales/state'
     | '/master/sales/zone'
@@ -169,6 +182,7 @@ export interface RootRouteChildren {
   MasterSalesCountryRoute: typeof MasterSalesCountryRoute
   MasterSalesDestinationRoute: typeof MasterSalesDestinationRoute
   MasterSalesProductRoute: typeof MasterSalesProductRoute
+  MasterSalesSalesExecutiveRoute: typeof MasterSalesSalesExecutiveRoute
   MasterSalesServiceCenterRoute: typeof MasterSalesServiceCenterRoute
   MasterSalesStateRoute: typeof MasterSalesStateRoute
   MasterSalesZoneRoute: typeof MasterSalesZoneRoute
@@ -232,6 +246,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSalesServiceCenterRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/sales/sales-executive': {
+      id: '/master/sales/sales-executive'
+      path: '/master/sales/sales-executive'
+      fullPath: '/master/sales/sales-executive'
+      preLoaderRoute: typeof MasterSalesSalesExecutiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/master/sales/product': {
       id: '/master/sales/product'
       path: '/master/sales/product'
@@ -265,6 +286,7 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSalesCountryRoute: MasterSalesCountryRoute,
   MasterSalesDestinationRoute: MasterSalesDestinationRoute,
   MasterSalesProductRoute: MasterSalesProductRoute,
+  MasterSalesSalesExecutiveRoute: MasterSalesSalesExecutiveRoute,
   MasterSalesServiceCenterRoute: MasterSalesServiceCenterRoute,
   MasterSalesStateRoute: MasterSalesStateRoute,
   MasterSalesZoneRoute: MasterSalesZoneRoute,
