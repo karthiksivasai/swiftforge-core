@@ -270,126 +270,155 @@ function ServiceCentrePage() {
     reader.readAsText(file);
   }
 
+  const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const endIdx = Math.min(currentPage * PAGE_SIZE, filtered.length);
+
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink asChild>
-                  <Link to="/">Home</Link>
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>Master · Sales · Service Centre</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-          <h1 className="text-2xl font-semibold mt-1">Service Centre</h1>
-        </div>
+    <div className="flex w-full flex-col gap-5 px-4 py-6 md:px-8 md:py-8">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
+              <Link to="/dashboard">Home</Link>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <span className="text-muted-foreground">Master</span>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <span className="text-muted-foreground">Sales</span>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>Service Centre</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Service Centre</h1>
+        <p className="text-sm text-muted-foreground">
+          Manage service centres, their branch mapping, and billing details.
+        </p>
       </div>
 
       {view === "list" ? (
-        <Card className="p-4 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <TooltipProvider>
-              <div className="flex items-center gap-2">
+        <Card className="overflow-hidden p-0">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) importCsv(f);
+              e.target.value = "";
+            }}
+          />
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
+            <TooltipProvider delayDuration={200}>
+              <div className="flex items-center gap-1.5">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="outline" size="icon" onClick={exportCsv}>
+                    <Button variant="ghost" size="icon" className="h-9 w-9" onClick={exportCsv}>
                       <Download className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Export CSV</TooltipContent>
+                  <TooltipContent>Export</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="icon"
+                      className="h-9 w-9"
                       onClick={() => importInputRef.current?.click()}
                     >
                       <Upload className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Import CSV</TooltipContent>
+                  <TooltipContent>Import</TooltipContent>
                 </Tooltip>
-                <input
-                  ref={importInputRef}
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) importCsv(f);
-                    e.target.value = "";
-                  }}
-                />
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="outline" size="icon" onClick={() => setRows(SEED)}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9"
+                      onClick={() => setRows(SEED)}
+                    >
                       <RefreshCw className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Reset</TooltipContent>
+                  <TooltipContent>Refresh</TooltipContent>
                 </Tooltip>
               </div>
             </TooltipProvider>
+
             <div className="flex items-center gap-2">
               <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={search}
                   onChange={(e) => {
                     setSearch(e.target.value);
                     setPage(1);
                   }}
-                  placeholder="Search"
-                  className="h-10 pl-8 w-64"
+                  placeholder="Search..."
+                  className="h-9 w-56 pl-8"
                 />
               </div>
-              <Button onClick={openAdd}>
-                <Plus className="h-4 w-4 mr-1" /> Add
+              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
               </Button>
             </div>
           </div>
 
-          <div className="rounded-md border overflow-hidden">
+          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Service Centre Code</TableHead>
-                  <TableHead>Service Centre Name</TableHead>
-                  <TableHead>Branch</TableHead>
-                  <TableHead className="text-center w-28">Action</TableHead>
+                <TableRow className="bg-sidebar hover:bg-sidebar">
+                  <TableHead className="text-sidebar-foreground">Service Centre Code</TableHead>
+                  <TableHead className="text-sidebar-foreground">Service Centre Name</TableHead>
+                  <TableHead className="text-sidebar-foreground">Branch</TableHead>
+                  <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pageRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                      No records
+                    <TableCell colSpan={4} className="h-32 text-center text-sm text-muted-foreground">
+                      No data available in table.
                     </TableCell>
                   </TableRow>
                 ) : (
                   pageRows.map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell>{r.code}</TableCell>
+                      <TableCell className="font-medium">{r.code}</TableCell>
                       <TableCell>{r.name}</TableCell>
                       <TableCell>{r.branch}</TableCell>
                       <TableCell className="text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => openEdit(r)}>
+                        <div className="flex justify-center gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(r)}
+                            aria-label={`Edit ${r.code}`}
+                          >
                             <Pencil className="h-4 w-4" />
                           </Button>
                           <Button
-                            variant="ghost"
                             size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
                             onClick={() => setDeleteTarget(r)}
+                            aria-label={`Delete ${r.code}`}
                           >
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>
@@ -400,18 +429,24 @@ function ServiceCentrePage() {
             </Table>
           </div>
 
-          <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <div>
-              Showing {(currentPage - 1) * PAGE_SIZE + 1} to{" "}
-              {Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length} entries
-            </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm text-muted-foreground">
+            <span>
+              Showing {startIdx} to {endIdx} of {filtered.length} entries
+            </span>
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" disabled={currentPage === 1} onClick={() => setPage(1)}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                disabled={currentPage === 1}
+                onClick={() => setPage(1)}
+              >
                 <ChevronsLeft className="h-4 w-4" />
               </Button>
               <Button
                 variant="ghost"
                 size="icon"
+                className="h-8 w-8"
                 disabled={currentPage === 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
@@ -419,23 +454,30 @@ function ServiceCentrePage() {
               </Button>
               {getPageItems(currentPage, totalPages).map((it, i) =>
                 it === "…" ? (
-                  <span key={`e-${i}`} className="px-2">
+                  <span
+                    key={`e-${i}`}
+                    className="grid h-8 min-w-8 place-items-center px-2 text-sm text-muted-foreground"
+                  >
                     …
                   </span>
                 ) : (
-                  <Button
+                  <button
                     key={it}
-                    variant={it === currentPage ? "default" : "ghost"}
-                    size="icon"
                     onClick={() => setPage(it)}
+                    className={`h-8 min-w-8 rounded-md px-2 text-sm font-medium transition-colors ${
+                      it === currentPage
+                        ? "bg-primary text-primary-foreground"
+                        : "text-foreground hover:bg-accent"
+                    }`}
                   >
                     {it}
-                  </Button>
+                  </button>
                 ),
               )}
               <Button
                 variant="ghost"
                 size="icon"
+                className="h-8 w-8"
                 disabled={currentPage === totalPages}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               >
@@ -444,6 +486,7 @@ function ServiceCentrePage() {
               <Button
                 variant="ghost"
                 size="icon"
+                className="h-8 w-8"
                 disabled={currentPage === totalPages}
                 onClick={() => setPage(totalPages)}
               >
