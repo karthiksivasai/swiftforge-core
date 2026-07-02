@@ -40,6 +40,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { BRANCHES } from "@/lib/branches-data";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -163,9 +175,8 @@ const ZONES = [
 
 const SERVICE_TYPES = ["REGULAR", "METRO", "REMOTE"];
 
-// Placeholder branch lists — will be wired to Branch/Main Branch master later.
-const MAIN_BRANCHES = ["HEAD OFFICE", "HYDERABAD", "BANGALORE", "MUMBAI", "DELHI", "CHENNAI"];
-const MANIFEST_BRANCHES = ["HEAD OFFICE", "HYDERABAD", "BANGALORE", "MUMBAI", "DELHI", "CHENNAI"];
+// Main Branch and Branch Manifest share the same seeded list (from Main_Branch_List.xlsx).
+const BRANCH_OPTIONS = BRANCHES.map((b) => b.name);
 
 const DOMESTIC_SEED: Omit<Destination, "id" | "type">[] = [
   { code: "A01", name: "A S PETA", country: "IN", state: "Andhra Pradesh", serviceType: "", status: "Active" },
@@ -644,21 +655,11 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Main Branch">
-                  <Select
-                    value={form.mainBranch || undefined}
-                    onValueChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select Main Branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MAIN_BRANCHES.map((b) => (
-                        <SelectItem key={b} value={b}>
-                          {b}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <BranchCombobox
+                    value={form.mainBranch || ""}
+                    onChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
+                    placeholder="Select Main Branch"
+                  />
                 </FieldWrapper>
 
                 <FieldWrapper label="State">
@@ -716,21 +717,11 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Branch Manifest">
-                  <Select
-                    value={form.branchManifest || undefined}
-                    onValueChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select Manifest Branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MANIFEST_BRANCHES.map((b) => (
-                        <SelectItem key={b} value={b}>
-                          {b}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <BranchCombobox
+                    value={form.branchManifest || ""}
+                    onChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
+                    placeholder="Select Manifest Branch"
+                  />
                 </FieldWrapper>
 
                 <FieldWrapper label="Status">
@@ -855,5 +846,62 @@ function PagerButton({
     >
       {children}
     </button>
+  );
+}
+
+function BranchCombobox({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="h-10 w-full justify-between font-normal"
+        >
+          <span className={cn("truncate", !value && "text-muted-foreground")}>
+            {value || placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search branch..." />
+          <CommandList>
+            <CommandEmpty>No branch found.</CommandEmpty>
+            <CommandGroup>
+              {BRANCH_OPTIONS.map((b) => (
+                <CommandItem
+                  key={b}
+                  value={b}
+                  onSelect={() => {
+                    onChange(b);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      value === b ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  {b}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
