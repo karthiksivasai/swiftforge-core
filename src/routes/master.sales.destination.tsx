@@ -53,6 +53,7 @@ import {
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BRANCHES } from "@/lib/branches-data";
+import { BranchSelect } from "@/components/branch-select";
 import { DOMESTIC_DESTINATIONS } from "@/lib/destinations-data";
 import { INTERNATIONAL_DESTINATIONS } from "@/lib/destinations-international-data";
 import {
@@ -714,22 +715,14 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Main Branch">
-                  <Select
-                    value={form.mainBranch || undefined}
-                    onValueChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select Main Branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BRANCH_OPTIONS.map((b) => (
-                        <SelectItem key={b} value={b}>
-                          {b}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <BranchSelect
+                    value={form.mainBranch}
+                    onChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
+                    options={BRANCH_OPTIONS}
+                    placeholder="Select Main Branch"
+                  />
                 </FieldWrapper>
+
 
 
                 <FieldWrapper label="State">
@@ -787,22 +780,14 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Branch Manifest">
-                  <Select
-                    value={form.branchManifest || undefined}
-                    onValueChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select Manifest Branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BRANCH_OPTIONS.map((b) => (
-                        <SelectItem key={b} value={b}>
-                          {b}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <BranchSelect
+                    value={form.branchManifest}
+                    onChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
+                    options={BRANCH_OPTIONS}
+                    placeholder="Select Manifest Branch"
+                  />
                 </FieldWrapper>
+
 
 
                 <FieldWrapper label="Status">
