@@ -655,21 +655,11 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Main Branch">
-                  <Select
-                    value={form.mainBranch || undefined}
-                    onValueChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select Main Branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MAIN_BRANCHES.map((b) => (
-                        <SelectItem key={b} value={b}>
-                          {b}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <BranchCombobox
+                    value={form.mainBranch || ""}
+                    onChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
+                    placeholder="Select Main Branch"
+                  />
                 </FieldWrapper>
 
                 <FieldWrapper label="State">
