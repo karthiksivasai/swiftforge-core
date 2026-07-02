@@ -64,9 +64,15 @@ export function BranchSelect({
       <SelectTrigger className={cn("h-10", className)}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent className="h-80 [&>[data-radix-select-viewport]]:h-full">
+      <SelectContent
+        className="h-80 w-[var(--radix-select-trigger-width)] min-w-[var(--radix-select-trigger-width)] max-w-[var(--radix-select-trigger-width)] [&>[data-radix-select-viewport]]:h-full"
+      >
         {visible.map((opt) => (
-          <SelectItem key={opt} value={opt}>
+          <SelectItem
+            key={opt}
+            value={opt}
+            className="w-full [&>span:last-child]:block [&>span:last-child]:truncate"
+          >
             {opt}
           </SelectItem>
         ))}
