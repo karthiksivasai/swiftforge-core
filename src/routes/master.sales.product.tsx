@@ -111,7 +111,7 @@ function emptyProduct(): Omit<Product, "id"> {
     type: "",
     service: "",
     fuelCharge: false,
-    gstReverse: true,
+    gstReverse: false,
     shipmentType: "DOX",
     status: "Active",
     groupType: "",
