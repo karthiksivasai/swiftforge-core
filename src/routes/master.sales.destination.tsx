@@ -714,12 +714,23 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Main Branch">
-                  <BranchCombobox
-                    value={form.mainBranch || ""}
-                    onChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
-                    placeholder="Select Main Branch"
-                  />
+                  <Select
+                    value={form.mainBranch || undefined}
+                    onValueChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
+                  >
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder="Select Main Branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BRANCH_OPTIONS.map((b) => (
+                        <SelectItem key={b} value={b}>
+                          {b}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </FieldWrapper>
+
 
                 <FieldWrapper label="State">
                   <Select
@@ -776,12 +787,23 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Branch Manifest">
-                  <BranchCombobox
-                    value={form.branchManifest || ""}
-                    onChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
-                    placeholder="Select Manifest Branch"
-                  />
+                  <Select
+                    value={form.branchManifest || undefined}
+                    onValueChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
+                  >
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder="Select Manifest Branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BRANCH_OPTIONS.map((b) => (
+                        <SelectItem key={b} value={b}>
+                          {b}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </FieldWrapper>
+
 
                 <FieldWrapper label="Status">
                   <Select
