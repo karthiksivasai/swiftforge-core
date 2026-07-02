@@ -250,6 +250,19 @@ function emptyForm(type: DestinationType): Omit<Destination, "id"> {
   };
 }
 
+function getPageItems(current: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const items: (number | "…")[] = [1];
+  const left = Math.max(2, current - 1);
+  const right = Math.min(total - 1, current + 1);
+  if (left > 2) items.push("…");
+  for (let i = left; i <= right; i++) items.push(i);
+  if (right < total - 1) items.push("…");
+  items.push(total);
+  return items;
+}
+
+
 function DestinationPage() {
   const [rows, setRows] = useState<Destination[]>(SEED);
   const [type, setType] = useState<DestinationType>("Domestic");
