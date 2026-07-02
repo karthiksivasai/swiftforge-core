@@ -523,6 +523,17 @@ function DestinationPage() {
           </TooltipProvider>
 
           <div className="flex items-center gap-2">
+            {selected.size > 0 && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => setBulkDeleteOpen(true)}
+                className="h-9 gap-1.5"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete Selected ({selected.size})
+              </Button>
+            )}
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
