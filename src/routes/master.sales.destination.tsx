@@ -53,6 +53,7 @@ import {
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BRANCHES } from "@/lib/branches-data";
+import { BranchSelect } from "@/components/branch-select";
 import { DOMESTIC_DESTINATIONS } from "@/lib/destinations-data";
 import { INTERNATIONAL_DESTINATIONS } from "@/lib/destinations-international-data";
 import {
