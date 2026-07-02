@@ -1,5 +1,8 @@
 import { Fragment } from "react";
 import { Link } from "@tanstack/react-router";
+
+type AnyPath = Parameters<typeof Link>[0]["to"];
+const asPath = (p: string) => p as AnyPath;
 import { Sparkles } from "lucide-react";
 
 import {
