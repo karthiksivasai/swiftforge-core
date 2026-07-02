@@ -828,10 +828,16 @@ function ServiceCentreForm({
       </Section>
 
       <div className="flex justify-end gap-2 pb-6">
-        <Button variant="outline" onClick={onCancel}>
+        <Button
+          onClick={onSave}
+          className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+        >
+          {editing ? "Update" : "Save"}
+        </Button>
+        <Button variant="destructive" onClick={onCancel}>
           Cancel
         </Button>
-        <Button onClick={onSave}>{editing ? "Update" : "Save"}</Button>
+
 
       </div>
     </div>
