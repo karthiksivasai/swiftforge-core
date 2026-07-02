@@ -63,13 +63,11 @@ function SectionCard({
   }
 
   return (
-    <Collapsible defaultOpen={active} className="group/section">
+    <Collapsible defaultOpen={active} className="group/section rounded-xl data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground data-[state=open]:shadow-sm overflow-hidden">
       <CollapsibleTrigger
         className={cn(
           "flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors",
-          active
-            ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm rounded-b-none"
-            : "text-sidebar-foreground hover:bg-white/5",
+          "group-data-[state=closed]/section:text-sidebar-foreground group-data-[state=closed]/section:hover:bg-white/5",
         )}
       >
         <Icon className="h-5 w-5 shrink-0" />
@@ -83,14 +81,7 @@ function SectionCard({
           )}
         />
       </CollapsibleTrigger>
-      <CollapsibleContent
-        className={cn(
-          "overflow-hidden group-data-[collapsible=icon]:hidden",
-          active
-            ? "bg-sidebar-accent text-sidebar-accent-foreground rounded-b-xl shadow-sm"
-            : "",
-        )}
-      >
+      <CollapsibleContent className="overflow-hidden group-data-[collapsible=icon]:hidden">
         <div className="flex flex-col gap-0.5 px-2 pb-2">
           {section.items?.map((leaf) => (
             <LeafLink key={leaf.path} leaf={leaf} pathname={pathname} indent={0} />
