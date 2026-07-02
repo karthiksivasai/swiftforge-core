@@ -577,13 +577,20 @@ function DestinationPage() {
             <TableBody>
               {pageRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-32 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={8} className="h-32 text-center text-sm text-muted-foreground">
                     No data available in table.
                   </TableCell>
                 </TableRow>
               ) : (
                 pageRows.map((r) => (
-                  <TableRow key={r.id}>
+                  <TableRow key={r.id} data-state={selected.has(r.id) ? "selected" : undefined}>
+                    <TableCell className="w-10">
+                      <Checkbox
+                        checked={selected.has(r.id)}
+                        onCheckedChange={(v) => toggleOne(r.id, v === true)}
+                        aria-label={`Select ${r.code}`}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">{r.code}</TableCell>
                     <TableCell>{r.name}</TableCell>
                     <TableCell>{r.country}</TableCell>
