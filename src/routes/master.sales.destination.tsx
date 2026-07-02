@@ -1,0 +1,859 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMemo, useRef, useState } from "react";
+import {
+  Download,
+  Upload,
+  RefreshCw,
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
+
+type DestinationType = "Domestic" | "International" | "Local";
+type Status = "Active" | "In-Active";
+
+type Destination = {
+  id: string;
+  type: DestinationType;
+  code: string;
+  name: string;
+  country: string;
+  state: string;
+  serviceType: string;
+  status: Status;
+  email?: string;
+  mobile?: string;
+  mainBranch?: string;
+  zone?: string;
+  branchManifest?: string;
+};
+
+const STATES = [
+  "Andaman & Nicobar Isands",
+  "Andhra Pradesh",
+  "Andhra Pradesh (New)",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chandigarh",
+  "Chhattisgarh",
+  "Dadra & Nagar Heveli",
+  "Daman & Diu",
+  "Delhi",
+  "Goa",
+  "GUJARAT",
+  "Haryana",
+  "Himachal Pradesh",
+  "INTERNATIONAL",
+  "Jammu & Kashmir",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Lakshadweep",
+  "Madhya Pradesh",
+  "MAHARASHTRA",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Orissa",
+  "Pondicherry",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarnchal",
+  "West Bengal",
+];
+
+const ZONES = [
+  "DOMESTIC",
+  "INTERNATIONAL",
+  "INTERNATIONAL ZONE 1",
+  "INTERNATIONAL ZONE 2",
+  "INTERNATIONAL ZONE 3",
+  "INTERNATIONAL ZONE 4",
+  "INTERNATIONAL ZONE 5",
+  "INTERNATIONAL ZONE 6",
+  "INTERNATIONAL ZONE 6A",
+  "INTERNATIONAL ZONE 7",
+  "INTERNATIONAL ZONE 7A",
+  "INTERNATIONAL ZONE 8",
+  "INTERNATIONAL ZONE 9",
+  "INTERNATIONAL ZONE 10",
+  "INTERNATIONAL ZONE 11",
+  "INTERNATIONAL ZONE 12",
+  "INTERNATIONAL ZONE 13",
+  "INTERNATIONAL ZONE 14",
+  "INTERNATIONAL ZONE 15",
+  "INTERNATIONAL ZONE 16",
+  "INTERNATIONAL ZONE 17",
+  "INTERNATIONAL ZONE 18",
+  "INTERNATIONAL ZONE AU",
+  "INTERNATIONAL ZONE CA",
+  "INTERNATIONAL ZONE CZ",
+  "INTERNATIONAL ZONE DE",
+  "INTERNATIONAL ZONE HU",
+  "INTERNATIONAL ZONE NZ",
+  "INTERNATIONAL ZONE PL",
+  "INTERNATIONAL ZONE RO",
+  "INTERNATIONAL ZONE SG",
+  "INTERNATIONAL ZONE US",
+];
+
+const SERVICE_TYPES = ["REGULAR", "METRO", "REMOTE"];
+
+// Placeholder branch lists — will be wired to Branch/Main Branch master later.
+const MAIN_BRANCHES = ["HEAD OFFICE", "HYDERABAD", "BANGALORE", "MUMBAI", "DELHI", "CHENNAI"];
+const MANIFEST_BRANCHES = ["HEAD OFFICE", "HYDERABAD", "BANGALORE", "MUMBAI", "DELHI", "CHENNAI"];
+
+const DOMESTIC_SEED: Omit<Destination, "id" | "type">[] = [
+  { code: "A01", name: "A S PETA", country: "IN", state: "Andhra Pradesh", serviceType: "", status: "Active" },
+  { code: "A02", name: "Aalo", country: "IN", state: "Arunachal Pradesh", serviceType: "", status: "Active" },
+  { code: "A03", name: "ABHANPUR", country: "IN", state: "Chhattisgarh", serviceType: "", status: "Active" },
+  { code: "A04", name: "ABHAYAPURI", country: "IN", state: "Assam", serviceType: "", status: "Active" },
+  { code: "A05", name: "ABOHAR", country: "IN", state: "Punjab", serviceType: "", status: "Active" },
+  { code: "A06", name: "Achampet", country: "IN", state: "Telangana", serviceType: "", status: "Active" },
+  { code: "A07", name: "ACHAMPETA", country: "IN", state: "Telangana", serviceType: "", status: "Active" },
+  { code: "A08", name: "Achampet-AP", country: "IN", state: "Andhra Pradesh", serviceType: "", status: "Active" },
+  { code: "A09", name: "ACHANTA", country: "IN", state: "Andhra Pradesh", serviceType: "", status: "Active" },
+  { code: "A10", name: "ACHROL", country: "IN", state: "Rajasthan", serviceType: "", status: "Active" },
+];
+
+const INTERNATIONAL_SEED: Omit<Destination, "id" | "type">[] = [
+  { code: "AD", name: "Andorra", country: "AD", state: "", serviceType: "", status: "Active" },
+  { code: "AE", name: "United Arab Emirates", country: "AE", state: "", serviceType: "", status: "Active" },
+  { code: "AER", name: "AUSTRALIA REGION", country: "AU", state: "", serviceType: "REGULAR", status: "In-Active" },
+  { code: "AF", name: "Afghanistan", country: "AF", state: "", serviceType: "", status: "Active" },
+  { code: "AG", name: "Antigua and Barbuda", country: "AG", state: "", serviceType: "", status: "Active" },
+  { code: "AI", name: "Anguilla", country: "AI", state: "", serviceType: "", status: "Active" },
+  { code: "AL", name: "Albania", country: "AL", state: "", serviceType: "", status: "Active" },
+  { code: "AM", name: "Armenia", country: "AM", state: "", serviceType: "", status: "Active" },
+  { code: "AN", name: "Netherlands Antilles", country: "AN", state: "", serviceType: "", status: "Active" },
+  { code: "AO", name: "Angola", country: "AO", state: "", serviceType: "", status: "Active" },
+];
+
+const SEED: Destination[] = [
+  ...DOMESTIC_SEED.map((d, i) => ({
+    id: `dom-${i + 1}`,
+    type: "Domestic" as DestinationType,
+    ...d,
+  })),
+  ...INTERNATIONAL_SEED.map((d, i) => ({
+    id: `intl-${i + 1}`,
+    type: "International" as DestinationType,
+    ...d,
+  })),
+];
+
+const PAGE_SIZE = 10;
+
+export const Route = createFileRoute("/master/sales/destination")({
+  head: () => ({
+    meta: [
+      { title: "Destination — Master — Courier ERP" },
+      {
+        name: "description",
+        content: "Manage destination master records for Domestic, International, and Local shipments.",
+      },
+    ],
+  }),
+  component: DestinationPage,
+});
+
+function emptyForm(type: DestinationType): Omit<Destination, "id"> {
+  return {
+    type,
+    code: "",
+    name: "",
+    country: type === "Domestic" ? "IN" : "",
+    state: "",
+    serviceType: "",
+    status: "Active",
+    email: "",
+    mobile: "",
+    mainBranch: "",
+    zone: "",
+    branchManifest: "",
+  };
+}
+
+function DestinationPage() {
+  const [rows, setRows] = useState<Destination[]>(SEED);
+  const [type, setType] = useState<DestinationType>("Domestic");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Destination | null>(null);
+  const [form, setForm] = useState<Omit<Destination, "id">>(emptyForm("Domestic"));
+  const [deleteTarget, setDeleteTarget] = useState<Destination | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const scoped = useMemo(() => rows.filter((r) => r.type === type), [rows, type]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return scoped;
+    return scoped.filter((r) =>
+      [r.code, r.name, r.country, r.state, r.serviceType, r.status].some((v) =>
+        String(v).toLowerCase().includes(q),
+      ),
+    );
+  }, [scoped, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const endIdx = Math.min(currentPage * PAGE_SIZE, filtered.length);
+
+  const openAdd = () => {
+    setEditing(null);
+    setForm(emptyForm(type));
+    setOpen(true);
+  };
+
+  const openEdit = (row: Destination) => {
+    setEditing(row);
+    const { id: _id, ...rest } = row;
+    setForm(rest);
+    setOpen(true);
+  };
+
+  const handleSave = () => {
+    if (!form.code.trim()) {
+      toast.error("Destination Code is required");
+      return;
+    }
+    if (!form.name.trim()) {
+      toast.error("Destination Name is required");
+      return;
+    }
+    if (editing) {
+      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
+      toast.success("Destination updated");
+    } else {
+      const id = crypto.randomUUID();
+      setRows((prev) => [{ id, ...form }, ...prev]);
+      toast.success("Destination added");
+    }
+    setOpen(false);
+  };
+
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const row = deleteTarget;
+    setRows((prev) => prev.filter((r) => r.id !== row.id));
+    toast.success(`Deleted ${row.code}`);
+    setDeleteTarget(null);
+  };
+
+  const handleExport = () => {
+    const header = ["Destination Code", "Destination Name", "Country", "State", "Service Type", "Status"];
+    const csv = [
+      header.join(","),
+      ...scoped.map((r) =>
+        [r.code, r.name, r.country, r.state, r.serviceType, r.status]
+          .map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`)
+          .join(","),
+      ),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `destinations-${type.toLowerCase()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    toast.success(`Exported destinations-${type.toLowerCase()}.csv`);
+  };
+
+  const handleImport = () => importInputRef.current?.click();
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length < 2) {
+        toast.error("File is empty");
+        return;
+      }
+      const parseRow = (line: string) => {
+        const out: string[] = [];
+        let cur = "";
+        let inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const c = line[i];
+          if (inQ) {
+            if (c === '"' && line[i + 1] === '"') {
+              cur += '"';
+              i++;
+            } else if (c === '"') inQ = false;
+            else cur += c;
+          } else {
+            if (c === '"') inQ = true;
+            else if (c === ",") {
+              out.push(cur);
+              cur = "";
+            } else cur += c;
+          }
+        }
+        out.push(cur);
+        return out;
+      };
+      const imported: Destination[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const [code, name, country, state, serviceType, status] = parseRow(lines[i]);
+        if (!code?.trim()) continue;
+        imported.push({
+          id: crypto.randomUUID(),
+          type,
+          code: code.trim(),
+          name: (name || "").trim(),
+          country: (country || "").trim(),
+          state: (state || "").trim(),
+          serviceType: (serviceType || "").trim(),
+          status: (status || "").trim() === "In-Active" ? "In-Active" : "Active",
+        });
+      }
+      if (imported.length === 0) {
+        toast.error("No valid rows found");
+        return;
+      }
+      setRows((prev) => [...imported, ...prev]);
+      toast.success(`Imported ${imported.length} destination${imported.length === 1 ? "" : "s"}`);
+    } catch {
+      toast.error("Failed to import file");
+    }
+  };
+
+  const handleRefresh = () => {
+    setSearch("");
+    setPage(1);
+    toast.success("Refreshed");
+  };
+
+  return (
+    <div className="flex w-full flex-col gap-5 px-4 py-6 md:px-8 md:py-8">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
+              <Link to="/dashboard">Home</Link>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <span className="text-muted-foreground">Master</span>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <span className="text-muted-foreground">Sales</span>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>Destination</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Destination</h1>
+        <p className="text-sm text-muted-foreground">
+          Manage domestic, international, and local destinations used across bookings and shipments.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs font-medium text-muted-foreground">Type</Label>
+          <Select
+            value={type}
+            onValueChange={(v) => {
+              setType(v as DestinationType);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-10 w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Domestic">Domestic</SelectItem>
+              <SelectItem value="International">International</SelectItem>
+              <SelectItem value="Local">Local</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <Card className="overflow-hidden p-0">
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={handleImportFile}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
+          <TooltipProvider delayDuration={200}>
+            <div className="flex items-center gap-1.5">
+              <IconButton label="Export" onClick={handleExport}>
+                <Download className="h-4 w-4" />
+              </IconButton>
+              <IconButton label="Import" onClick={handleImport}>
+                <Upload className="h-4 w-4" />
+              </IconButton>
+              <IconButton label="Refresh" onClick={handleRefresh}>
+                <RefreshCw className="h-4 w-4" />
+              </IconButton>
+            </div>
+          </TooltipProvider>
+
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search..."
+                className="h-9 w-56 pl-8"
+              />
+            </div>
+            <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+              <Plus className="h-4 w-4" />
+              Add
+            </Button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-sidebar hover:bg-sidebar">
+                <TableHead className="text-sidebar-foreground">Destination Code</TableHead>
+                <TableHead className="text-sidebar-foreground">Destination Name</TableHead>
+                <TableHead className="text-sidebar-foreground">Country</TableHead>
+                <TableHead className="text-sidebar-foreground">State</TableHead>
+                <TableHead className="text-sidebar-foreground">Service Type</TableHead>
+                <TableHead className="text-sidebar-foreground">Status</TableHead>
+                <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pageRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="h-32 text-center text-sm text-muted-foreground">
+                    No data available in table.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                pageRows.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-medium">{r.code}</TableCell>
+                    <TableCell>{r.name}</TableCell>
+                    <TableCell>{r.country}</TableCell>
+                    <TableCell>{r.state}</TableCell>
+                    <TableCell>{r.serviceType}</TableCell>
+                    <TableCell>{r.status}</TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex justify-center gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => openEdit(r)}
+                          aria-label={`Edit ${r.code}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          onClick={() => setDeleteTarget(r)}
+                          aria-label={`Delete ${r.code}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm text-muted-foreground">
+          <span>
+            Showing {startIdx} to {endIdx} of {filtered.length} entries
+          </span>
+          <div className="flex items-center gap-1">
+            <PagerButton disabled={currentPage === 1} onClick={() => setPage(1)}>
+              <ChevronsLeft className="h-4 w-4" />
+            </PagerButton>
+            <PagerButton disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </PagerButton>
+            {Array.from({ length: totalPages }).map((_, i) => {
+              const n = i + 1;
+              const active = n === currentPage;
+              return (
+                <button
+                  key={n}
+                  onClick={() => setPage(n)}
+                  className={`h-8 min-w-8 rounded-md px-2 text-sm font-medium transition-colors ${
+                    active ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-accent"
+                  }`}
+                >
+                  {n}
+                </button>
+              );
+            })}
+            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>
+              <ChevronRight className="h-4 w-4" />
+            </PagerButton>
+            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
+              <ChevronsRight className="h-4 w-4" />
+            </PagerButton>
+          </div>
+        </div>
+      </Card>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit Destination" : "Add Destination"}</DialogTitle>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-6 py-2">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Type</Label>
+              <Select
+                value={form.type}
+                onValueChange={(v) => setForm((f) => ({ ...f, type: v as DestinationType }))}
+              >
+                <SelectTrigger className="h-10 w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Domestic">Domestic</SelectItem>
+                  <SelectItem value="International">International</SelectItem>
+                  <SelectItem value="Local">Local</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <fieldset className="rounded-md border p-4">
+              <legend className="rounded bg-sidebar px-2 py-0.5 text-xs font-medium text-sidebar-foreground">
+                Destination
+              </legend>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <FieldWrapper label="Destination Code" required>
+                  <Input
+                    value={form.code}
+                    onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="Destination Name" required>
+                  <Input
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="Email">
+                  <Input
+                    type="email"
+                    value={form.email ?? ""}
+                    onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="Mobile">
+                  <Input
+                    value={form.mobile ?? ""}
+                    onChange={(e) => setForm((f) => ({ ...f, mobile: e.target.value }))}
+                  />
+                </FieldWrapper>
+
+                <FieldWrapper label="Main Branch">
+                  <Select
+                    value={form.mainBranch || undefined}
+                    onValueChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
+                  >
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder="Select Main Branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MAIN_BRANCHES.map((b) => (
+                        <SelectItem key={b} value={b}>
+                          {b}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FieldWrapper>
+
+                <FieldWrapper label="State">
+                  <Select
+                    value={form.state || undefined}
+                    onValueChange={(v) => setForm((f) => ({ ...f, state: v }))}
+                  >
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder="Select State" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STATES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FieldWrapper>
+
+                <FieldWrapper label="Zone">
+                  <Select
+                    value={form.zone || undefined}
+                    onValueChange={(v) => setForm((f) => ({ ...f, zone: v }))}
+                  >
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder="Select Zone" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ZONES.map((z) => (
+                        <SelectItem key={z} value={z}>
+                          {z}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FieldWrapper>
+
+                <FieldWrapper label="Service Type">
+                  <Select
+                    value={form.serviceType || undefined}
+                    onValueChange={(v) => setForm((f) => ({ ...f, serviceType: v }))}
+                  >
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder="Select Service" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SERVICE_TYPES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FieldWrapper>
+
+                <FieldWrapper label="Branch Manifest">
+                  <Select
+                    value={form.branchManifest || undefined}
+                    onValueChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
+                  >
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder="Select Manifest Branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MANIFEST_BRANCHES.map((b) => (
+                        <SelectItem key={b} value={b}>
+                          {b}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FieldWrapper>
+
+                <FieldWrapper label="Status">
+                  <Select
+                    value={form.status}
+                    onValueChange={(v) => setForm((f) => ({ ...f, status: v as Status }))}
+                  >
+                    <SelectTrigger className="h-10">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Active">Active</SelectItem>
+                      <SelectItem value="In-Active">In-Active</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FieldWrapper>
+              </div>
+            </fieldset>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              onClick={handleSave}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              Save
+            </Button>
+            <Button variant="destructive" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete destination?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove{" "}
+              <span className="font-medium text-foreground">{deleteTarget?.code}</span>
+              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the destination master.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function FieldWrapper({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label className="text-xs font-medium text-muted-foreground">
+        {label}
+        {required ? <span className="ml-0.5 text-destructive">*</span> : null}
+      </Label>
+      {children}
+    </div>
+  );
+}
+
+function IconButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="icon"
+          variant="outline"
+          className="h-9 w-9 bg-background"
+          onClick={onClick}
+          aria-label={label}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function PagerButton({
+  disabled,
+  onClick,
+  children,
+}: {
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
