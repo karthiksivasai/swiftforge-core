@@ -135,6 +135,7 @@ function ProductPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState<Omit<Product, "id">>(emptyProduct());
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
