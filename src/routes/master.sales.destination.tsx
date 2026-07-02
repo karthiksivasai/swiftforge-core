@@ -175,9 +175,8 @@ const ZONES = [
 
 const SERVICE_TYPES = ["REGULAR", "METRO", "REMOTE"];
 
-// Placeholder branch lists — will be wired to Branch/Main Branch master later.
-const MAIN_BRANCHES = ["HEAD OFFICE", "HYDERABAD", "BANGALORE", "MUMBAI", "DELHI", "CHENNAI"];
-const MANIFEST_BRANCHES = ["HEAD OFFICE", "HYDERABAD", "BANGALORE", "MUMBAI", "DELHI", "CHENNAI"];
+// Main Branch and Branch Manifest share the same seeded list (from Main_Branch_List.xlsx).
+const BRANCH_OPTIONS = BRANCHES.map((b) => b.name);
 
 const DOMESTIC_SEED: Omit<Destination, "id" | "type">[] = [
   { code: "A01", name: "A S PETA", country: "IN", state: "Andhra Pradesh", serviceType: "", status: "Active" },
