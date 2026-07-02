@@ -43,9 +43,11 @@ function isGroupActive(sectionSlug: string, group: NavGroup, pathname: string) {
 function SectionCard({
   section,
   pathname,
+  collapsed,
 }: {
   section: NavSection;
   pathname: string;
+  collapsed: boolean;
 }) {
   const Icon = section.icon;
   const active = isSectionActive(section, pathname);
@@ -57,7 +59,7 @@ function SectionCard({
         to={asPath(section.path)}
         className={cn(
           "flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors",
-          "group-data-[collapsible=icon]:h-9 group-data-[collapsible=icon]:w-9 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:mx-auto",
+          "group-data-[collapsible=icon]:h-11 group-data-[collapsible=icon]:w-11 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:mx-auto",
           active
             ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
             : "text-sidebar-foreground hover:bg-white/5",
@@ -69,34 +71,70 @@ function SectionCard({
     );
   }
 
+  // Collapsed: hover flyout with the nested navigation
+  if (collapsed) {
+    return (
+      <HoverCard openDelay={80} closeDelay={120}>
+        <HoverCardTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              "mx-auto flex h-11 w-11 items-center justify-center rounded-xl text-sm font-medium transition-colors",
+              active
+                ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                : "text-sidebar-foreground hover:bg-white/5",
+            )}
+            aria-label={section.label}
+          >
+            <Icon className="h-5 w-5 shrink-0" />
+          </button>
+        </HoverCardTrigger>
+        <HoverCardContent
+          side="right"
+          align="start"
+          sideOffset={8}
+          className="w-64 rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+        >
+          <div className="px-2 pb-2 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {section.label}
+          </div>
+          <div className="flex flex-col gap-0.5 max-h-[70vh] overflow-y-auto">
+            {section.items?.map((leaf) => (
+              <LeafLink key={leaf.path} leaf={leaf} pathname={pathname} indent={0} />
+            ))}
+            {section.groups?.map((group) => (
+              <GroupCollapsible
+                key={group.slug}
+                sectionSlug={section.slug}
+                group={group}
+                pathname={pathname}
+              />
+            ))}
+          </div>
+        </HoverCardContent>
+      </HoverCard>
+    );
+  }
+
   return (
     <Collapsible
       defaultOpen={active}
       className={cn(
         "group/section rounded-xl overflow-hidden",
         "data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground data-[state=open]:shadow-sm",
-        "group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:shadow-none",
       )}
     >
       <CollapsibleTrigger
         className={cn(
           "flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors",
           "group-data-[state=closed]/section:text-sidebar-foreground group-data-[state=closed]/section:hover:bg-white/5",
-          "group-data-[collapsible=icon]:h-9 group-data-[collapsible=icon]:w-9 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:text-sidebar-foreground group-data-[collapsible=icon]:hover:bg-white/5",
         )}
       >
         <Icon className="h-5 w-5 shrink-0" />
-        <span className="flex-1 text-left group-data-[collapsible=icon]:hidden">
-          {section.label}
-        </span>
-        <ChevronDown
-          className={cn(
-            "h-4 w-4 shrink-0 opacity-70 transition-transform group-data-[state=open]/section:rotate-180",
-            "group-data-[collapsible=icon]:hidden",
-          )}
-        />
+        <span className="flex-1 text-left">{section.label}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 opacity-70 transition-transform group-data-[state=open]/section:rotate-180" />
       </CollapsibleTrigger>
-      <CollapsibleContent className="overflow-hidden group-data-[collapsible=icon]:hidden">
+      <CollapsibleContent className="overflow-hidden">
         <div className="flex flex-col gap-0.5 px-2 pb-2">
           {section.items?.map((leaf) => (
             <LeafLink key={leaf.path} leaf={leaf} pathname={pathname} indent={0} />
