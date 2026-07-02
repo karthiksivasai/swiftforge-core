@@ -53,6 +53,7 @@ import {
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BRANCHES } from "@/lib/branches-data";
+import { DOMESTIC_DESTINATIONS } from "@/lib/destinations-data";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -179,19 +180,6 @@ const SERVICE_TYPES = ["REGULAR", "METRO", "REMOTE"];
 // Main Branch and Branch Manifest share the same seeded list (from Main_Branch_List.xlsx).
 const BRANCH_OPTIONS = BRANCHES.map((b) => b.name);
 
-const DOMESTIC_SEED: Omit<Destination, "id" | "type">[] = [
-  { code: "A01", name: "A S PETA", country: "IN", state: "Andhra Pradesh", serviceType: "", status: "Active" },
-  { code: "A02", name: "Aalo", country: "IN", state: "Arunachal Pradesh", serviceType: "", status: "Active" },
-  { code: "A03", name: "ABHANPUR", country: "IN", state: "Chhattisgarh", serviceType: "", status: "Active" },
-  { code: "A04", name: "ABHAYAPURI", country: "IN", state: "Assam", serviceType: "", status: "Active" },
-  { code: "A05", name: "ABOHAR", country: "IN", state: "Punjab", serviceType: "", status: "Active" },
-  { code: "A06", name: "Achampet", country: "IN", state: "Telangana", serviceType: "", status: "Active" },
-  { code: "A07", name: "ACHAMPETA", country: "IN", state: "Telangana", serviceType: "", status: "Active" },
-  { code: "A08", name: "Achampet-AP", country: "IN", state: "Andhra Pradesh", serviceType: "", status: "Active" },
-  { code: "A09", name: "ACHANTA", country: "IN", state: "Andhra Pradesh", serviceType: "", status: "Active" },
-  { code: "A10", name: "ACHROL", country: "IN", state: "Rajasthan", serviceType: "", status: "Active" },
-];
-
 const INTERNATIONAL_SEED: Omit<Destination, "id" | "type">[] = [
   { code: "AD", name: "Andorra", country: "AD", state: "", serviceType: "", status: "Active" },
   { code: "AE", name: "United Arab Emirates", country: "AE", state: "", serviceType: "", status: "Active" },
@@ -206,7 +194,7 @@ const INTERNATIONAL_SEED: Omit<Destination, "id" | "type">[] = [
 ];
 
 const SEED: Destination[] = [
-  ...DOMESTIC_SEED.map((d, i) => ({
+  ...DOMESTIC_DESTINATIONS.map((d, i) => ({
     id: `dom-${i + 1}`,
     type: "Domestic" as DestinationType,
     ...d,
