@@ -14,6 +14,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
+import { Route as MasterSalesProductRouteImport } from './routes/master.sales.product'
 
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
@@ -40,6 +41,11 @@ const MasterSplatRoute = MasterSplatRouteImport.update({
   path: '/master/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterSalesProductRoute = MasterSalesProductRouteImport.update({
+  id: '/master/sales/product',
+  path: '/master/sales/product',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/sales/product': typeof MasterSalesProductRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/sales/product': typeof MasterSalesProductRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,12 +70,25 @@ export interface FileRoutesById {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/sales/product': typeof MasterSalesProductRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard' | '/master/$' | '/reports/$' | '/transaction/$'
+  fullPaths:
+    | '/'
+    | '/dashboard'
+    | '/master/$'
+    | '/reports/$'
+    | '/transaction/$'
+    | '/master/sales/product'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard' | '/master/$' | '/reports/$' | '/transaction/$'
+  to:
+    | '/'
+    | '/dashboard'
+    | '/master/$'
+    | '/reports/$'
+    | '/transaction/$'
+    | '/master/sales/product'
   id:
     | '__root__'
     | '/'
@@ -75,6 +96,7 @@ export interface FileRouteTypes {
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/master/sales/product'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -83,6 +105,7 @@ export interface RootRouteChildren {
   MasterSplatRoute: typeof MasterSplatRoute
   ReportsSplatRoute: typeof ReportsSplatRoute
   TransactionSplatRoute: typeof TransactionSplatRoute
+  MasterSalesProductRoute: typeof MasterSalesProductRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -122,6 +145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/sales/product': {
+      id: '/master/sales/product'
+      path: '/master/sales/product'
+      fullPath: '/master/sales/product'
+      preLoaderRoute: typeof MasterSalesProductRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -131,6 +161,7 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSplatRoute: MasterSplatRoute,
   ReportsSplatRoute: ReportsSplatRoute,
   TransactionSplatRoute: TransactionSplatRoute,
+  MasterSalesProductRoute: MasterSalesProductRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
