@@ -97,7 +97,7 @@ function DashboardPage() {
             {QUICK_LINKS.map((q) => (
               <Link
                 key={q.to}
-                to={q.to}
+                to={q.to as Parameters<typeof Link>[0]["to"]}
                 className="flex items-center justify-between rounded-md px-2 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
               >
                 <span>{q.label}</span>

@@ -42,7 +42,7 @@ export function PlaceholderPage({ title, breadcrumbs, description }: Placeholder
                     <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
                   ) : (
                     <BreadcrumbLink asChild>
-                      <Link to={crumb.path}>{crumb.label}</Link>
+                      <Link to={asPath(crumb.path)}>{crumb.label}</Link>
                     </BreadcrumbLink>
                   )}
                 </BreadcrumbItem>
