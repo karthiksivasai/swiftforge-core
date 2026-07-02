@@ -214,6 +214,8 @@ function LeafLink({
 export function AppSidebar() {
   const tenant = useTenant();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { state, isMobile } = useSidebar();
+  const collapsed = state === "collapsed" && !isMobile;
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
@@ -231,11 +233,11 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="gap-2 px-3 py-4 group-data-[collapsible=icon]:px-1.5">
+      <SidebarContent className="gap-2 px-3 py-4 group-data-[collapsible=icon]:px-2">
         <SidebarMenu className="gap-2">
           {NAVIGATION.map((section) => (
             <SidebarMenuItem key={section.slug}>
-              <SectionCard section={section} pathname={pathname} />
+              <SectionCard section={section} pathname={pathname} collapsed={collapsed} />
             </SidebarMenuItem>
           ))}
         </SidebarMenu>
