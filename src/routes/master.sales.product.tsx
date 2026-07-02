@@ -180,9 +180,12 @@ function ProductPage() {
     setOpen(false);
   };
 
-  const handleDelete = (row: Product) => {
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const row = deleteTarget;
     setRows((prev) => prev.filter((r) => r.id !== row.id));
     toast.success(`Deleted ${row.code}`);
+    setDeleteTarget(null);
   };
 
   const handleExport = () => {
