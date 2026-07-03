@@ -29,7 +29,11 @@ import { Route as MasterSalesCountryRouteImport } from './routes/master.sales.co
 import { Route as MasterSalesContentRouteImport } from './routes/master.sales.content'
 import { Route as MasterSalesChargesMasterRouteImport } from './routes/master.sales.charges-master'
 import { Route as MasterSalesBankMasterRouteImport } from './routes/master.sales.bank-master'
+import { Route as MasterCustomerShipperRouteImport } from './routes/master.customer.shipper'
+import { Route as MasterCustomerExpenseRouteImport } from './routes/master.customer.expense'
+import { Route as MasterCustomerCustomerRateRouteImport } from './routes/master.customer.customer-rate'
 import { Route as MasterCustomerCustomerRouteImport } from './routes/master.customer.customer'
+import { Route as MasterCustomerConsigneeRouteImport } from './routes/master.customer.consignee'
 
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
@@ -134,9 +138,30 @@ const MasterSalesBankMasterRoute = MasterSalesBankMasterRouteImport.update({
   path: '/master/sales/bank-master',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterCustomerShipperRoute = MasterCustomerShipperRouteImport.update({
+  id: '/master/customer/shipper',
+  path: '/master/customer/shipper',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterCustomerExpenseRoute = MasterCustomerExpenseRouteImport.update({
+  id: '/master/customer/expense',
+  path: '/master/customer/expense',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterCustomerCustomerRateRoute =
+  MasterCustomerCustomerRateRouteImport.update({
+    id: '/master/customer/customer-rate',
+    path: '/master/customer/customer-rate',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const MasterCustomerCustomerRoute = MasterCustomerCustomerRouteImport.update({
   id: '/master/customer/customer',
   path: '/master/customer/customer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterCustomerConsigneeRoute = MasterCustomerConsigneeRouteImport.update({
+  id: '/master/customer/consignee',
+  path: '/master/customer/consignee',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -146,7 +171,11 @@ export interface FileRoutesByFullPath {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
+  '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
+  '/master/customer/expense': typeof MasterCustomerExpenseRoute
+  '/master/customer/shipper': typeof MasterCustomerShipperRoute
   '/master/sales/bank-master': typeof MasterSalesBankMasterRoute
   '/master/sales/charges-master': typeof MasterSalesChargesMasterRoute
   '/master/sales/content': typeof MasterSalesContentRoute
@@ -169,7 +198,11 @@ export interface FileRoutesByTo {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
+  '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
+  '/master/customer/expense': typeof MasterCustomerExpenseRoute
+  '/master/customer/shipper': typeof MasterCustomerShipperRoute
   '/master/sales/bank-master': typeof MasterSalesBankMasterRoute
   '/master/sales/charges-master': typeof MasterSalesChargesMasterRoute
   '/master/sales/content': typeof MasterSalesContentRoute
@@ -193,7 +226,11 @@ export interface FileRoutesById {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
+  '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
+  '/master/customer/expense': typeof MasterCustomerExpenseRoute
+  '/master/customer/shipper': typeof MasterCustomerShipperRoute
   '/master/sales/bank-master': typeof MasterSalesBankMasterRoute
   '/master/sales/charges-master': typeof MasterSalesChargesMasterRoute
   '/master/sales/content': typeof MasterSalesContentRoute
@@ -218,7 +255,11 @@ export interface FileRouteTypes {
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/master/customer/consignee'
     | '/master/customer/customer'
+    | '/master/customer/customer-rate'
+    | '/master/customer/expense'
+    | '/master/customer/shipper'
     | '/master/sales/bank-master'
     | '/master/sales/charges-master'
     | '/master/sales/content'
@@ -241,7 +282,11 @@ export interface FileRouteTypes {
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/master/customer/consignee'
     | '/master/customer/customer'
+    | '/master/customer/customer-rate'
+    | '/master/customer/expense'
+    | '/master/customer/shipper'
     | '/master/sales/bank-master'
     | '/master/sales/charges-master'
     | '/master/sales/content'
@@ -264,7 +309,11 @@ export interface FileRouteTypes {
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/master/customer/consignee'
     | '/master/customer/customer'
+    | '/master/customer/customer-rate'
+    | '/master/customer/expense'
+    | '/master/customer/shipper'
     | '/master/sales/bank-master'
     | '/master/sales/charges-master'
     | '/master/sales/content'
@@ -288,7 +337,11 @@ export interface RootRouteChildren {
   MasterSplatRoute: typeof MasterSplatRoute
   ReportsSplatRoute: typeof ReportsSplatRoute
   TransactionSplatRoute: typeof TransactionSplatRoute
+  MasterCustomerConsigneeRoute: typeof MasterCustomerConsigneeRoute
   MasterCustomerCustomerRoute: typeof MasterCustomerCustomerRoute
+  MasterCustomerCustomerRateRoute: typeof MasterCustomerCustomerRateRoute
+  MasterCustomerExpenseRoute: typeof MasterCustomerExpenseRoute
+  MasterCustomerShipperRoute: typeof MasterCustomerShipperRoute
   MasterSalesBankMasterRoute: typeof MasterSalesBankMasterRoute
   MasterSalesChargesMasterRoute: typeof MasterSalesChargesMasterRoute
   MasterSalesContentRoute: typeof MasterSalesContentRoute
@@ -448,11 +501,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSalesBankMasterRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/customer/shipper': {
+      id: '/master/customer/shipper'
+      path: '/master/customer/shipper'
+      fullPath: '/master/customer/shipper'
+      preLoaderRoute: typeof MasterCustomerShipperRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/customer/expense': {
+      id: '/master/customer/expense'
+      path: '/master/customer/expense'
+      fullPath: '/master/customer/expense'
+      preLoaderRoute: typeof MasterCustomerExpenseRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/customer/customer-rate': {
+      id: '/master/customer/customer-rate'
+      path: '/master/customer/customer-rate'
+      fullPath: '/master/customer/customer-rate'
+      preLoaderRoute: typeof MasterCustomerCustomerRateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/master/customer/customer': {
       id: '/master/customer/customer'
       path: '/master/customer/customer'
       fullPath: '/master/customer/customer'
       preLoaderRoute: typeof MasterCustomerCustomerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/customer/consignee': {
+      id: '/master/customer/consignee'
+      path: '/master/customer/consignee'
+      fullPath: '/master/customer/consignee'
+      preLoaderRoute: typeof MasterCustomerConsigneeRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -464,7 +545,11 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSplatRoute: MasterSplatRoute,
   ReportsSplatRoute: ReportsSplatRoute,
   TransactionSplatRoute: TransactionSplatRoute,
+  MasterCustomerConsigneeRoute: MasterCustomerConsigneeRoute,
   MasterCustomerCustomerRoute: MasterCustomerCustomerRoute,
+  MasterCustomerCustomerRateRoute: MasterCustomerCustomerRateRoute,
+  MasterCustomerExpenseRoute: MasterCustomerExpenseRoute,
+  MasterCustomerShipperRoute: MasterCustomerShipperRoute,
   MasterSalesBankMasterRoute: MasterSalesBankMasterRoute,
   MasterSalesChargesMasterRoute: MasterSalesChargesMasterRoute,
   MasterSalesContentRoute: MasterSalesContentRoute,
