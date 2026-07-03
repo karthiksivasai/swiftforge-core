@@ -1106,7 +1106,7 @@ function StepPersonalDetails({
           <Input value={p.address2} onChange={(e) => patch({ address2: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Pin Code">
-          <SearchField value={p.pinCode} onChange={(v) => patch({ pinCode: v })} />
+          <SearchField lookup="pinCode" returnField="code" value={p.pinCode} onChange={(v) => patch({ pinCode: v })} />
         </FieldWrapper>
         <FieldWrapper label="City">
           <Input value={p.city} onChange={(e) => patch({ city: e.target.value })} />
@@ -1132,10 +1132,10 @@ function StepPersonalDetails({
           <Input value={p.faxNo} onChange={(e) => patch({ faxNo: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Customer Billing State" required>
-          <SearchField value={p.customerBillingState} onChange={(v) => patch({ customerBillingState: v })} />
+          <SearchField lookup="state" value={p.customerBillingState} onChange={(v) => patch({ customerBillingState: v })} />
         </FieldWrapper>
         <FieldWrapper label="Service Centre" required>
-          <SearchField value={p.serviceCentre} onChange={(v) => patch({ serviceCentre: v })} />
+          <SearchField lookup="serviceCentre" value={p.serviceCentre} onChange={(v) => patch({ serviceCentre: v })} />
         </FieldWrapper>
         <FieldWrapper label="Start Date" required>
           <DateField value={p.startDate} onChange={(v) => patch({ startDate: v })} />
@@ -1151,7 +1151,7 @@ function StepPersonalDetails({
           </Select>
         </FieldWrapper>
         <FieldWrapper label="Origin" required>
-          <SearchField value={p.origin} onChange={(v) => patch({ origin: v })} />
+          <SearchField lookup="destination" value={p.origin} onChange={(v) => patch({ origin: v })} />
         </FieldWrapper>
         <FieldWrapper label="GST No.">
           <Input value={p.gstNo} onChange={(e) => patch({ gstNo: e.target.value })} />
