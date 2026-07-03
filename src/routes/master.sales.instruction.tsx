@@ -61,21 +61,21 @@ type InstructionRow = {
 };
 
 const SEED_DATA: Omit<InstructionRow, "id">[] = [
-  { code: "DOC", name: "Documents" },
-  { code: "PAR", name: "Parcel" },
-  { code: "GRM", name: "Garments" },
-  { code: "ELC", name: "Electronics" },
-  { code: "BKS", name: "Books" },
-  { code: "GFT", name: "Gifts" },
-  { code: "SMP", name: "Samples" },
-  { code: "SPR", name: "Spare Parts" },
-  { code: "MED", name: "Medicines" },
-  { code: "FOD", name: "Food Items" },
-  { code: "COS", name: "Cosmetics" },
-  { code: "JWL", name: "Jewellery" },
-  { code: "HDW", name: "Handicrafts" },
-  { code: "STA", name: "Stationery" },
-  { code: "TOY", name: "Toys" },
+  { code: "HWC", name: "Handle With Care" },
+  { code: "FRG", name: "Fragile" },
+  { code: "TSU", name: "This Side Up" },
+  { code: "KDR", name: "Keep Dry" },
+  { code: "DNS", name: "Do Not Stack" },
+  { code: "DNF", name: "Do Not Fold" },
+  { code: "URG", name: "Urgent Delivery" },
+  { code: "COD", name: "Collect On Delivery" },
+  { code: "SIG", name: "Signature Required" },
+  { code: "IDP", name: "ID Proof Required" },
+  { code: "CFB", name: "Call Before Delivery" },
+  { code: "DLW", name: "Deliver After Weekday" },
+  { code: "PRS", name: "Perishable" },
+  { code: "TSN", name: "Temperature Sensitive" },
+  { code: "GFT", name: "Gift Item" },
 ];
 
 const SEED: InstructionRow[] = SEED_DATA.map((s, i) => ({ id: String(i + 1), ...s }));
