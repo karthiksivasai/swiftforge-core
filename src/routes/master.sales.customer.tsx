@@ -77,6 +77,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { MasterLookupDialog, type LookupReturn } from "@/components/master-lookup-dialog";
+import type { LookupKey } from "@/lib/master-lookups";
 
 // ---------- Types ----------
 type CustomerStatus = "Active" | "In-Active";
