@@ -460,7 +460,13 @@ function LocalBranchPage() {
               onChange={(e) => setC("billingStateCode")(e.target.value)}
               className="w-20"
             />
-            <Button variant="outline" size="icon" className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+              onClick={() => setStateLookupOpen(true)}
+            >
               <Search className="h-4 w-4" />
             </Button>
           </div>
