@@ -347,6 +347,8 @@ function LocalBranchPage() {
   const [companyLogo, setCompanyLogo] = useState<string>("");
   const [signatoryLogo, setSignatoryLogo] = useState<string>("");
   const [fyForm, setFyForm] = useState({ fromDate: "", toDate: "", finYear: "" });
+  const [pinLookupOpen, setPinLookupOpen] = useState(false);
+  const [stateLookupOpen, setStateLookupOpen] = useState(false);
 
   const setC = (k: keyof CompanyDetails) => (v: string) => setCompany((c) => ({ ...c, [k]: v }));
   const setB = (k: keyof BankDetails) => (v: string) => setBank((b) => ({ ...b, [k]: v }));
