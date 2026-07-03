@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/table";
 import {
   Dialog,
-  DialogInstruction,
+  DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -41,12 +41,12 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { Tooltip, TooltipInstruction, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
-  AlertDialogInstruction,
+  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
@@ -395,7 +395,7 @@ function InstructionPage() {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogInstruction className="max-w-2xl">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Instruction" : "Add Instruction"}</DialogTitle>
           </DialogHeader>
@@ -426,11 +426,11 @@ function InstructionPage() {
               Cancel
             </Button>
           </DialogFooter>
-        </DialogInstruction>
+        </DialogContent>
       </Dialog>
 
       <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <AlertDialogInstruction>
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete instruction?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -448,7 +448,7 @@ function InstructionPage() {
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
-        </AlertDialogInstruction>
+        </AlertDialogContent>
       </AlertDialog>
     </div>
   );
@@ -543,7 +543,7 @@ function IconButton({
           {children}
         </Button>
       </TooltipTrigger>
-      <TooltipInstruction>{label}</TooltipInstruction>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }
