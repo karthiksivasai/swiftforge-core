@@ -7,7 +7,7 @@ export const Route = createFileRoute("/transaction/$")({
   loader: ({ params }) => {
     const page = resolvePage(`/transaction/${params._splat ?? ""}`);
     if (!page) throw notFound();
-    return page;
+    return { title: page.title, breadcrumbs: page.breadcrumbs.map((b) => ({ label: b.label, path: b.path })) };
   },
   head: ({ loaderData }) => ({
     meta: loaderData

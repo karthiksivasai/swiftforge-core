@@ -7,7 +7,12 @@ export const Route = createFileRoute("/master/$")({
   loader: ({ params }) => {
     const page = resolvePage(`/master/${params._splat ?? ""}`);
     if (!page) throw notFound();
-    return page;
+    // Return only serializable fields — nav objects contain Lucide icon
+    // components (React forwardRef) which seroval cannot dehydrate for SSR.
+    return {
+      title: page.title,
+      breadcrumbs: page.breadcrumbs.map((b) => ({ label: b.label, path: b.path })),
+    };
   },
   head: ({ loaderData }) => ({
     meta: loaderData
