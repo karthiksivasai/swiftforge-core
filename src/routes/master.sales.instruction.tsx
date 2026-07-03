@@ -86,7 +86,7 @@ export const Route = createFileRoute("/master/sales/instruction")({
   head: () => ({
     meta: [
       { title: "Instruction — Master — Courier ERP" },
-      { name: "description", instruction: "Manage the instruction master for customer classification." },
+      { name: "description", content: "Manage the instruction master used for shipment handling notes." },
     ],
   }),
   component: InstructionPage,
