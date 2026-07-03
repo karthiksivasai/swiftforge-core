@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { Search, Trash2, Plus, Upload, Trash } from "lucide-react";
+import { Search, Trash2, Plus, Upload, Trash, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,8 +21,136 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+type PincodeRow = { name: string; code: string };
+type BillingStateRow = { name: string; code: string };
+
+const PINCODE_DATA: PincodeRow[] = [
+  { name: "Begumpet", code: "500016" },
+  { name: "Secunderabad", code: "500003" },
+  { name: "Hyderabad GPO", code: "500001" },
+  { name: "Ameerpet", code: "500038" },
+  { name: "Banjara Hills", code: "500034" },
+  { name: "Jubilee Hills", code: "500033" },
+  { name: "Kukatpally", code: "500072" },
+  { name: "Madhapur", code: "500081" },
+  { name: "Gachibowli", code: "500032" },
+  { name: "Vanasthalipuram", code: "500070" },
+];
+
+const BILLING_STATE_DATA: BillingStateRow[] = [
+  { name: "Andhra Pradesh", code: "AP" },
+  { name: "Telangana", code: "TS" },
+  { name: "Karnataka", code: "KA" },
+  { name: "Tamil Nadu", code: "TN" },
+  { name: "Kerala", code: "KL" },
+  { name: "Maharashtra", code: "MH" },
+  { name: "Gujarat", code: "GJ" },
+  { name: "Delhi", code: "DL" },
+  { name: "Uttar Pradesh", code: "UP" },
+  { name: "West Bengal", code: "WB" },
+  { name: "Rajasthan", code: "RJ" },
+  { name: "Madhya Pradesh", code: "MP" },
+];
+
+function LookupDialog<T extends { name: string; code: string }>({
+  open,
+  onOpenChange,
+  title,
+  nameHeader,
+  codeHeader,
+  data,
+  onSelect,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  title: string;
+  nameHeader: string;
+  codeHeader: string;
+  data: T[];
+  onSelect: (row: T) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const filtered = data.filter(
+    (r) =>
+      r.name.toLowerCase().includes(query.toLowerCase()) ||
+      r.code.toLowerCase().includes(query.toLowerCase()),
+  );
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        onOpenChange(v);
+        if (!v) setQuery("");
+      }}
+    >
+      <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
+        <DialogHeader className="flex-row items-center justify-between bg-sidebar px-4 py-3 space-y-0">
+          <DialogTitle className="text-sidebar-foreground text-sm font-medium">{title}</DialogTitle>
+        </DialogHeader>
+        <div className="p-4 space-y-3">
+          <div className="flex justify-end">
+            <div className="flex items-center gap-2">
+              <Label className="text-sm">Search:</Label>
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="h-8 w-56"
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="overflow-hidden rounded-md border border-border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-sidebar hover:bg-sidebar">
+                  <TableHead className="text-sidebar-foreground">{nameHeader}</TableHead>
+                  <TableHead className="text-sidebar-foreground">{codeHeader}</TableHead>
+                  <TableHead className="text-sidebar-foreground text-center w-32">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-6">
+                      No data available in table
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filtered.map((row) => (
+                    <TableRow key={row.code}>
+                      <TableCell>{row.name}</TableCell>
+                      <TableCell>{row.code}</TableCell>
+                      <TableCell className="text-center">
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 text-white hover:bg-emerald-600/90 h-7"
+                          onClick={() => {
+                            onSelect(row);
+                            onOpenChange(false);
+                            setQuery("");
+                          }}
+                        >
+                          Select
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {filtered.length === 0 ? "No Record Found" : `${filtered.length} record${filtered.length === 1 ? "" : "s"} found`}
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export const Route = createFileRoute("/master/sales/local-branch")({
   head: () => ({
