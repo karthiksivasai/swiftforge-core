@@ -670,22 +670,25 @@ function MultiChargeSelect({
           <ChevronDown className="h-4 w-4 opacity-60" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
-        <div className="max-h-72 overflow-y-auto">
-          <label className="flex cursor-pointer items-center justify-between gap-2 border-b px-3 py-2 text-sm hover:bg-muted">
-            <span>Select All</span>
-            <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
+      <PopoverContent
+        align="start"
+        className="w-[var(--radix-popover-trigger-width)] max-h-72 overflow-y-auto overscroll-contain p-0"
+        onWheel={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+      >
+        <label className="sticky top-0 z-10 flex cursor-pointer items-center justify-between gap-2 border-b bg-popover px-3 py-2 text-sm hover:bg-muted">
+          <span>Select All</span>
+          <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
+        </label>
+        {options.map((opt) => (
+          <label
+            key={opt}
+            className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-muted"
+          >
+            <span className="truncate">{opt}</span>
+            <Checkbox checked={selected.includes(opt)} onCheckedChange={() => toggle(opt)} />
           </label>
-          {options.map((opt) => (
-            <label
-              key={opt}
-              className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-muted"
-            >
-              <span className="truncate">{opt}</span>
-              <Checkbox checked={selected.includes(opt)} onCheckedChange={() => toggle(opt)} />
-            </label>
-          ))}
-        </div>
+        ))}
       </PopoverContent>
     </Popover>
   );
