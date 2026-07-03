@@ -2261,13 +2261,44 @@ function FieldWrapper({ label, required, children }: { label: string; required?:
   );
 }
 
-function SearchField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function SearchField({
+  value,
+  onChange,
+  lookup,
+  returnField = "name",
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  lookup?: LookupKey;
+  returnField?: LookupReturn;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
   return (
     <div className="flex gap-1">
-      <Input value={value} onChange={(e) => onChange(e.target.value)} />
-      <Button size="icon" variant="outline" className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90" aria-label="Search" onClick={() => toast.info("Lookup")}>
+      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+      <Button
+        size="icon"
+        variant="outline"
+        className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+        aria-label="Search"
+        onClick={() => {
+          if (lookup) setOpen(true);
+          else toast.info("Lookup");
+        }}
+      >
         <Search className="h-4 w-4" />
       </Button>
+      {lookup && (
+        <MasterLookupDialog
+          open={open}
+          onOpenChange={setOpen}
+          lookup={lookup}
+          returnField={returnField}
+          onSelect={(v) => onChange(v)}
+        />
+      )}
     </div>
   );
 }
