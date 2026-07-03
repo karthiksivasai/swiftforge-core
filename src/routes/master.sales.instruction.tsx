@@ -269,7 +269,7 @@ function InstructionPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Instruction</h1>
         <p className="text-sm text-muted-foreground">
-          Manage the instruction master used to classify customers.
+          Manage the instruction master used for shipment handling notes.
         </p>
       </div>
 
