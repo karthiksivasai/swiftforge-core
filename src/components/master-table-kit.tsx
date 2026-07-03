@@ -183,12 +183,12 @@ export function MasterBreadcrumb({ trail }: { trail: string[] }) {
           </BreadcrumbLink>
         </BreadcrumbItem>
         {trail.slice(0, -1).map((t) => (
-          <>
-            <BreadcrumbSeparator key={`s-${t}`} />
-            <BreadcrumbItem key={t}>
+          <span key={t} className="contents">
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
               <span className="text-muted-foreground">{t}</span>
             </BreadcrumbItem>
-          </>
+          </span>
         ))}
         <BreadcrumbSeparator />
         <BreadcrumbItem>
