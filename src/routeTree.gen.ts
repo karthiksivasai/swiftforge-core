@@ -20,6 +20,7 @@ import { Route as MasterSalesServiceCenterRouteImport } from './routes/master.sa
 import { Route as MasterSalesSalesExecutiveRouteImport } from './routes/master.sales.sales-executive'
 import { Route as MasterSalesProductRouteImport } from './routes/master.sales.product'
 import { Route as MasterSalesIndustryRouteImport } from './routes/master.sales.industry'
+import { Route as MasterSalesFlightRouteImport } from './routes/master.sales.flight'
 import { Route as MasterSalesDestinationRouteImport } from './routes/master.sales.destination'
 import { Route as MasterSalesCountryRouteImport } from './routes/master.sales.country'
 
@@ -80,6 +81,11 @@ const MasterSalesIndustryRoute = MasterSalesIndustryRouteImport.update({
   path: '/master/sales/industry',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterSalesFlightRoute = MasterSalesFlightRouteImport.update({
+  id: '/master/sales/flight',
+  path: '/master/sales/flight',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MasterSalesDestinationRoute = MasterSalesDestinationRouteImport.update({
   id: '/master/sales/destination',
   path: '/master/sales/destination',
@@ -99,6 +105,7 @@ export interface FileRoutesByFullPath {
   '/transaction/$': typeof TransactionSplatRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
   '/master/sales/destination': typeof MasterSalesDestinationRoute
+  '/master/sales/flight': typeof MasterSalesFlightRoute
   '/master/sales/industry': typeof MasterSalesIndustryRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/sales-executive': typeof MasterSalesSalesExecutiveRoute
@@ -114,6 +121,7 @@ export interface FileRoutesByTo {
   '/transaction/$': typeof TransactionSplatRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
   '/master/sales/destination': typeof MasterSalesDestinationRoute
+  '/master/sales/flight': typeof MasterSalesFlightRoute
   '/master/sales/industry': typeof MasterSalesIndustryRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/sales-executive': typeof MasterSalesSalesExecutiveRoute
@@ -130,6 +138,7 @@ export interface FileRoutesById {
   '/transaction/$': typeof TransactionSplatRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
   '/master/sales/destination': typeof MasterSalesDestinationRoute
+  '/master/sales/flight': typeof MasterSalesFlightRoute
   '/master/sales/industry': typeof MasterSalesIndustryRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/sales-executive': typeof MasterSalesSalesExecutiveRoute
@@ -147,6 +156,7 @@ export interface FileRouteTypes {
     | '/transaction/$'
     | '/master/sales/country'
     | '/master/sales/destination'
+    | '/master/sales/flight'
     | '/master/sales/industry'
     | '/master/sales/product'
     | '/master/sales/sales-executive'
@@ -162,6 +172,7 @@ export interface FileRouteTypes {
     | '/transaction/$'
     | '/master/sales/country'
     | '/master/sales/destination'
+    | '/master/sales/flight'
     | '/master/sales/industry'
     | '/master/sales/product'
     | '/master/sales/sales-executive'
@@ -177,6 +188,7 @@ export interface FileRouteTypes {
     | '/transaction/$'
     | '/master/sales/country'
     | '/master/sales/destination'
+    | '/master/sales/flight'
     | '/master/sales/industry'
     | '/master/sales/product'
     | '/master/sales/sales-executive'
@@ -193,6 +205,7 @@ export interface RootRouteChildren {
   TransactionSplatRoute: typeof TransactionSplatRoute
   MasterSalesCountryRoute: typeof MasterSalesCountryRoute
   MasterSalesDestinationRoute: typeof MasterSalesDestinationRoute
+  MasterSalesFlightRoute: typeof MasterSalesFlightRoute
   MasterSalesIndustryRoute: typeof MasterSalesIndustryRoute
   MasterSalesProductRoute: typeof MasterSalesProductRoute
   MasterSalesSalesExecutiveRoute: typeof MasterSalesSalesExecutiveRoute
@@ -280,6 +293,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSalesIndustryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/sales/flight': {
+      id: '/master/sales/flight'
+      path: '/master/sales/flight'
+      fullPath: '/master/sales/flight'
+      preLoaderRoute: typeof MasterSalesFlightRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/master/sales/destination': {
       id: '/master/sales/destination'
       path: '/master/sales/destination'
@@ -305,6 +325,7 @@ const rootRouteChildren: RootRouteChildren = {
   TransactionSplatRoute: TransactionSplatRoute,
   MasterSalesCountryRoute: MasterSalesCountryRoute,
   MasterSalesDestinationRoute: MasterSalesDestinationRoute,
+  MasterSalesFlightRoute: MasterSalesFlightRoute,
   MasterSalesIndustryRoute: MasterSalesIndustryRoute,
   MasterSalesProductRoute: MasterSalesProductRoute,
   MasterSalesSalesExecutiveRoute: MasterSalesSalesExecutiveRoute,
