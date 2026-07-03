@@ -1265,14 +1265,14 @@ function StepBillingDetails({
           <Input value={b.paisa} onChange={(e) => patch({ paisa: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Contract Head">
-          <SearchField value={b.contractHead} onChange={(v) => patch({ contractHead: v })} />
+          <SearchField lookup="contractHead" value={b.contractHead} onChange={(v) => patch({ contractHead: v })} />
         </FieldWrapper>
 
         <FieldWrapper label="Ledger Head">
-          <SearchField value={b.ledgerHead} onChange={(v) => patch({ ledgerHead: v })} />
+          <SearchField lookup="ledgerHead" value={b.ledgerHead} onChange={(v) => patch({ ledgerHead: v })} />
         </FieldWrapper>
         <FieldWrapper label="Contract Origin">
-          <SearchField value={b.contractOrigin} onChange={(v) => patch({ contractOrigin: v })} />
+          <SearchField lookup="destination" value={b.contractOrigin} onChange={(v) => patch({ contractOrigin: v })} />
         </FieldWrapper>
         <FieldWrapper label="Business Channel">
           <Select value={b.businessChannel || "Select Customer Type"} onValueChange={(v) => patch({ businessChannel: v === "Select Customer Type" ? "" : v })}>
@@ -1390,7 +1390,7 @@ function StepOtherDetails({
     <Section title="Other Details">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <FieldWrapper label="Sales Executive">
-          <SearchField value={o.salesExecutive} onChange={(v) => patch({ salesExecutive: v })} />
+          <SearchField lookup="salesExecutive" value={o.salesExecutive} onChange={(v) => patch({ salesExecutive: v })} />
         </FieldWrapper>
         <FieldWrapper label="Incentive Type">
           <Select value={o.incentiveType} onValueChange={(v) => patch({ incentiveType: v })}>
@@ -1442,10 +1442,10 @@ function StepOtherDetails({
           </div>
         </FieldWrapper>
         <FieldWrapper label="Area">
-          <SearchField value={o.area} onChange={(v) => patch({ area: v })} />
+          <SearchField lookup="area" value={o.area} onChange={(v) => patch({ area: v })} />
         </FieldWrapper>
         <FieldWrapper label="Field Executive">
-          <SearchField value={o.fieldExecutive} onChange={(v) => patch({ fieldExecutive: v })} />
+          <SearchField lookup="fieldExecutive" value={o.fieldExecutive} onChange={(v) => patch({ fieldExecutive: v })} />
         </FieldWrapper>
 
         <FieldWrapper label="Monday">
@@ -1492,7 +1492,7 @@ function StepOtherDetails({
           </Select>
         </FieldWrapper>
         <FieldWrapper label="Industry">
-          <SearchField value={o.industry} onChange={(v) => patch({ industry: v })} />
+          <SearchField lookup="industry" value={o.industry} onChange={(v) => patch({ industry: v })} />
         </FieldWrapper>
         <FieldWrapper label="GeoLocation">
           <div className="relative">
@@ -1659,9 +1659,9 @@ function FuelSurchargesTab({
             <FieldWrapper label="Entry Code"><Input value={form.entryCode} onChange={(e) => setForm({ ...form, entryCode: e.target.value })} /></FieldWrapper>
             <FieldWrapper label="From Date"><DateField value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} /></FieldWrapper>
             <FieldWrapper label="To Date"><DateField value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} /></FieldWrapper>
-            <FieldWrapper label="Vendor"><SearchField value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} /></FieldWrapper>
-            <FieldWrapper label="Product"><SearchField value={form.product} onChange={(v) => setForm({ ...form, product: v })} /></FieldWrapper>
-            <FieldWrapper label="Destination"><SearchField value={form.destination} onChange={(v) => setForm({ ...form, destination: v })} /></FieldWrapper>
+            <FieldWrapper label="Vendor"><SearchField lookup="vendor" value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} /></FieldWrapper>
+            <FieldWrapper label="Product"><SearchField lookup="product" value={form.product} onChange={(v) => setForm({ ...form, product: v })} /></FieldWrapper>
+            <FieldWrapper label="Destination"><SearchField lookup="destination" value={form.destination} onChange={(v) => setForm({ ...form, destination: v })} /></FieldWrapper>
             <FieldWrapper label="Percentage"><Input value={form.percentage} onChange={(e) => setForm({ ...form, percentage: e.target.value })} /></FieldWrapper>
           </div>
           <DialogFooter className="gap-2">
@@ -1786,11 +1786,11 @@ function OtherChargesTab({
             <FieldWrapper label="Charge Type"><Input value={form.chargeType} onChange={(e) => setForm({ ...form, chargeType: e.target.value })} /></FieldWrapper>
             <FieldWrapper label="From Date"><DateField value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} /></FieldWrapper>
             <FieldWrapper label="To Date"><DateField value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} /></FieldWrapper>
-            <FieldWrapper label="Vendor"><SearchField value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} /></FieldWrapper>
+            <FieldWrapper label="Vendor"><SearchField lookup="vendor" value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} /></FieldWrapper>
             <FieldWrapper label="Service"><SearchField value={form.service} onChange={(v) => setForm({ ...form, service: v })} /></FieldWrapper>
-            <FieldWrapper label="Product"><SearchField value={form.product} onChange={(v) => setForm({ ...form, product: v })} /></FieldWrapper>
-            <FieldWrapper label="Origin"><SearchField value={form.origin} onChange={(v) => setForm({ ...form, origin: v })} /></FieldWrapper>
-            <FieldWrapper label="Destination"><SearchField value={form.destination} onChange={(v) => setForm({ ...form, destination: v })} /></FieldWrapper>
+            <FieldWrapper label="Product"><SearchField lookup="product" value={form.product} onChange={(v) => setForm({ ...form, product: v })} /></FieldWrapper>
+            <FieldWrapper label="Origin"><SearchField lookup="destination" value={form.origin} onChange={(v) => setForm({ ...form, origin: v })} /></FieldWrapper>
+            <FieldWrapper label="Destination"><SearchField lookup="destination" value={form.destination} onChange={(v) => setForm({ ...form, destination: v })} /></FieldWrapper>
             <FieldWrapper label="Amount"><Input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></FieldWrapper>
             <FieldWrapper label="Minimum Value"><Input value={form.minimumValue} onChange={(e) => setForm({ ...form, minimumValue: e.target.value })} /></FieldWrapper>
           </div>
@@ -1885,8 +1885,8 @@ function VolumetricTab({
           <DialogHeader><DialogTitle>{dialog?.id ? "Edit Volumetric" : "Volumetric"}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 py-2">
             <FieldWrapper label="Customer Name"><Input value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Product"><SearchField value={form.product} onChange={(v) => setForm({ ...form, product: v })} /></FieldWrapper>
-            <FieldWrapper label="Vendor"><SearchField value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} /></FieldWrapper>
+            <FieldWrapper label="Product"><SearchField lookup="product" value={form.product} onChange={(v) => setForm({ ...form, product: v })} /></FieldWrapper>
+            <FieldWrapper label="Vendor"><SearchField lookup="vendor" value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} /></FieldWrapper>
             <FieldWrapper label="Service"><SearchField value={form.service} onChange={(v) => setForm({ ...form, service: v })} /></FieldWrapper>
             <FieldWrapper label="CM Divide"><Input value={form.cmDivide} onChange={(e) => setForm({ ...form, cmDivide: e.target.value })} /></FieldWrapper>
             <FieldWrapper label="Inch Divide"><Input value={form.inchDivide} onChange={(e) => setForm({ ...form, inchDivide: e.target.value })} /></FieldWrapper>
@@ -2081,7 +2081,7 @@ function AddressTab({
             <FieldWrapper label="Customer"><Input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} /></FieldWrapper>
             <FieldWrapper label="Contact Type" required>
               <div className="flex gap-1">
-                <SearchField value={form.contactType} onChange={(v) => setForm({ ...form, contactType: v })} />
+                <SearchField lookup="contactType" value={form.contactType} onChange={(v) => setForm({ ...form, contactType: v })} />
                 <Button size="icon" className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90" onClick={() => setContactTypeOpen(true)} aria-label="Manage Contact Types">
                   <Plus className="h-4 w-4" />
                 </Button>
@@ -2102,10 +2102,10 @@ function AddressTab({
             <FieldWrapper label="Address 2"><Input value={form.address2} onChange={(e) => setForm({ ...form, address2: e.target.value })} /></FieldWrapper>
             <FieldWrapper label="Address 3"><Input value={form.address3} onChange={(e) => setForm({ ...form, address3: e.target.value })} /></FieldWrapper>
 
-            <FieldWrapper label="PinCode" required><SearchField value={form.pinCode} onChange={(v) => setForm({ ...form, pinCode: v })} /></FieldWrapper>
+            <FieldWrapper label="PinCode" required><SearchField lookup="pinCode" returnField="code" value={form.pinCode} onChange={(v) => setForm({ ...form, pinCode: v })} /></FieldWrapper>
             <FieldWrapper label="City"><SearchField value={form.city} onChange={(v) => setForm({ ...form, city: v })} /></FieldWrapper>
-            <FieldWrapper label="State"><SearchField value={form.state} onChange={(v) => setForm({ ...form, state: v })} /></FieldWrapper>
-            <FieldWrapper label="Country"><SearchField value={form.country} onChange={(v) => setForm({ ...form, country: v })} /></FieldWrapper>
+            <FieldWrapper label="State"><SearchField lookup="state" value={form.state} onChange={(v) => setForm({ ...form, state: v })} /></FieldWrapper>
+            <FieldWrapper label="Country"><SearchField lookup="country" value={form.country} onChange={(v) => setForm({ ...form, country: v })} /></FieldWrapper>
 
             <FieldWrapper label="Remark"><Input value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} /></FieldWrapper>
             <FieldWrapper label="Passport No."><Input value={form.passportNo} onChange={(e) => setForm({ ...form, passportNo: e.target.value })} /></FieldWrapper>
