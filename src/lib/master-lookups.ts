@@ -1,0 +1,248 @@
+// Shared lookup option lists sourced from the existing master seeds.
+// Used by <SearchField lookup="..." /> across forms so users can pick
+// a value from the same list the corresponding master page manages.
+
+export type LookupOption = { code: string; name: string; hint?: string };
+
+export type LookupKey =
+  | "state"
+  | "serviceCentre"
+  | "product"
+  | "salesExecutive"
+  | "industry"
+  | "country"
+  | "destination"
+  | "zone"
+  | "pinCode"
+  | "vendor"
+  | "contractHead"
+  | "ledgerHead"
+  | "area"
+  | "fieldExecutive"
+  | "contactType";
+
+const STATES: LookupOption[] = [
+  { code: "AN", name: "Andaman & Nicobar Islands" },
+  { code: "AP", name: "Andhra Pradesh" },
+  { code: "AR", name: "Arunachal Pradesh" },
+  { code: "AS", name: "Assam" },
+  { code: "BR", name: "Bihar" },
+  { code: "CH", name: "Chandigarh" },
+  { code: "CT", name: "Chhattisgarh" },
+  { code: "DL", name: "Delhi" },
+  { code: "GA", name: "Goa" },
+  { code: "GJ", name: "Gujarat" },
+  { code: "HR", name: "Haryana" },
+  { code: "HP", name: "Himachal Pradesh" },
+  { code: "JK", name: "Jammu & Kashmir" },
+  { code: "JH", name: "Jharkhand" },
+  { code: "KA", name: "Karnataka" },
+  { code: "KL", name: "Kerala" },
+  { code: "MP", name: "Madhya Pradesh" },
+  { code: "MH", name: "Maharashtra" },
+  { code: "MN", name: "Manipur" },
+  { code: "ML", name: "Meghalaya" },
+  { code: "MZ", name: "Mizoram" },
+  { code: "NL", name: "Nagaland" },
+  { code: "OR", name: "Odisha" },
+  { code: "PY", name: "Puducherry" },
+  { code: "PB", name: "Punjab" },
+  { code: "RJ", name: "Rajasthan" },
+  { code: "SK", name: "Sikkim" },
+  { code: "TN", name: "Tamil Nadu" },
+  { code: "TG", name: "Telangana" },
+  { code: "TR", name: "Tripura" },
+  { code: "UP", name: "Uttar Pradesh" },
+  { code: "UT", name: "Uttarakhand" },
+  { code: "WB", name: "West Bengal" },
+];
+
+const SERVICE_CENTRES: LookupOption[] = [
+  { code: "AKL", name: "AUCKLAND", hint: "AKL" },
+  { code: "AM", name: "AUSTRALIA METRO", hint: "AUM" },
+  { code: "BAN", name: "Bangalore", hint: "BLR" },
+  { code: "CAN", name: "CANADA", hint: "CA" },
+  { code: "GUN", name: "GUNTUR", hint: "GUN" },
+  { code: "HYD", name: "HYD", hint: "HYD" },
+  { code: "KUL", name: "KUALA LUMPUR", hint: "MY" },
+  { code: "MAH", name: "MAHARASHTRA", hint: "MAH" },
+  { code: "MNL", name: "MANILA (PHILIPPINES)", hint: "PH" },
+  { code: "MEL", name: "MELBOURNE", hint: "MEL" },
+  { code: "MUM", name: "MUMBAI COURIERWALA", hint: "BOM" },
+  { code: "PER", name: "PERTH", hint: "PER" },
+  { code: "SYD", name: "SYDNEY", hint: "AER" },
+  { code: "UK", name: "UNITED KINGDOM", hint: "GB" },
+  { code: "USA", name: "UNITED STATES OF AMERICA", hint: "US" },
+];
+
+const PRODUCTS: LookupOption[] = [
+  { code: "ADOX", name: "ADOX" },
+  { code: "ASPX", name: "ASPX" },
+  { code: "COM", name: "COMMERCIAL" },
+  { code: "DOCS", name: "DOCUMENTS" },
+  { code: "DOX", name: "INTL DOX" },
+  { code: "ENV", name: "ENVELOPE" },
+  { code: "FOOD", name: "FOOD" },
+  { code: "LAP", name: "LAPTOP" },
+  { code: "MED", name: "MEDICINE" },
+  { code: "MOB", name: "MOBILE" },
+  { code: "GRMT", name: "GARMENTS" },
+  { code: "SPAR", name: "SPARE PARTS" },
+  { code: "BOOK", name: "BOOKS" },
+  { code: "GIFT", name: "GIFT ITEMS" },
+];
+
+const SALES_EXECS: LookupOption[] = [
+  { code: "A20", name: "AIHAN ENTERPRISES" },
+  { code: "SAI", name: "AMUDALA SIVA SAI" },
+  { code: "JVN", name: "JEEVAN" },
+  { code: "MNC", name: "MAROJU NAVEEN CHARY" },
+  { code: "NTH", name: "NITHIN" },
+  { code: "SRA", name: "SRAVANI DONTHU" },
+  { code: "Bmk", name: "Vemula sai kiran" },
+];
+
+const INDUSTRIES: LookupOption[] = [
+  { code: "AGR", name: "Agriculture" },
+  { code: "AUT", name: "Automotive" },
+  { code: "BNK", name: "Banking & Finance" },
+  { code: "CON", name: "Construction" },
+  { code: "EDU", name: "Education" },
+  { code: "ECM", name: "E-Commerce" },
+  { code: "ENR", name: "Energy" },
+  { code: "FMC", name: "FMCG" },
+  { code: "HLT", name: "Healthcare" },
+  { code: "HOS", name: "Hospitality" },
+  { code: "INS", name: "Insurance" },
+  { code: "ITS", name: "IT Services" },
+  { code: "LOG", name: "Logistics" },
+  { code: "MFG", name: "Manufacturing" },
+  { code: "MED", name: "Media & Entertainment" },
+  { code: "PHR", name: "Pharmaceuticals" },
+  { code: "RET", name: "Retail" },
+  { code: "TEL", name: "Telecommunications" },
+  { code: "TEX", name: "Textiles" },
+  { code: "TRV", name: "Travel & Tourism" },
+];
+
+const COUNTRIES: LookupOption[] = [
+  { code: "IN", name: "INDIA" },
+  { code: "US", name: "UNITED STATES OF AMERICA" },
+  { code: "GB", name: "UNITED KINGDOM" },
+  { code: "AU", name: "AUSTRALIA" },
+  { code: "CA", name: "CANADA" },
+  { code: "AE", name: "UNITED ARAB EMIRATES" },
+  { code: "SG", name: "SINGAPORE" },
+  { code: "MY", name: "MALAYSIA" },
+  { code: "NZ", name: "NEW ZEALAND" },
+  { code: "DE", name: "GERMANY" },
+  { code: "FR", name: "FRANCE" },
+  { code: "JP", name: "JAPAN" },
+  { code: "CN", name: "CHINA" },
+  { code: "PH", name: "PHILIPPINES" },
+  { code: "SA", name: "SAUDI ARABIA" },
+];
+
+const DESTINATIONS: LookupOption[] = [
+  { code: "HYD", name: "Hyderabad" },
+  { code: "BLR", name: "Bangalore" },
+  { code: "BOM", name: "Mumbai" },
+  { code: "DEL", name: "Delhi" },
+  { code: "MAA", name: "Chennai" },
+  { code: "CCU", name: "Kolkata" },
+  { code: "PNQ", name: "Pune" },
+  { code: "AMD", name: "Ahmedabad" },
+  { code: "LON", name: "London" },
+  { code: "NYC", name: "New York" },
+  { code: "DXB", name: "Dubai" },
+  { code: "SIN", name: "Singapore" },
+];
+
+const ZONES: LookupOption[] = [
+  { code: "1", name: "INTERNATIONAL ZONE 1" },
+  { code: "2", name: "INTERNATIONAL ZONE 2" },
+  { code: "3", name: "INTERNATIONAL ZONE 3" },
+  { code: "4", name: "INTERNATIONAL ZONE 4" },
+  { code: "5", name: "INTERNATIONAL ZONE 5" },
+  { code: "6", name: "INTERNATIONAL ZONE 6" },
+  { code: "7", name: "INTERNATIONAL ZONE 7" },
+  { code: "8", name: "INTERNATIONAL ZONE 8" },
+  { code: "9", name: "INTERNATIONAL ZONE 9" },
+  { code: "10", name: "INTERNATIONAL ZONE 10" },
+];
+
+const PIN_CODES: LookupOption[] = [
+  { code: "500001", name: "Hyderabad GPO", hint: "Telangana" },
+  { code: "500032", name: "Gachibowli", hint: "Telangana" },
+  { code: "500081", name: "HITEC City", hint: "Telangana" },
+  { code: "560001", name: "Bangalore GPO", hint: "Karnataka" },
+  { code: "560066", name: "Whitefield", hint: "Karnataka" },
+  { code: "400001", name: "Mumbai GPO", hint: "Maharashtra" },
+  { code: "400051", name: "Bandra West", hint: "Maharashtra" },
+  { code: "110001", name: "New Delhi GPO", hint: "Delhi" },
+  { code: "110016", name: "Hauz Khas", hint: "Delhi" },
+  { code: "600001", name: "Chennai GPO", hint: "Tamil Nadu" },
+  { code: "700001", name: "Kolkata GPO", hint: "West Bengal" },
+  { code: "411001", name: "Pune GPO", hint: "Maharashtra" },
+];
+
+const VENDORS: LookupOption[] = [
+  { code: "V001", name: "DTDC Express" },
+  { code: "V002", name: "Blue Dart" },
+  { code: "V003", name: "DHL Express" },
+  { code: "V004", name: "FedEx" },
+  { code: "V005", name: "Aramex" },
+  { code: "V006", name: "Delhivery" },
+  { code: "V007", name: "Professional Couriers" },
+  { code: "V008", name: "Trackon Couriers" },
+];
+
+const HEADS: LookupOption[] = [
+  { code: "H001", name: "Sales Revenue" },
+  { code: "H002", name: "Service Revenue" },
+  { code: "H003", name: "Freight Income" },
+  { code: "H004", name: "Fuel Surcharge" },
+  { code: "H005", name: "Handling Charges" },
+];
+
+const AREAS: LookupOption[] = [
+  { code: "A01", name: "Central" },
+  { code: "A02", name: "North" },
+  { code: "A03", name: "South" },
+  { code: "A04", name: "East" },
+  { code: "A05", name: "West" },
+];
+
+const FIELD_EXECS: LookupOption[] = [
+  { code: "FE01", name: "Ravi Kumar" },
+  { code: "FE02", name: "Suresh Reddy" },
+  { code: "FE03", name: "Anitha Devi" },
+  { code: "FE04", name: "Vijay Sharma" },
+];
+
+const CONTACT_TYPES: LookupOption[] = [
+  { code: "OWN", name: "Owner" },
+  { code: "MGR", name: "Manager" },
+  { code: "ACC", name: "Accounts" },
+  { code: "OPS", name: "Operations" },
+  { code: "SLS", name: "Sales" },
+  { code: "SUP", name: "Support" },
+];
+
+export const MASTER_LOOKUPS: Record<LookupKey, { title: string; options: LookupOption[]; hintLabel?: string }> = {
+  state: { title: "Select State", options: STATES },
+  serviceCentre: { title: "Select Service Centre", options: SERVICE_CENTRES, hintLabel: "Branch" },
+  product: { title: "Select Product", options: PRODUCTS },
+  salesExecutive: { title: "Select Sales Executive", options: SALES_EXECS },
+  industry: { title: "Select Industry", options: INDUSTRIES },
+  country: { title: "Select Country", options: COUNTRIES },
+  destination: { title: "Select Destination", options: DESTINATIONS },
+  zone: { title: "Select Zone", options: ZONES },
+  pinCode: { title: "Select Pin Code", options: PIN_CODES, hintLabel: "State" },
+  vendor: { title: "Select Vendor", options: VENDORS },
+  contractHead: { title: "Select Contract Head", options: HEADS },
+  ledgerHead: { title: "Select Ledger Head", options: HEADS },
+  area: { title: "Select Area", options: AREAS },
+  fieldExecutive: { title: "Select Field Executive", options: FIELD_EXECS },
+  contactType: { title: "Select Contact Type", options: CONTACT_TYPES },
+};
