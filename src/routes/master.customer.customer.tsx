@@ -483,7 +483,7 @@ const INCENTIVE_TYPES = ["Percentage", "Flat"];
 const PAGE_SIZE = 10;
 
 // ---------- Route ----------
-export const Route = createFileRoute("/master/sales/customer")({
+export const Route = createFileRoute("/master/customer/customer")({
   head: () => ({
     meta: [
       { title: "Customer — Courier ERP" },
