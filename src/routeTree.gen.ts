@@ -28,6 +28,7 @@ import { Route as MasterSalesDestinationRouteImport } from './routes/master.sale
 import { Route as MasterSalesCountryRouteImport } from './routes/master.sales.country'
 import { Route as MasterSalesContentRouteImport } from './routes/master.sales.content'
 import { Route as MasterSalesChargesMasterRouteImport } from './routes/master.sales.charges-master'
+import { Route as MasterSalesBankMasterRouteImport } from './routes/master.sales.bank-master'
 
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
@@ -127,6 +128,11 @@ const MasterSalesChargesMasterRoute =
     path: '/master/sales/charges-master',
     getParentRoute: () => rootRouteImport,
   } as any)
+const MasterSalesBankMasterRoute = MasterSalesBankMasterRouteImport.update({
+  id: '/master/sales/bank-master',
+  path: '/master/sales/bank-master',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -134,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/sales/bank-master': typeof MasterSalesBankMasterRoute
   '/master/sales/charges-master': typeof MasterSalesChargesMasterRoute
   '/master/sales/content': typeof MasterSalesContentRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/sales/bank-master': typeof MasterSalesBankMasterRoute
   '/master/sales/charges-master': typeof MasterSalesChargesMasterRoute
   '/master/sales/content': typeof MasterSalesContentRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/sales/bank-master': typeof MasterSalesBankMasterRoute
   '/master/sales/charges-master': typeof MasterSalesChargesMasterRoute
   '/master/sales/content': typeof MasterSalesContentRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
@@ -200,6 +209,7 @@ export interface FileRouteTypes {
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/master/sales/bank-master'
     | '/master/sales/charges-master'
     | '/master/sales/content'
     | '/master/sales/country'
@@ -221,6 +231,7 @@ export interface FileRouteTypes {
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/master/sales/bank-master'
     | '/master/sales/charges-master'
     | '/master/sales/content'
     | '/master/sales/country'
@@ -242,6 +253,7 @@ export interface FileRouteTypes {
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/master/sales/bank-master'
     | '/master/sales/charges-master'
     | '/master/sales/content'
     | '/master/sales/country'
@@ -264,6 +276,7 @@ export interface RootRouteChildren {
   MasterSplatRoute: typeof MasterSplatRoute
   ReportsSplatRoute: typeof ReportsSplatRoute
   TransactionSplatRoute: typeof TransactionSplatRoute
+  MasterSalesBankMasterRoute: typeof MasterSalesBankMasterRoute
   MasterSalesChargesMasterRoute: typeof MasterSalesChargesMasterRoute
   MasterSalesContentRoute: typeof MasterSalesContentRoute
   MasterSalesCountryRoute: typeof MasterSalesCountryRoute
@@ -415,6 +428,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSalesChargesMasterRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/sales/bank-master': {
+      id: '/master/sales/bank-master'
+      path: '/master/sales/bank-master'
+      fullPath: '/master/sales/bank-master'
+      preLoaderRoute: typeof MasterSalesBankMasterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -424,6 +444,7 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSplatRoute: MasterSplatRoute,
   ReportsSplatRoute: ReportsSplatRoute,
   TransactionSplatRoute: TransactionSplatRoute,
+  MasterSalesBankMasterRoute: MasterSalesBankMasterRoute,
   MasterSalesChargesMasterRoute: MasterSalesChargesMasterRoute,
   MasterSalesContentRoute: MasterSalesContentRoute,
   MasterSalesCountryRoute: MasterSalesCountryRoute,
