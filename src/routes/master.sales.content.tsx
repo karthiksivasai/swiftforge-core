@@ -405,7 +405,7 @@ function ContentPage() {
               <Input
                 value={form.code}
                 onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-                placeholder="e.g. ITS"
+                placeholder="e.g. DOC"
               />
             </FieldWrapper>
 
@@ -413,7 +413,7 @@ function ContentPage() {
               <Input
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="e.g. IT Services"
+                placeholder="e.g. Documents"
               />
             </FieldWrapper>
           </div>
