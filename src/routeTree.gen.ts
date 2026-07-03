@@ -20,6 +20,7 @@ import { Route as MasterSalesServiceCenterRouteImport } from './routes/master.sa
 import { Route as MasterSalesSalesExecutiveRouteImport } from './routes/master.sales.sales-executive'
 import { Route as MasterSalesProductTypeRouteImport } from './routes/master.sales.product-type'
 import { Route as MasterSalesProductRouteImport } from './routes/master.sales.product'
+import { Route as MasterSalesLocalBranchRouteImport } from './routes/master.sales.local-branch'
 import { Route as MasterSalesInstructionRouteImport } from './routes/master.sales.instruction'
 import { Route as MasterSalesIndustryRouteImport } from './routes/master.sales.industry'
 import { Route as MasterSalesFlightRouteImport } from './routes/master.sales.flight'
@@ -84,6 +85,11 @@ const MasterSalesProductRoute = MasterSalesProductRouteImport.update({
   path: '/master/sales/product',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterSalesLocalBranchRoute = MasterSalesLocalBranchRouteImport.update({
+  id: '/master/sales/local-branch',
+  path: '/master/sales/local-branch',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MasterSalesInstructionRoute = MasterSalesInstructionRouteImport.update({
   id: '/master/sales/instruction',
   path: '/master/sales/instruction',
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/master/sales/flight': typeof MasterSalesFlightRoute
   '/master/sales/industry': typeof MasterSalesIndustryRoute
   '/master/sales/instruction': typeof MasterSalesInstructionRoute
+  '/master/sales/local-branch': typeof MasterSalesLocalBranchRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/product-type': typeof MasterSalesProductTypeRoute
   '/master/sales/sales-executive': typeof MasterSalesSalesExecutiveRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/master/sales/flight': typeof MasterSalesFlightRoute
   '/master/sales/industry': typeof MasterSalesIndustryRoute
   '/master/sales/instruction': typeof MasterSalesInstructionRoute
+  '/master/sales/local-branch': typeof MasterSalesLocalBranchRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/product-type': typeof MasterSalesProductTypeRoute
   '/master/sales/sales-executive': typeof MasterSalesSalesExecutiveRoute
@@ -166,6 +174,7 @@ export interface FileRoutesById {
   '/master/sales/flight': typeof MasterSalesFlightRoute
   '/master/sales/industry': typeof MasterSalesIndustryRoute
   '/master/sales/instruction': typeof MasterSalesInstructionRoute
+  '/master/sales/local-branch': typeof MasterSalesLocalBranchRoute
   '/master/sales/product': typeof MasterSalesProductRoute
   '/master/sales/product-type': typeof MasterSalesProductTypeRoute
   '/master/sales/sales-executive': typeof MasterSalesSalesExecutiveRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/master/sales/flight'
     | '/master/sales/industry'
     | '/master/sales/instruction'
+    | '/master/sales/local-branch'
     | '/master/sales/product'
     | '/master/sales/product-type'
     | '/master/sales/sales-executive'
@@ -206,6 +216,7 @@ export interface FileRouteTypes {
     | '/master/sales/flight'
     | '/master/sales/industry'
     | '/master/sales/instruction'
+    | '/master/sales/local-branch'
     | '/master/sales/product'
     | '/master/sales/product-type'
     | '/master/sales/sales-executive'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '/master/sales/flight'
     | '/master/sales/industry'
     | '/master/sales/instruction'
+    | '/master/sales/local-branch'
     | '/master/sales/product'
     | '/master/sales/product-type'
     | '/master/sales/sales-executive'
@@ -245,6 +257,7 @@ export interface RootRouteChildren {
   MasterSalesFlightRoute: typeof MasterSalesFlightRoute
   MasterSalesIndustryRoute: typeof MasterSalesIndustryRoute
   MasterSalesInstructionRoute: typeof MasterSalesInstructionRoute
+  MasterSalesLocalBranchRoute: typeof MasterSalesLocalBranchRoute
   MasterSalesProductRoute: typeof MasterSalesProductRoute
   MasterSalesProductTypeRoute: typeof MasterSalesProductTypeRoute
   MasterSalesSalesExecutiveRoute: typeof MasterSalesSalesExecutiveRoute
@@ -332,6 +345,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSalesProductRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/sales/local-branch': {
+      id: '/master/sales/local-branch'
+      path: '/master/sales/local-branch'
+      fullPath: '/master/sales/local-branch'
+      preLoaderRoute: typeof MasterSalesLocalBranchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/master/sales/instruction': {
       id: '/master/sales/instruction'
       path: '/master/sales/instruction'
@@ -389,6 +409,7 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSalesFlightRoute: MasterSalesFlightRoute,
   MasterSalesIndustryRoute: MasterSalesIndustryRoute,
   MasterSalesInstructionRoute: MasterSalesInstructionRoute,
+  MasterSalesLocalBranchRoute: MasterSalesLocalBranchRoute,
   MasterSalesProductRoute: MasterSalesProductRoute,
   MasterSalesProductTypeRoute: MasterSalesProductTypeRoute,
   MasterSalesSalesExecutiveRoute: MasterSalesSalesExecutiveRoute,
