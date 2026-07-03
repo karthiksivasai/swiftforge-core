@@ -433,7 +433,13 @@ function LocalBranchPage() {
           <Field label="Address 2" value={company.address2} onChange={setC("address2")} textarea />
           <div className="flex items-end gap-2">
             <Field label="Pin Code" value={company.pinCode} onChange={setC("pinCode")} className="flex-1" />
-            <Button variant="outline" size="icon" className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+              onClick={() => setPinLookupOpen(true)}
+            >
               <Search className="h-4 w-4" />
             </Button>
           </div>
