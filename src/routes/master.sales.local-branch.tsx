@@ -615,6 +615,32 @@ function LocalBranchPage() {
           </Table>
         </div>
       </Section>
+
+      <LookupDialog
+        open={pinLookupOpen}
+        onOpenChange={setPinLookupOpen}
+        title="Pincode"
+        nameHeader="Pincode Name"
+        codeHeader="PinCode Code"
+        data={PINCODE_DATA}
+        onSelect={(row) => {
+          setCompany((c) => ({ ...c, pinCode: row.code, city: row.name }));
+          toast.success(`Selected ${row.name}`);
+        }}
+      />
+
+      <LookupDialog
+        open={stateLookupOpen}
+        onOpenChange={setStateLookupOpen}
+        title="Billing State"
+        nameHeader="State Name"
+        codeHeader="State Code"
+        data={BILLING_STATE_DATA}
+        onSelect={(row) => {
+          setCompany((c) => ({ ...c, billingState: row.name, billingStateCode: row.code }));
+          toast.success(`Selected ${row.name}`);
+        }}
+      />
     </div>
   );
 }
