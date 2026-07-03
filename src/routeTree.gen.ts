@@ -24,6 +24,7 @@ import { Route as MasterSalesIndustryRouteImport } from './routes/master.sales.i
 import { Route as MasterSalesFlightRouteImport } from './routes/master.sales.flight'
 import { Route as MasterSalesDestinationRouteImport } from './routes/master.sales.destination'
 import { Route as MasterSalesCountryRouteImport } from './routes/master.sales.country'
+import { Route as MasterSalesContentRouteImport } from './routes/master.sales.content'
 
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
@@ -102,6 +103,11 @@ const MasterSalesCountryRoute = MasterSalesCountryRouteImport.update({
   path: '/master/sales/country',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterSalesContentRoute = MasterSalesContentRouteImport.update({
+  id: '/master/sales/content',
+  path: '/master/sales/content',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -109,6 +115,7 @@ export interface FileRoutesByFullPath {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/sales/content': typeof MasterSalesContentRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
   '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/flight': typeof MasterSalesFlightRoute
@@ -126,6 +133,7 @@ export interface FileRoutesByTo {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/sales/content': typeof MasterSalesContentRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
   '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/flight': typeof MasterSalesFlightRoute
@@ -144,6 +152,7 @@ export interface FileRoutesById {
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/master/sales/content': typeof MasterSalesContentRoute
   '/master/sales/country': typeof MasterSalesCountryRoute
   '/master/sales/destination': typeof MasterSalesDestinationRoute
   '/master/sales/flight': typeof MasterSalesFlightRoute
@@ -163,6 +172,7 @@ export interface FileRouteTypes {
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/master/sales/content'
     | '/master/sales/country'
     | '/master/sales/destination'
     | '/master/sales/flight'
@@ -180,6 +190,7 @@ export interface FileRouteTypes {
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/master/sales/content'
     | '/master/sales/country'
     | '/master/sales/destination'
     | '/master/sales/flight'
@@ -197,6 +208,7 @@ export interface FileRouteTypes {
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/master/sales/content'
     | '/master/sales/country'
     | '/master/sales/destination'
     | '/master/sales/flight'
@@ -215,6 +227,7 @@ export interface RootRouteChildren {
   MasterSplatRoute: typeof MasterSplatRoute
   ReportsSplatRoute: typeof ReportsSplatRoute
   TransactionSplatRoute: typeof TransactionSplatRoute
+  MasterSalesContentRoute: typeof MasterSalesContentRoute
   MasterSalesCountryRoute: typeof MasterSalesCountryRoute
   MasterSalesDestinationRoute: typeof MasterSalesDestinationRoute
   MasterSalesFlightRoute: typeof MasterSalesFlightRoute
@@ -334,6 +347,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSalesCountryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/sales/content': {
+      id: '/master/sales/content'
+      path: '/master/sales/content'
+      fullPath: '/master/sales/content'
+      preLoaderRoute: typeof MasterSalesContentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -343,6 +363,7 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSplatRoute: MasterSplatRoute,
   ReportsSplatRoute: ReportsSplatRoute,
   TransactionSplatRoute: TransactionSplatRoute,
+  MasterSalesContentRoute: MasterSalesContentRoute,
   MasterSalesCountryRoute: MasterSalesCountryRoute,
   MasterSalesDestinationRoute: MasterSalesDestinationRoute,
   MasterSalesFlightRoute: MasterSalesFlightRoute,
@@ -357,13 +378,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
