@@ -14,6 +14,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -93,6 +94,7 @@ type VendorRow = {
   global: boolean;
   gst: boolean;
   volumetricWeightRoundOff: boolean;
+  ratesFileName: string;
 };
 
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED"] as const;
@@ -125,6 +127,7 @@ function seedVendor(id: string, code: string, name: string): VendorRow {
     global: false,
     gst: false,
     volumetricWeightRoundOff: false,
+    ratesFileName: "",
   };
 }
 
@@ -185,6 +188,7 @@ const emptyRow = (): Omit<VendorRow, "id"> => ({
   global: false,
   gst: false,
   volumetricWeightRoundOff: false,
+  ratesFileName: "",
 });
 
 export const Route = createFileRoute("/master/vendor/vendor")({
@@ -212,6 +216,7 @@ function VendorPage() {
   const [toVendor, setToVendor] = useState<VendorPick>(emptyVendorPick());
   const [vendorZones, setVendorZones] = useState<Record<string, string[]>>({});
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const ratesFileRef = useRef<HTMLInputElement | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -349,6 +354,7 @@ function VendorPage() {
           global: false,
           gst: false,
           volumetricWeightRoundOff: false,
+          ratesFileName: "",
         });
       }
       if (imported.length === 0) return toast.error("No valid rows found");
@@ -385,6 +391,31 @@ function VendorPage() {
     setVendorZones((prev) => ({ ...prev, [toCode]: [...sourceZones] }));
     toast.success(`Zone configuration copied from ${fromCode} to ${toCode}`);
     setCopyZoneOpen(false);
+  };
+
+  const handleRatesUpload = async () => {
+    if (!form.ratesFileName) return toast.error("Choose a file first");
+    const vendorCode = (editing?.code ?? form.code).trim().toUpperCase();
+    if (!vendorCode) return toast.error("Save vendor details with a code before uploading rates");
+
+    const file = ratesFileRef.current?.files?.[0];
+    if (file) {
+      try {
+        const text = await file.text();
+        const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+        const zones = lines.slice(1).map((l) => l.split(",")[0]?.trim()).filter(Boolean);
+        if (zones.length > 0) {
+          setVendorZones((prev) => ({ ...prev, [vendorCode]: zones }));
+        }
+      } catch {
+        /* keep upload success even if parse fails */
+      }
+    }
+
+    if (editing) {
+      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...r, ratesFileName: form.ratesFileName } : r)));
+    }
+    toast.success(`Rate file uploaded: ${form.ratesFileName}`);
   };
 
   const displayAddress = (r: VendorRow) => [r.address1, r.address2].filter(Boolean).join(", ");
@@ -582,39 +613,69 @@ function VendorPage() {
                     </SelectContent>
                   </Select>
                 </FieldWrapper>
-                <FieldWrapper label="Global">
-                  <div className="flex h-9 items-center gap-2">
-                    <Checkbox id="vendor-global" checked={form.global} onCheckedChange={(c) => setForm((f) => ({ ...f, global: c === true }))} />
-                    <label htmlFor="vendor-global" className="text-sm text-muted-foreground">Global</label>
+                <div className="flex flex-col justify-end gap-1.5 md:col-span-2 lg:col-span-3">
+                  <div className="flex h-9 flex-wrap items-center gap-x-6 gap-y-2">
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="vendor-global" checked={form.global} onCheckedChange={(c) => setForm((f) => ({ ...f, global: c === true }))} />
+                      <label htmlFor="vendor-global" className="text-sm text-muted-foreground">Global</label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="vendor-gst" checked={form.gst} onCheckedChange={(c) => setForm((f) => ({ ...f, gst: c === true }))} />
+                      <label htmlFor="vendor-gst" className="text-sm text-muted-foreground">GST</label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="vendor-volumetric" checked={form.volumetricWeightRoundOff} onCheckedChange={(c) => setForm((f) => ({ ...f, volumetricWeightRoundOff: c === true }))} />
+                      <label htmlFor="vendor-volumetric" className="whitespace-nowrap text-sm text-muted-foreground">Volumetric Weight Round off</label>
+                    </div>
                   </div>
-                </FieldWrapper>
-                <FieldWrapper label="GST">
-                  <div className="flex h-9 items-center gap-2">
-                    <Checkbox id="vendor-gst" checked={form.gst} onCheckedChange={(c) => setForm((f) => ({ ...f, gst: c === true }))} />
-                    <label htmlFor="vendor-gst" className="text-sm text-muted-foreground">GST</label>
-                  </div>
-                </FieldWrapper>
-                <FieldWrapper label="Volumetric Weight Round off">
-                  <div className="flex h-9 items-center gap-2">
-                    <Checkbox id="vendor-volumetric" checked={form.volumetricWeightRoundOff} onCheckedChange={(c) => setForm((f) => ({ ...f, volumetricWeightRoundOff: c === true }))} />
-                    <label htmlFor="vendor-volumetric" className="text-sm text-muted-foreground">Volumetric Weight Round off</label>
-                  </div>
-                </FieldWrapper>
+                </div>
               </div>
             </TabsContent>
 
             <TabsContent value="rates" className="mt-4">
-              <div className="flex min-h-[200px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 p-8 text-center">
-                <p className="text-sm font-medium text-foreground">Rates Details</p>
-                <p className="max-w-md text-sm text-muted-foreground">
-                  Vendor rate configuration will be implemented in a future phase. Save vendor details from the Details tab.
-                </p>
+              <div className="flex min-h-[320px] flex-col gap-4 rounded-lg border bg-card">
+                <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+                  <Label className="text-sm font-medium text-muted-foreground">File Upload</Label>
+                  <input
+                    ref={ratesFileRef}
+                    type="file"
+                    accept=".csv,.xls,.xlsx,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      setForm((f) => ({ ...f, ratesFileName: file?.name ?? "" }));
+                    }}
+                  />
+                  <Button variant="outline" size="sm" type="button" onClick={() => ratesFileRef.current?.click()}>
+                    Choose
+                  </Button>
+                  <span className="text-sm text-muted-foreground">{form.ratesFileName || "No file selected"}</span>
+                  <Button
+                    size="sm"
+                    type="button"
+                    className="ml-auto bg-chart-2 text-primary-foreground hover:bg-chart-2/90"
+                    onClick={handleRatesUpload}
+                  >
+                    Upload
+                  </Button>
+                </div>
+                <div className="flex flex-1 items-center justify-center px-4 pb-4">
+                  {form.ratesFileName ? (
+                    <p className="text-sm text-muted-foreground">
+                      Rate file <span className="font-medium text-foreground">{form.ratesFileName}</span> ready to upload.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Upload a vendor rate file to populate rate details.</p>
+                  )}
+                </div>
               </div>
             </TabsContent>
           </Tabs>
 
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
+            {dialogTab === "details" ? (
+              <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
+            ) : null}
             <Button variant="destructive" onClick={() => setOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>

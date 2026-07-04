@@ -86,6 +86,10 @@ const PRODUCTS: LookupOption[] = [
   { code: "LAP", name: "LAPTOP" },
   { code: "MED", name: "MEDICINE" },
   { code: "MOB", name: "MOBILE" },
+  { code: "NDOX", name: "NON DOCUMENTS" },
+  { code: "SPX", name: "OTHER PACKAGE" },
+  { code: "PACK", name: "PACK" },
+  { code: "SPXD", name: "SPXD" },
   { code: "GRMT", name: "GARMENTS" },
   { code: "SPAR", name: "SPARE PARTS" },
   { code: "BOOK", name: "BOOKS" },
@@ -226,6 +230,7 @@ const HEADS: LookupOption[] = [
 ];
 
 const AREAS: LookupOption[] = [
+  { code: "HYD", name: "HYD" },
   { code: "A01", name: "Central" },
   { code: "A02", name: "North" },
   { code: "A03", name: "South" },
@@ -234,10 +239,14 @@ const AREAS: LookupOption[] = [
 ];
 
 const FIELD_EXECS: LookupOption[] = [
-  { code: "FE01", name: "Ravi Kumar" },
-  { code: "FE02", name: "Suresh Reddy" },
-  { code: "FE03", name: "Anitha Devi" },
-  { code: "FE04", name: "Vijay Sharma" },
+  { code: "AKHIL", name: "AKHIL CW" },
+  { code: "AKSHITH", name: "AKSHITH" },
+  { code: "ANIL", name: "ANIL CW" },
+  { code: "KRISHNA", name: "KRISHNA" },
+  { code: "PAVAN", name: "PAVAN CW" },
+  { code: "RAJU", name: "RAJU" },
+  { code: "SURESH", name: "SURESH CW" },
+  { code: "VIJAY", name: "VIJAY" },
 ];
 
 const CONTACT_TYPES: LookupOption[] = [

@@ -19,6 +19,16 @@ Each of these has a real page, table, add/edit dialog with validation, CSV impor
 
 ### Master → Vendor group
 - **Vendor** — `src/routes/master.vendor.vendor.tsx` (2026-07-04)
+- **Vendor Contract** — `src/routes/master.vendor.vendor-contract.tsx` (2026-07-04)
+
+### Master → Operation group
+- **Service Mapping** — `src/routes/master.operation.service-mapping.tsx` (2026-07-04)
+- **Field Executive** — `src/routes/master.operation.field-executive.tsx` (2026-07-04)
+- **Pin Code** — `src/routes/master.operation.pin-code.tsx` (2026-07-04)
+- **Area** — `src/routes/master.operation.area.tsx` (2026-07-04)
+- **Exception** — `src/routes/master.operation.exception.tsx` (2026-07-04)
+- **Airline** — `src/routes/master.operation.airline.tsx` (2026-07-04)
+- **Country Pincodes** — `src/routes/master.operation.country-pincodes.tsx` (2026-07-04)
 
 ### Shell / global
 - Sidebar navigation (`app-sidebar.tsx` + `lib/navigation.ts`)
@@ -61,16 +71,10 @@ Route files exist as splat placeholders. Each needs a real implementation follow
 > Note: route files already exist for these under `src/routes/master.sales.*.tsx`. Verify each before starting; some may still be scaffolds.
 
 ### Vendor group (`/master/vendor/*`)
-- Vendor Contract
+_None — vendor group complete._
 
 ### Operation group (`/master/operation/*`)
-- Service Mapping
-- Field Executive
-- Pin Code
-- Area
-- Exception
-- Airline
-- Country Pincodes
+_None — operation group complete._
 
 ---
 

@@ -14,6 +14,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
+import { Route as MasterVendorVendorContractRouteImport } from './routes/master.vendor.vendor-contract'
 import { Route as MasterVendorVendorRouteImport } from './routes/master.vendor.vendor'
 import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
 import { Route as MasterSalesStateRouteImport } from './routes/master.sales.state'
@@ -30,6 +31,13 @@ import { Route as MasterSalesCountryRouteImport } from './routes/master.sales.co
 import { Route as MasterSalesContentRouteImport } from './routes/master.sales.content'
 import { Route as MasterSalesChargesMasterRouteImport } from './routes/master.sales.charges-master'
 import { Route as MasterSalesBankMasterRouteImport } from './routes/master.sales.bank-master'
+import { Route as MasterOperationServiceMappingRouteImport } from './routes/master.operation.service-mapping'
+import { Route as MasterOperationPinCodeRouteImport } from './routes/master.operation.pin-code'
+import { Route as MasterOperationFieldExecutiveRouteImport } from './routes/master.operation.field-executive'
+import { Route as MasterOperationExceptionRouteImport } from './routes/master.operation.exception'
+import { Route as MasterOperationCountryPincodesRouteImport } from './routes/master.operation.country-pincodes'
+import { Route as MasterOperationAreaRouteImport } from './routes/master.operation.area'
+import { Route as MasterOperationAirlineRouteImport } from './routes/master.operation.airline'
 import { Route as MasterCustomerShipperRouteImport } from './routes/master.customer.shipper'
 import { Route as MasterCustomerExpenseRouteImport } from './routes/master.customer.expense'
 import { Route as MasterCustomerCustomerRateRouteImport } from './routes/master.customer.customer-rate'
@@ -61,6 +69,12 @@ const MasterSplatRoute = MasterSplatRouteImport.update({
   path: '/master/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterVendorVendorContractRoute =
+  MasterVendorVendorContractRouteImport.update({
+    id: '/master/vendor/vendor-contract',
+    path: '/master/vendor/vendor-contract',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const MasterVendorVendorRoute = MasterVendorVendorRouteImport.update({
   id: '/master/vendor/vendor',
   path: '/master/vendor/vendor',
@@ -144,6 +158,45 @@ const MasterSalesBankMasterRoute = MasterSalesBankMasterRouteImport.update({
   path: '/master/sales/bank-master',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterOperationServiceMappingRoute =
+  MasterOperationServiceMappingRouteImport.update({
+    id: '/master/operation/service-mapping',
+    path: '/master/operation/service-mapping',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterOperationPinCodeRoute = MasterOperationPinCodeRouteImport.update({
+  id: '/master/operation/pin-code',
+  path: '/master/operation/pin-code',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterOperationFieldExecutiveRoute =
+  MasterOperationFieldExecutiveRouteImport.update({
+    id: '/master/operation/field-executive',
+    path: '/master/operation/field-executive',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterOperationExceptionRoute =
+  MasterOperationExceptionRouteImport.update({
+    id: '/master/operation/exception',
+    path: '/master/operation/exception',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterOperationCountryPincodesRoute =
+  MasterOperationCountryPincodesRouteImport.update({
+    id: '/master/operation/country-pincodes',
+    path: '/master/operation/country-pincodes',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterOperationAreaRoute = MasterOperationAreaRouteImport.update({
+  id: '/master/operation/area',
+  path: '/master/operation/area',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterOperationAirlineRoute = MasterOperationAirlineRouteImport.update({
+  id: '/master/operation/airline',
+  path: '/master/operation/airline',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MasterCustomerShipperRoute = MasterCustomerShipperRouteImport.update({
   id: '/master/customer/shipper',
   path: '/master/customer/shipper',
@@ -182,6 +235,13 @@ export interface FileRoutesByFullPath {
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
   '/master/customer/expense': typeof MasterCustomerExpenseRoute
   '/master/customer/shipper': typeof MasterCustomerShipperRoute
+  '/master/operation/airline': typeof MasterOperationAirlineRoute
+  '/master/operation/area': typeof MasterOperationAreaRoute
+  '/master/operation/country-pincodes': typeof MasterOperationCountryPincodesRoute
+  '/master/operation/exception': typeof MasterOperationExceptionRoute
+  '/master/operation/field-executive': typeof MasterOperationFieldExecutiveRoute
+  '/master/operation/pin-code': typeof MasterOperationPinCodeRoute
+  '/master/operation/service-mapping': typeof MasterOperationServiceMappingRoute
   '/master/sales/bank-master': typeof MasterSalesBankMasterRoute
   '/master/sales/charges-master': typeof MasterSalesChargesMasterRoute
   '/master/sales/content': typeof MasterSalesContentRoute
@@ -198,6 +258,7 @@ export interface FileRoutesByFullPath {
   '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
+  '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -210,6 +271,13 @@ export interface FileRoutesByTo {
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
   '/master/customer/expense': typeof MasterCustomerExpenseRoute
   '/master/customer/shipper': typeof MasterCustomerShipperRoute
+  '/master/operation/airline': typeof MasterOperationAirlineRoute
+  '/master/operation/area': typeof MasterOperationAreaRoute
+  '/master/operation/country-pincodes': typeof MasterOperationCountryPincodesRoute
+  '/master/operation/exception': typeof MasterOperationExceptionRoute
+  '/master/operation/field-executive': typeof MasterOperationFieldExecutiveRoute
+  '/master/operation/pin-code': typeof MasterOperationPinCodeRoute
+  '/master/operation/service-mapping': typeof MasterOperationServiceMappingRoute
   '/master/sales/bank-master': typeof MasterSalesBankMasterRoute
   '/master/sales/charges-master': typeof MasterSalesChargesMasterRoute
   '/master/sales/content': typeof MasterSalesContentRoute
@@ -226,6 +294,7 @@ export interface FileRoutesByTo {
   '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
+  '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -239,6 +308,13 @@ export interface FileRoutesById {
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
   '/master/customer/expense': typeof MasterCustomerExpenseRoute
   '/master/customer/shipper': typeof MasterCustomerShipperRoute
+  '/master/operation/airline': typeof MasterOperationAirlineRoute
+  '/master/operation/area': typeof MasterOperationAreaRoute
+  '/master/operation/country-pincodes': typeof MasterOperationCountryPincodesRoute
+  '/master/operation/exception': typeof MasterOperationExceptionRoute
+  '/master/operation/field-executive': typeof MasterOperationFieldExecutiveRoute
+  '/master/operation/pin-code': typeof MasterOperationPinCodeRoute
+  '/master/operation/service-mapping': typeof MasterOperationServiceMappingRoute
   '/master/sales/bank-master': typeof MasterSalesBankMasterRoute
   '/master/sales/charges-master': typeof MasterSalesChargesMasterRoute
   '/master/sales/content': typeof MasterSalesContentRoute
@@ -255,6 +331,7 @@ export interface FileRoutesById {
   '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
+  '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -269,6 +346,13 @@ export interface FileRouteTypes {
     | '/master/customer/customer-rate'
     | '/master/customer/expense'
     | '/master/customer/shipper'
+    | '/master/operation/airline'
+    | '/master/operation/area'
+    | '/master/operation/country-pincodes'
+    | '/master/operation/exception'
+    | '/master/operation/field-executive'
+    | '/master/operation/pin-code'
+    | '/master/operation/service-mapping'
     | '/master/sales/bank-master'
     | '/master/sales/charges-master'
     | '/master/sales/content'
@@ -285,6 +369,7 @@ export interface FileRouteTypes {
     | '/master/sales/state'
     | '/master/sales/zone'
     | '/master/vendor/vendor'
+    | '/master/vendor/vendor-contract'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -297,6 +382,13 @@ export interface FileRouteTypes {
     | '/master/customer/customer-rate'
     | '/master/customer/expense'
     | '/master/customer/shipper'
+    | '/master/operation/airline'
+    | '/master/operation/area'
+    | '/master/operation/country-pincodes'
+    | '/master/operation/exception'
+    | '/master/operation/field-executive'
+    | '/master/operation/pin-code'
+    | '/master/operation/service-mapping'
     | '/master/sales/bank-master'
     | '/master/sales/charges-master'
     | '/master/sales/content'
@@ -313,6 +405,7 @@ export interface FileRouteTypes {
     | '/master/sales/state'
     | '/master/sales/zone'
     | '/master/vendor/vendor'
+    | '/master/vendor/vendor-contract'
   id:
     | '__root__'
     | '/'
@@ -325,6 +418,13 @@ export interface FileRouteTypes {
     | '/master/customer/customer-rate'
     | '/master/customer/expense'
     | '/master/customer/shipper'
+    | '/master/operation/airline'
+    | '/master/operation/area'
+    | '/master/operation/country-pincodes'
+    | '/master/operation/exception'
+    | '/master/operation/field-executive'
+    | '/master/operation/pin-code'
+    | '/master/operation/service-mapping'
     | '/master/sales/bank-master'
     | '/master/sales/charges-master'
     | '/master/sales/content'
@@ -341,6 +441,7 @@ export interface FileRouteTypes {
     | '/master/sales/state'
     | '/master/sales/zone'
     | '/master/vendor/vendor'
+    | '/master/vendor/vendor-contract'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -354,6 +455,13 @@ export interface RootRouteChildren {
   MasterCustomerCustomerRateRoute: typeof MasterCustomerCustomerRateRoute
   MasterCustomerExpenseRoute: typeof MasterCustomerExpenseRoute
   MasterCustomerShipperRoute: typeof MasterCustomerShipperRoute
+  MasterOperationAirlineRoute: typeof MasterOperationAirlineRoute
+  MasterOperationAreaRoute: typeof MasterOperationAreaRoute
+  MasterOperationCountryPincodesRoute: typeof MasterOperationCountryPincodesRoute
+  MasterOperationExceptionRoute: typeof MasterOperationExceptionRoute
+  MasterOperationFieldExecutiveRoute: typeof MasterOperationFieldExecutiveRoute
+  MasterOperationPinCodeRoute: typeof MasterOperationPinCodeRoute
+  MasterOperationServiceMappingRoute: typeof MasterOperationServiceMappingRoute
   MasterSalesBankMasterRoute: typeof MasterSalesBankMasterRoute
   MasterSalesChargesMasterRoute: typeof MasterSalesChargesMasterRoute
   MasterSalesContentRoute: typeof MasterSalesContentRoute
@@ -370,6 +478,7 @@ export interface RootRouteChildren {
   MasterSalesStateRoute: typeof MasterSalesStateRoute
   MasterSalesZoneRoute: typeof MasterSalesZoneRoute
   MasterVendorVendorRoute: typeof MasterVendorVendorRoute
+  MasterVendorVendorContractRoute: typeof MasterVendorVendorContractRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -407,6 +516,13 @@ declare module '@tanstack/react-router' {
       path: '/master/$'
       fullPath: '/master/$'
       preLoaderRoute: typeof MasterSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/vendor/vendor-contract': {
+      id: '/master/vendor/vendor-contract'
+      path: '/master/vendor/vendor-contract'
+      fullPath: '/master/vendor/vendor-contract'
+      preLoaderRoute: typeof MasterVendorVendorContractRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/master/vendor/vendor': {
@@ -521,6 +637,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterSalesBankMasterRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/master/operation/service-mapping': {
+      id: '/master/operation/service-mapping'
+      path: '/master/operation/service-mapping'
+      fullPath: '/master/operation/service-mapping'
+      preLoaderRoute: typeof MasterOperationServiceMappingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/pin-code': {
+      id: '/master/operation/pin-code'
+      path: '/master/operation/pin-code'
+      fullPath: '/master/operation/pin-code'
+      preLoaderRoute: typeof MasterOperationPinCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/field-executive': {
+      id: '/master/operation/field-executive'
+      path: '/master/operation/field-executive'
+      fullPath: '/master/operation/field-executive'
+      preLoaderRoute: typeof MasterOperationFieldExecutiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/exception': {
+      id: '/master/operation/exception'
+      path: '/master/operation/exception'
+      fullPath: '/master/operation/exception'
+      preLoaderRoute: typeof MasterOperationExceptionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/country-pincodes': {
+      id: '/master/operation/country-pincodes'
+      path: '/master/operation/country-pincodes'
+      fullPath: '/master/operation/country-pincodes'
+      preLoaderRoute: typeof MasterOperationCountryPincodesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/area': {
+      id: '/master/operation/area'
+      path: '/master/operation/area'
+      fullPath: '/master/operation/area'
+      preLoaderRoute: typeof MasterOperationAreaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/airline': {
+      id: '/master/operation/airline'
+      path: '/master/operation/airline'
+      fullPath: '/master/operation/airline'
+      preLoaderRoute: typeof MasterOperationAirlineRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/master/customer/shipper': {
       id: '/master/customer/shipper'
       path: '/master/customer/shipper'
@@ -570,6 +735,13 @@ const rootRouteChildren: RootRouteChildren = {
   MasterCustomerCustomerRateRoute: MasterCustomerCustomerRateRoute,
   MasterCustomerExpenseRoute: MasterCustomerExpenseRoute,
   MasterCustomerShipperRoute: MasterCustomerShipperRoute,
+  MasterOperationAirlineRoute: MasterOperationAirlineRoute,
+  MasterOperationAreaRoute: MasterOperationAreaRoute,
+  MasterOperationCountryPincodesRoute: MasterOperationCountryPincodesRoute,
+  MasterOperationExceptionRoute: MasterOperationExceptionRoute,
+  MasterOperationFieldExecutiveRoute: MasterOperationFieldExecutiveRoute,
+  MasterOperationPinCodeRoute: MasterOperationPinCodeRoute,
+  MasterOperationServiceMappingRoute: MasterOperationServiceMappingRoute,
   MasterSalesBankMasterRoute: MasterSalesBankMasterRoute,
   MasterSalesChargesMasterRoute: MasterSalesChargesMasterRoute,
   MasterSalesContentRoute: MasterSalesContentRoute,
@@ -586,6 +758,7 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSalesStateRoute: MasterSalesStateRoute,
   MasterSalesZoneRoute: MasterSalesZoneRoute,
   MasterVendorVendorRoute: MasterVendorVendorRoute,
+  MasterVendorVendorContractRoute: MasterVendorVendorContractRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
