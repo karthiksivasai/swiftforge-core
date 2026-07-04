@@ -19,7 +19,10 @@ export type LookupKey =
   | "ledgerHead"
   | "area"
   | "fieldExecutive"
-  | "contactType";
+  | "contactType"
+  | "customer"
+  | "shipper"
+  | "exception";
 
 const STATES: LookupOption[] = [
   { code: "AN", name: "Andaman & Nicobar Islands" },
@@ -242,10 +245,16 @@ const FIELD_EXECS: LookupOption[] = [
   { code: "AKHIL", name: "AKHIL CW" },
   { code: "AKSHITH", name: "AKSHITH" },
   { code: "ANIL", name: "ANIL CW" },
+  { code: "BHAVANI", name: "BHAVANI" },
+  { code: "CHANDU", name: "CHANDU" },
+  { code: "DINESH", name: "DINESH" },
   { code: "KRISHNA", name: "KRISHNA" },
+  { code: "MAHESH", name: "MAHESH" },
+  { code: "NITHIN", name: "NITHIN" },
   { code: "PAVAN", name: "PAVAN CW" },
   { code: "RAJU", name: "RAJU" },
   { code: "SURESH", name: "SURESH CW" },
+  { code: "VARUN", name: "VANTEDDU ARUN" },
   { code: "VIJAY", name: "VIJAY" },
 ];
 
@@ -256,6 +265,33 @@ const CONTACT_TYPES: LookupOption[] = [
   { code: "OPS", name: "Operations" },
   { code: "SLS", name: "Sales" },
   { code: "SUP", name: "Support" },
+];
+
+const CUSTOMERS: LookupOption[] = [
+  { code: "C001", name: "AIHAN ENTERPRISES" },
+  { code: "C002", name: "GLOBAL TRADERS PVT LTD" },
+  { code: "C003", name: "HYDERABAD EXPORTS" },
+  { code: "C004", name: "METRO LOGISTICS" },
+  { code: "C005", name: "SUNRISE COURIER CLIENT" },
+];
+
+const SHIPPERS: LookupOption[] = [
+  { code: "S001", name: "ABC SHIPPING CO" },
+  { code: "S002", name: "DELTA FREIGHT" },
+  { code: "S003", name: "HYD PACKERS" },
+  { code: "S004", name: "OM LOGISTICS SHIPPER" },
+  { code: "S005", name: "PRIME DISPATCH" },
+];
+
+const EXCEPTIONS: LookupOption[] = [
+  { code: "CD", name: "ARRIVED AT DESTINATION" },
+  { code: "AF", name: "ARRIVED AT FACILITY" },
+  { code: "AT", name: "ARRIVED HUB" },
+  { code: "AC", name: "AWAITING CUSTOM CLEARANCE" },
+  { code: "OK", name: "Delivered" },
+  { code: "DD", name: "DEPARTED FROM FACILITY" },
+  { code: "CL", name: "CUSTOMS HELD" },
+  { code: "CA", name: "CUSTOMS AUTHORIZED" },
 ];
 
 export const MASTER_LOOKUPS: Record<LookupKey, { title: string; options: LookupOption[]; hintLabel?: string }> = {
@@ -274,4 +310,7 @@ export const MASTER_LOOKUPS: Record<LookupKey, { title: string; options: LookupO
   area: { title: "Select Area", options: AREAS },
   fieldExecutive: { title: "Select Field Executive", options: FIELD_EXECS },
   contactType: { title: "Select Contact Type", options: CONTACT_TYPES },
+  customer: { title: "Select Customer", options: CUSTOMERS },
+  shipper: { title: "Select Shipper", options: SHIPPERS },
+  exception: { title: "Select Exception", options: EXCEPTIONS },
 };

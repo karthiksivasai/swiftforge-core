@@ -4,9 +4,11 @@ import {
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Link } from "@tanstack/react-router";
 import {
   Breadcrumb,
@@ -41,30 +43,106 @@ export function FieldWrapper({
   );
 }
 
+function tooltipStyle(side: "top" | "left" | "right" | "bottom", rect: DOMRect) {
+  switch (side) {
+    case "left":
+      return { top: rect.top + rect.height / 2, left: rect.left - 8, transform: "translate(-100%, -50%)" };
+    case "right":
+      return { top: rect.top + rect.height / 2, left: rect.right + 8, transform: "translateY(-50%)" };
+    case "bottom":
+      return { top: rect.bottom + 8, left: rect.left + rect.width / 2, transform: "translateX(-50%)" };
+    default:
+      return { top: rect.top - 8, left: rect.left + rect.width / 2, transform: "translate(-50%, -100%)" };
+  }
+}
+
+export function IconTooltipBubble({
+  anchorRef,
+  label,
+  visible,
+  side = "top",
+}: {
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  label: string;
+  visible: boolean;
+  side?: "top" | "left" | "right" | "bottom";
+}) {
+  const [, setTick] = useState(0);
+
+  useLayoutEffect(() => {
+    if (!visible) return;
+    const update = () => setTick((n) => n + 1);
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [visible, label]);
+
+  if (!visible || typeof document === "undefined") return null;
+
+  const el = anchorRef.current;
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+
+  return createPortal(
+    <div
+      role="tooltip"
+      className="pointer-events-none fixed z-[9999] max-w-xs whitespace-nowrap rounded-md bg-foreground px-2.5 py-1 text-xs font-medium text-background shadow-md"
+      style={tooltipStyle(side, rect)}
+    >
+      {label}
+    </div>,
+    document.body,
+  );
+}
+
 export function IconButton({
   label,
   onClick,
   children,
+  variant = "outline",
+  className,
+  size = "toolbar",
+  tooltipSide = "top",
 }: {
   label: string;
   onClick: () => void;
   children: React.ReactNode;
+  variant?: "outline" | "ghost";
+  className?: string;
+  size?: "toolbar" | "row";
+  tooltipSide?: "top" | "left" | "right" | "bottom";
 }) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [hover, setHover] = useState(false);
+
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          size="icon"
-          variant="outline"
-          className="h-9 w-9 bg-background"
-          onClick={onClick}
-          aria-label={label}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <>
+      <Button
+        ref={btnRef}
+        size="icon"
+        variant={variant}
+        className={cn(
+          size === "toolbar" && "h-9 w-9 bg-background",
+          size === "row" && "h-7 w-7",
+          className,
+        )}
+        onClick={onClick}
+        aria-label={label}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onPointerEnter={() => setHover(true)}
+        onPointerLeave={() => setHover(false)}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
+      >
+        {children}
+      </Button>
+      <IconTooltipBubble anchorRef={btnRef} label={label} visible={hover} side={tooltipSide} />
+    </>
   );
 }
 

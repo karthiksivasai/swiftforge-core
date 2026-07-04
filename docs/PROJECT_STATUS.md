@@ -30,6 +30,14 @@ Each of these has a real page, table, add/edit dialog with validation, CSV impor
 - **Airline** — `src/routes/master.operation.airline.tsx` (2026-07-04)
 - **Country Pincodes** — `src/routes/master.operation.country-pincodes.tsx` (2026-07-04)
 
+### Transaction
+- **Pick Up** — `src/routes/transaction.pickup.tsx` (2026-07-04)
+- **Pickup Inscan** — `src/routes/transaction.pickup-inscan.tsx` (2026-07-04)
+- **AWB Entry List** — `src/routes/transaction.awb-entry.tsx` (2026-07-04)
+- **Manifest Scan** — `src/routes/transaction.manifest-scan.tsx` (2026-07-04)
+- **Manifest In Scan** — `src/routes/transaction.manifest-in-scan.tsx` (2026-07-04)
+- **Manifest View** — `src/routes/transaction.manifest-view.tsx` (2026-07-04)
+
 ### Shell / global
 - Sidebar navigation (`app-sidebar.tsx` + `lib/navigation.ts`)
 - App header (`app-header.tsx`) — branch selector, theme toggle
@@ -80,12 +88,6 @@ _None — operation group complete._
 
 ## Pending — Transaction modules (`/transaction/*`)
 
-- Pickup
-- Pickup Inscan
-- AWB Entry
-- Manifest Scan
-- Manifest In Scan
-- Manifest View
 - DRS Scan
 - Un-Delivery Scan
 - Bagging

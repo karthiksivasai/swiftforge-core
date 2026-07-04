@@ -17,6 +17,7 @@ import { AppHeader } from "@/components/app-header";
 import { TenantProvider } from "@/lib/tenant";
 import { ThemeProvider } from "@/lib/theme";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 function NotFoundComponent() {
   return (
@@ -111,11 +112,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <head>
+    <html lang="en" suppressHydrationWarning>
+      <head suppressHydrationWarning>
         <HeadContent />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         {children}
         <Scripts />
       </body>
@@ -130,17 +131,19 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <TenantProvider>
-          <SidebarProvider defaultOpen={false}>
-            <AppSidebar />
-            <SidebarInset>
-              <AppHeader />
-              <main className="flex-1">
-                {/* Required: nested routes render here. */}
-                <Outlet />
-              </main>
-              <Toaster />
-            </SidebarInset>
-          </SidebarProvider>
+          <TooltipProvider delayDuration={0}>
+            <SidebarProvider defaultOpen={false}>
+              <AppSidebar />
+              <SidebarInset className="min-w-0 overflow-x-hidden">
+                <AppHeader />
+                <main className="min-w-0 flex-1 overflow-x-hidden">
+                  {/* Required: nested routes render here. */}
+                  <Outlet />
+                </main>
+                <Toaster />
+              </SidebarInset>
+            </SidebarProvider>
+          </TooltipProvider>
         </TenantProvider>
       </ThemeProvider>
     </QueryClientProvider>

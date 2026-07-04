@@ -9,8 +9,15 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as DemoRouteImport } from './routes/demo'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as TransactionPickupInscanRouteImport } from './routes/transaction.pickup-inscan'
+import { Route as TransactionPickupRouteImport } from './routes/transaction.pickup'
+import { Route as TransactionManifestViewRouteImport } from './routes/transaction.manifest-view'
+import { Route as TransactionManifestScanRouteImport } from './routes/transaction.manifest-scan'
+import { Route as TransactionManifestInScanRouteImport } from './routes/transaction.manifest-in-scan'
+import { Route as TransactionAwbEntryRouteImport } from './routes/transaction.awb-entry'
 import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
@@ -44,6 +51,11 @@ import { Route as MasterCustomerCustomerRateRouteImport } from './routes/master.
 import { Route as MasterCustomerCustomerRouteImport } from './routes/master.customer.customer'
 import { Route as MasterCustomerConsigneeRouteImport } from './routes/master.customer.consignee'
 
+const DemoRoute = DemoRouteImport.update({
+  id: '/demo',
+  path: '/demo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -52,6 +64,37 @@ const DashboardRoute = DashboardRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionPickupInscanRoute = TransactionPickupInscanRouteImport.update({
+  id: '/transaction/pickup-inscan',
+  path: '/transaction/pickup-inscan',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionPickupRoute = TransactionPickupRouteImport.update({
+  id: '/transaction/pickup',
+  path: '/transaction/pickup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionManifestViewRoute = TransactionManifestViewRouteImport.update({
+  id: '/transaction/manifest-view',
+  path: '/transaction/manifest-view',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionManifestScanRoute = TransactionManifestScanRouteImport.update({
+  id: '/transaction/manifest-scan',
+  path: '/transaction/manifest-scan',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionManifestInScanRoute =
+  TransactionManifestInScanRouteImport.update({
+    id: '/transaction/manifest-in-scan',
+    path: '/transaction/manifest-in-scan',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionAwbEntryRoute = TransactionAwbEntryRouteImport.update({
+  id: '/transaction/awb-entry',
+  path: '/transaction/awb-entry',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TransactionSplatRoute = TransactionSplatRouteImport.update({
@@ -227,9 +270,16 @@ const MasterCustomerConsigneeRoute = MasterCustomerConsigneeRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/demo': typeof DemoRoute
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/transaction/awb-entry': typeof TransactionAwbEntryRoute
+  '/transaction/manifest-in-scan': typeof TransactionManifestInScanRoute
+  '/transaction/manifest-scan': typeof TransactionManifestScanRoute
+  '/transaction/manifest-view': typeof TransactionManifestViewRoute
+  '/transaction/pickup': typeof TransactionPickupRoute
+  '/transaction/pickup-inscan': typeof TransactionPickupInscanRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -263,9 +313,16 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/demo': typeof DemoRoute
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/transaction/awb-entry': typeof TransactionAwbEntryRoute
+  '/transaction/manifest-in-scan': typeof TransactionManifestInScanRoute
+  '/transaction/manifest-scan': typeof TransactionManifestScanRoute
+  '/transaction/manifest-view': typeof TransactionManifestViewRoute
+  '/transaction/pickup': typeof TransactionPickupRoute
+  '/transaction/pickup-inscan': typeof TransactionPickupInscanRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -300,9 +357,16 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/demo': typeof DemoRoute
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
+  '/transaction/awb-entry': typeof TransactionAwbEntryRoute
+  '/transaction/manifest-in-scan': typeof TransactionManifestInScanRoute
+  '/transaction/manifest-scan': typeof TransactionManifestScanRoute
+  '/transaction/manifest-view': typeof TransactionManifestViewRoute
+  '/transaction/pickup': typeof TransactionPickupRoute
+  '/transaction/pickup-inscan': typeof TransactionPickupInscanRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -338,9 +402,16 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/demo'
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/transaction/awb-entry'
+    | '/transaction/manifest-in-scan'
+    | '/transaction/manifest-scan'
+    | '/transaction/manifest-view'
+    | '/transaction/pickup'
+    | '/transaction/pickup-inscan'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -374,9 +445,16 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/demo'
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/transaction/awb-entry'
+    | '/transaction/manifest-in-scan'
+    | '/transaction/manifest-scan'
+    | '/transaction/manifest-view'
+    | '/transaction/pickup'
+    | '/transaction/pickup-inscan'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -410,9 +488,16 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/dashboard'
+    | '/demo'
     | '/master/$'
     | '/reports/$'
     | '/transaction/$'
+    | '/transaction/awb-entry'
+    | '/transaction/manifest-in-scan'
+    | '/transaction/manifest-scan'
+    | '/transaction/manifest-view'
+    | '/transaction/pickup'
+    | '/transaction/pickup-inscan'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -447,9 +532,16 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  DemoRoute: typeof DemoRoute
   MasterSplatRoute: typeof MasterSplatRoute
   ReportsSplatRoute: typeof ReportsSplatRoute
   TransactionSplatRoute: typeof TransactionSplatRoute
+  TransactionAwbEntryRoute: typeof TransactionAwbEntryRoute
+  TransactionManifestInScanRoute: typeof TransactionManifestInScanRoute
+  TransactionManifestScanRoute: typeof TransactionManifestScanRoute
+  TransactionManifestViewRoute: typeof TransactionManifestViewRoute
+  TransactionPickupRoute: typeof TransactionPickupRoute
+  TransactionPickupInscanRoute: typeof TransactionPickupInscanRoute
   MasterCustomerConsigneeRoute: typeof MasterCustomerConsigneeRoute
   MasterCustomerCustomerRoute: typeof MasterCustomerCustomerRoute
   MasterCustomerCustomerRateRoute: typeof MasterCustomerCustomerRateRoute
@@ -483,6 +575,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/demo': {
+      id: '/demo'
+      path: '/demo'
+      fullPath: '/demo'
+      preLoaderRoute: typeof DemoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -495,6 +594,48 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/pickup-inscan': {
+      id: '/transaction/pickup-inscan'
+      path: '/transaction/pickup-inscan'
+      fullPath: '/transaction/pickup-inscan'
+      preLoaderRoute: typeof TransactionPickupInscanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/pickup': {
+      id: '/transaction/pickup'
+      path: '/transaction/pickup'
+      fullPath: '/transaction/pickup'
+      preLoaderRoute: typeof TransactionPickupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/manifest-view': {
+      id: '/transaction/manifest-view'
+      path: '/transaction/manifest-view'
+      fullPath: '/transaction/manifest-view'
+      preLoaderRoute: typeof TransactionManifestViewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/manifest-scan': {
+      id: '/transaction/manifest-scan'
+      path: '/transaction/manifest-scan'
+      fullPath: '/transaction/manifest-scan'
+      preLoaderRoute: typeof TransactionManifestScanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/manifest-in-scan': {
+      id: '/transaction/manifest-in-scan'
+      path: '/transaction/manifest-in-scan'
+      fullPath: '/transaction/manifest-in-scan'
+      preLoaderRoute: typeof TransactionManifestInScanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/awb-entry': {
+      id: '/transaction/awb-entry'
+      path: '/transaction/awb-entry'
+      fullPath: '/transaction/awb-entry'
+      preLoaderRoute: typeof TransactionAwbEntryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/transaction/$': {
@@ -727,9 +868,16 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  DemoRoute: DemoRoute,
   MasterSplatRoute: MasterSplatRoute,
   ReportsSplatRoute: ReportsSplatRoute,
   TransactionSplatRoute: TransactionSplatRoute,
+  TransactionAwbEntryRoute: TransactionAwbEntryRoute,
+  TransactionManifestInScanRoute: TransactionManifestInScanRoute,
+  TransactionManifestScanRoute: TransactionManifestScanRoute,
+  TransactionManifestViewRoute: TransactionManifestViewRoute,
+  TransactionPickupRoute: TransactionPickupRoute,
+  TransactionPickupInscanRoute: TransactionPickupInscanRoute,
   MasterCustomerConsigneeRoute: MasterCustomerConsigneeRoute,
   MasterCustomerCustomerRoute: MasterCustomerCustomerRoute,
   MasterCustomerCustomerRateRoute: MasterCustomerCustomerRateRoute,
