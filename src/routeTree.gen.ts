@@ -14,6 +14,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
+import { Route as MasterVendorVendorRouteImport } from './routes/master.vendor.vendor'
 import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
 import { Route as MasterSalesStateRouteImport } from './routes/master.sales.state'
 import { Route as MasterSalesServiceCenterRouteImport } from './routes/master.sales.service-center'
@@ -58,6 +59,11 @@ const ReportsSplatRoute = ReportsSplatRouteImport.update({
 const MasterSplatRoute = MasterSplatRouteImport.update({
   id: '/master/$',
   path: '/master/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterVendorVendorRoute = MasterVendorVendorRouteImport.update({
+  id: '/master/vendor/vendor',
+  path: '/master/vendor/vendor',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MasterSalesZoneRoute = MasterSalesZoneRouteImport.update({
@@ -191,6 +197,7 @@ export interface FileRoutesByFullPath {
   '/master/sales/service-center': typeof MasterSalesServiceCenterRoute
   '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
+  '/master/vendor/vendor': typeof MasterVendorVendorRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -218,6 +225,7 @@ export interface FileRoutesByTo {
   '/master/sales/service-center': typeof MasterSalesServiceCenterRoute
   '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
+  '/master/vendor/vendor': typeof MasterVendorVendorRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -246,6 +254,7 @@ export interface FileRoutesById {
   '/master/sales/service-center': typeof MasterSalesServiceCenterRoute
   '/master/sales/state': typeof MasterSalesStateRoute
   '/master/sales/zone': typeof MasterSalesZoneRoute
+  '/master/vendor/vendor': typeof MasterVendorVendorRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -275,6 +284,7 @@ export interface FileRouteTypes {
     | '/master/sales/service-center'
     | '/master/sales/state'
     | '/master/sales/zone'
+    | '/master/vendor/vendor'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -302,6 +312,7 @@ export interface FileRouteTypes {
     | '/master/sales/service-center'
     | '/master/sales/state'
     | '/master/sales/zone'
+    | '/master/vendor/vendor'
   id:
     | '__root__'
     | '/'
@@ -329,6 +340,7 @@ export interface FileRouteTypes {
     | '/master/sales/service-center'
     | '/master/sales/state'
     | '/master/sales/zone'
+    | '/master/vendor/vendor'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -357,6 +369,7 @@ export interface RootRouteChildren {
   MasterSalesServiceCenterRoute: typeof MasterSalesServiceCenterRoute
   MasterSalesStateRoute: typeof MasterSalesStateRoute
   MasterSalesZoneRoute: typeof MasterSalesZoneRoute
+  MasterVendorVendorRoute: typeof MasterVendorVendorRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -394,6 +407,13 @@ declare module '@tanstack/react-router' {
       path: '/master/$'
       fullPath: '/master/$'
       preLoaderRoute: typeof MasterSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/vendor/vendor': {
+      id: '/master/vendor/vendor'
+      path: '/master/vendor/vendor'
+      fullPath: '/master/vendor/vendor'
+      preLoaderRoute: typeof MasterVendorVendorRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/master/sales/zone': {
@@ -565,7 +585,18 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSalesServiceCenterRoute: MasterSalesServiceCenterRoute,
   MasterSalesStateRoute: MasterSalesStateRoute,
   MasterSalesZoneRoute: MasterSalesZoneRoute,
+  MasterVendorVendorRoute: MasterVendorVendorRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

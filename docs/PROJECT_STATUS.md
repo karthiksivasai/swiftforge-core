@@ -17,6 +17,9 @@ Each of these has a real page, table, add/edit dialog with validation, CSV impor
 - **Customer Rate** — `src/routes/master.customer.customer-rate.tsx`
 - **Expense** — `src/routes/master.customer.expense.tsx`
 
+### Master → Vendor group
+- **Vendor** — `src/routes/master.vendor.vendor.tsx` (2026-07-04)
+
 ### Shell / global
 - Sidebar navigation (`app-sidebar.tsx` + `lib/navigation.ts`)
 - App header (`app-header.tsx`) — branch selector, theme toggle
@@ -58,7 +61,6 @@ Route files exist as splat placeholders. Each needs a real implementation follow
 > Note: route files already exist for these under `src/routes/master.sales.*.tsx`. Verify each before starting; some may still be scaffolds.
 
 ### Vendor group (`/master/vendor/*`)
-- Vendor
 - Vendor Contract
 
 ### Operation group (`/master/operation/*`)
