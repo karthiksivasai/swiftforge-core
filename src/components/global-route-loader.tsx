@@ -16,10 +16,9 @@ export function RoutePendingLoader() {
 
 /** Full-screen overlay for refresh and in-app navigation. */
 export function GlobalRouteLoader() {
-  const router = useRouter();
-  const isLoading = useStore(router.stores.isLoading, (value) => value);
-  const hasPending = useStore(router.stores.hasPending, (value) => value);
-  const routeBusy = isLoading || hasPending;
+  const routeBusy = useRouterState({
+    select: (s) => s.isLoading || s.status === "pending",
+  });
 
   const [visible, setVisible] = useState(true);
   const shownAt = useRef(Date.now());
