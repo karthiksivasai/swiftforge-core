@@ -24,6 +24,8 @@ import { Route as TransactionDrsScanRouteImport } from './routes/transaction.drs
 import { Route as TransactionBaggingRouteImport } from './routes/transaction.bagging'
 import { Route as TransactionAwbEntryRouteImport } from './routes/transaction.awb-entry'
 import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
+import { Route as ReportsStatementsRouteImport } from './routes/reports.statements'
+import { Route as ReportsOperationsRouteImport } from './routes/reports.operations'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
 import { Route as TransactionTrackingUpdateEntryRouteImport } from './routes/transaction.tracking.update-entry'
@@ -32,8 +34,15 @@ import { Route as TransactionTrackingKycTrackingRouteImport } from './routes/tra
 import { Route as TransactionTrackingForwardingUpdationRouteImport } from './routes/transaction.tracking.forwarding-updation'
 import { Route as TransactionTrackingAwbQueryRouteImport } from './routes/transaction.tracking.awb-query'
 import { Route as TransactionReceiptReceiptEntryRouteImport } from './routes/transaction.receipt.receipt-entry'
+import { Route as TransactionReceiptExpenseEntryRouteImport } from './routes/transaction.receipt.expense-entry'
 import { Route as TransactionReceiptExpenseAuthorizeRouteImport } from './routes/transaction.receipt.expense-authorize'
+import { Route as TransactionReceiptDebitNoteRouteImport } from './routes/transaction.receipt.debit-note'
+import { Route as TransactionReceiptCustomerPaymentRouteImport } from './routes/transaction.receipt.customer-payment'
+import { Route as TransactionReceiptCreditNoteRouteImport } from './routes/transaction.receipt.credit-note'
+import { Route as TransactionRateCompareVendorRateCompareRouteImport } from './routes/transaction.rate-compare.vendor-rate-compare'
+import { Route as TransactionRateCompareCustomerRateCompareRouteImport } from './routes/transaction.rate-compare.customer-rate-compare'
 import { Route as TransactionOutScanObcEntryRouteImport } from './routes/transaction.out-scan.obc-entry'
+import { Route as TransactionBulkImportPodToExcelRouteImport } from './routes/transaction.bulk-import.pod-to-excel'
 import { Route as MasterVendorVendorContractRouteImport } from './routes/master.vendor.vendor-contract'
 import { Route as MasterVendorVendorRouteImport } from './routes/master.vendor.vendor'
 import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
@@ -142,6 +151,16 @@ const TransactionSplatRoute = TransactionSplatRouteImport.update({
   path: '/transaction/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReportsStatementsRoute = ReportsStatementsRouteImport.update({
+  id: '/reports/statements',
+  path: '/reports/statements',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsOperationsRoute = ReportsOperationsRouteImport.update({
+  id: '/reports/operations',
+  path: '/reports/operations',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReportsSplatRoute = ReportsSplatRouteImport.update({
   id: '/reports/$',
   path: '/reports/$',
@@ -188,16 +207,58 @@ const TransactionReceiptReceiptEntryRoute =
     path: '/transaction/receipt/receipt-entry',
     getParentRoute: () => rootRouteImport,
   } as any)
+const TransactionReceiptExpenseEntryRoute =
+  TransactionReceiptExpenseEntryRouteImport.update({
+    id: '/transaction/receipt/expense-entry',
+    path: '/transaction/receipt/expense-entry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const TransactionReceiptExpenseAuthorizeRoute =
   TransactionReceiptExpenseAuthorizeRouteImport.update({
     id: '/transaction/receipt/expense-authorize',
     path: '/transaction/receipt/expense-authorize',
     getParentRoute: () => rootRouteImport,
   } as any)
+const TransactionReceiptDebitNoteRoute =
+  TransactionReceiptDebitNoteRouteImport.update({
+    id: '/transaction/receipt/debit-note',
+    path: '/transaction/receipt/debit-note',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionReceiptCustomerPaymentRoute =
+  TransactionReceiptCustomerPaymentRouteImport.update({
+    id: '/transaction/receipt/customer-payment',
+    path: '/transaction/receipt/customer-payment',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionReceiptCreditNoteRoute =
+  TransactionReceiptCreditNoteRouteImport.update({
+    id: '/transaction/receipt/credit-note',
+    path: '/transaction/receipt/credit-note',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionRateCompareVendorRateCompareRoute =
+  TransactionRateCompareVendorRateCompareRouteImport.update({
+    id: '/transaction/rate-compare/vendor-rate-compare',
+    path: '/transaction/rate-compare/vendor-rate-compare',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionRateCompareCustomerRateCompareRoute =
+  TransactionRateCompareCustomerRateCompareRouteImport.update({
+    id: '/transaction/rate-compare/customer-rate-compare',
+    path: '/transaction/rate-compare/customer-rate-compare',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const TransactionOutScanObcEntryRoute =
   TransactionOutScanObcEntryRouteImport.update({
     id: '/transaction/out-scan/obc-entry',
     path: '/transaction/out-scan/obc-entry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionBulkImportPodToExcelRoute =
+  TransactionBulkImportPodToExcelRouteImport.update({
+    id: '/transaction/bulk-import/pod-to-excel',
+    path: '/transaction/bulk-import/pod-to-excel',
     getParentRoute: () => rootRouteImport,
   } as any)
 const MasterVendorVendorContractRoute =
@@ -361,6 +422,8 @@ export interface FileRoutesByFullPath {
   '/demo': typeof DemoRoute
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
+  '/reports/operations': typeof ReportsOperationsRoute
+  '/reports/statements': typeof ReportsStatementsRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/transaction/awb-entry': typeof TransactionAwbEntryRoute
   '/transaction/bagging': typeof TransactionBaggingRoute
@@ -402,8 +465,15 @@ export interface FileRoutesByFullPath {
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
   '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
+  '/transaction/bulk-import/pod-to-excel': typeof TransactionBulkImportPodToExcelRoute
   '/transaction/out-scan/obc-entry': typeof TransactionOutScanObcEntryRoute
+  '/transaction/rate-compare/customer-rate-compare': typeof TransactionRateCompareCustomerRateCompareRoute
+  '/transaction/rate-compare/vendor-rate-compare': typeof TransactionRateCompareVendorRateCompareRoute
+  '/transaction/receipt/credit-note': typeof TransactionReceiptCreditNoteRoute
+  '/transaction/receipt/customer-payment': typeof TransactionReceiptCustomerPaymentRoute
+  '/transaction/receipt/debit-note': typeof TransactionReceiptDebitNoteRoute
   '/transaction/receipt/expense-authorize': typeof TransactionReceiptExpenseAuthorizeRoute
+  '/transaction/receipt/expense-entry': typeof TransactionReceiptExpenseEntryRoute
   '/transaction/receipt/receipt-entry': typeof TransactionReceiptReceiptEntryRoute
   '/transaction/tracking/awb-query': typeof TransactionTrackingAwbQueryRoute
   '/transaction/tracking/forwarding-updation': typeof TransactionTrackingForwardingUpdationRoute
@@ -417,6 +487,8 @@ export interface FileRoutesByTo {
   '/demo': typeof DemoRoute
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
+  '/reports/operations': typeof ReportsOperationsRoute
+  '/reports/statements': typeof ReportsStatementsRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/transaction/awb-entry': typeof TransactionAwbEntryRoute
   '/transaction/bagging': typeof TransactionBaggingRoute
@@ -458,8 +530,15 @@ export interface FileRoutesByTo {
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
   '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
+  '/transaction/bulk-import/pod-to-excel': typeof TransactionBulkImportPodToExcelRoute
   '/transaction/out-scan/obc-entry': typeof TransactionOutScanObcEntryRoute
+  '/transaction/rate-compare/customer-rate-compare': typeof TransactionRateCompareCustomerRateCompareRoute
+  '/transaction/rate-compare/vendor-rate-compare': typeof TransactionRateCompareVendorRateCompareRoute
+  '/transaction/receipt/credit-note': typeof TransactionReceiptCreditNoteRoute
+  '/transaction/receipt/customer-payment': typeof TransactionReceiptCustomerPaymentRoute
+  '/transaction/receipt/debit-note': typeof TransactionReceiptDebitNoteRoute
   '/transaction/receipt/expense-authorize': typeof TransactionReceiptExpenseAuthorizeRoute
+  '/transaction/receipt/expense-entry': typeof TransactionReceiptExpenseEntryRoute
   '/transaction/receipt/receipt-entry': typeof TransactionReceiptReceiptEntryRoute
   '/transaction/tracking/awb-query': typeof TransactionTrackingAwbQueryRoute
   '/transaction/tracking/forwarding-updation': typeof TransactionTrackingForwardingUpdationRoute
@@ -474,6 +553,8 @@ export interface FileRoutesById {
   '/demo': typeof DemoRoute
   '/master/$': typeof MasterSplatRoute
   '/reports/$': typeof ReportsSplatRoute
+  '/reports/operations': typeof ReportsOperationsRoute
+  '/reports/statements': typeof ReportsStatementsRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/transaction/awb-entry': typeof TransactionAwbEntryRoute
   '/transaction/bagging': typeof TransactionBaggingRoute
@@ -515,8 +596,15 @@ export interface FileRoutesById {
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
   '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
+  '/transaction/bulk-import/pod-to-excel': typeof TransactionBulkImportPodToExcelRoute
   '/transaction/out-scan/obc-entry': typeof TransactionOutScanObcEntryRoute
+  '/transaction/rate-compare/customer-rate-compare': typeof TransactionRateCompareCustomerRateCompareRoute
+  '/transaction/rate-compare/vendor-rate-compare': typeof TransactionRateCompareVendorRateCompareRoute
+  '/transaction/receipt/credit-note': typeof TransactionReceiptCreditNoteRoute
+  '/transaction/receipt/customer-payment': typeof TransactionReceiptCustomerPaymentRoute
+  '/transaction/receipt/debit-note': typeof TransactionReceiptDebitNoteRoute
   '/transaction/receipt/expense-authorize': typeof TransactionReceiptExpenseAuthorizeRoute
+  '/transaction/receipt/expense-entry': typeof TransactionReceiptExpenseEntryRoute
   '/transaction/receipt/receipt-entry': typeof TransactionReceiptReceiptEntryRoute
   '/transaction/tracking/awb-query': typeof TransactionTrackingAwbQueryRoute
   '/transaction/tracking/forwarding-updation': typeof TransactionTrackingForwardingUpdationRoute
@@ -532,6 +620,8 @@ export interface FileRouteTypes {
     | '/demo'
     | '/master/$'
     | '/reports/$'
+    | '/reports/operations'
+    | '/reports/statements'
     | '/transaction/$'
     | '/transaction/awb-entry'
     | '/transaction/bagging'
@@ -573,8 +663,15 @@ export interface FileRouteTypes {
     | '/master/sales/zone'
     | '/master/vendor/vendor'
     | '/master/vendor/vendor-contract'
+    | '/transaction/bulk-import/pod-to-excel'
     | '/transaction/out-scan/obc-entry'
+    | '/transaction/rate-compare/customer-rate-compare'
+    | '/transaction/rate-compare/vendor-rate-compare'
+    | '/transaction/receipt/credit-note'
+    | '/transaction/receipt/customer-payment'
+    | '/transaction/receipt/debit-note'
     | '/transaction/receipt/expense-authorize'
+    | '/transaction/receipt/expense-entry'
     | '/transaction/receipt/receipt-entry'
     | '/transaction/tracking/awb-query'
     | '/transaction/tracking/forwarding-updation'
@@ -588,6 +685,8 @@ export interface FileRouteTypes {
     | '/demo'
     | '/master/$'
     | '/reports/$'
+    | '/reports/operations'
+    | '/reports/statements'
     | '/transaction/$'
     | '/transaction/awb-entry'
     | '/transaction/bagging'
@@ -629,8 +728,15 @@ export interface FileRouteTypes {
     | '/master/sales/zone'
     | '/master/vendor/vendor'
     | '/master/vendor/vendor-contract'
+    | '/transaction/bulk-import/pod-to-excel'
     | '/transaction/out-scan/obc-entry'
+    | '/transaction/rate-compare/customer-rate-compare'
+    | '/transaction/rate-compare/vendor-rate-compare'
+    | '/transaction/receipt/credit-note'
+    | '/transaction/receipt/customer-payment'
+    | '/transaction/receipt/debit-note'
     | '/transaction/receipt/expense-authorize'
+    | '/transaction/receipt/expense-entry'
     | '/transaction/receipt/receipt-entry'
     | '/transaction/tracking/awb-query'
     | '/transaction/tracking/forwarding-updation'
@@ -644,6 +750,8 @@ export interface FileRouteTypes {
     | '/demo'
     | '/master/$'
     | '/reports/$'
+    | '/reports/operations'
+    | '/reports/statements'
     | '/transaction/$'
     | '/transaction/awb-entry'
     | '/transaction/bagging'
@@ -685,8 +793,15 @@ export interface FileRouteTypes {
     | '/master/sales/zone'
     | '/master/vendor/vendor'
     | '/master/vendor/vendor-contract'
+    | '/transaction/bulk-import/pod-to-excel'
     | '/transaction/out-scan/obc-entry'
+    | '/transaction/rate-compare/customer-rate-compare'
+    | '/transaction/rate-compare/vendor-rate-compare'
+    | '/transaction/receipt/credit-note'
+    | '/transaction/receipt/customer-payment'
+    | '/transaction/receipt/debit-note'
     | '/transaction/receipt/expense-authorize'
+    | '/transaction/receipt/expense-entry'
     | '/transaction/receipt/receipt-entry'
     | '/transaction/tracking/awb-query'
     | '/transaction/tracking/forwarding-updation'
@@ -701,6 +816,8 @@ export interface RootRouteChildren {
   DemoRoute: typeof DemoRoute
   MasterSplatRoute: typeof MasterSplatRoute
   ReportsSplatRoute: typeof ReportsSplatRoute
+  ReportsOperationsRoute: typeof ReportsOperationsRoute
+  ReportsStatementsRoute: typeof ReportsStatementsRoute
   TransactionSplatRoute: typeof TransactionSplatRoute
   TransactionAwbEntryRoute: typeof TransactionAwbEntryRoute
   TransactionBaggingRoute: typeof TransactionBaggingRoute
@@ -742,8 +859,15 @@ export interface RootRouteChildren {
   MasterSalesZoneRoute: typeof MasterSalesZoneRoute
   MasterVendorVendorRoute: typeof MasterVendorVendorRoute
   MasterVendorVendorContractRoute: typeof MasterVendorVendorContractRoute
+  TransactionBulkImportPodToExcelRoute: typeof TransactionBulkImportPodToExcelRoute
   TransactionOutScanObcEntryRoute: typeof TransactionOutScanObcEntryRoute
+  TransactionRateCompareCustomerRateCompareRoute: typeof TransactionRateCompareCustomerRateCompareRoute
+  TransactionRateCompareVendorRateCompareRoute: typeof TransactionRateCompareVendorRateCompareRoute
+  TransactionReceiptCreditNoteRoute: typeof TransactionReceiptCreditNoteRoute
+  TransactionReceiptCustomerPaymentRoute: typeof TransactionReceiptCustomerPaymentRoute
+  TransactionReceiptDebitNoteRoute: typeof TransactionReceiptDebitNoteRoute
   TransactionReceiptExpenseAuthorizeRoute: typeof TransactionReceiptExpenseAuthorizeRoute
+  TransactionReceiptExpenseEntryRoute: typeof TransactionReceiptExpenseEntryRoute
   TransactionReceiptReceiptEntryRoute: typeof TransactionReceiptReceiptEntryRoute
   TransactionTrackingAwbQueryRoute: typeof TransactionTrackingAwbQueryRoute
   TransactionTrackingForwardingUpdationRoute: typeof TransactionTrackingForwardingUpdationRoute
@@ -859,6 +983,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TransactionSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reports/statements': {
+      id: '/reports/statements'
+      path: '/reports/statements'
+      fullPath: '/reports/statements'
+      preLoaderRoute: typeof ReportsStatementsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports/operations': {
+      id: '/reports/operations'
+      path: '/reports/operations'
+      fullPath: '/reports/operations'
+      preLoaderRoute: typeof ReportsOperationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reports/$': {
       id: '/reports/$'
       path: '/reports/$'
@@ -915,6 +1053,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TransactionReceiptReceiptEntryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/transaction/receipt/expense-entry': {
+      id: '/transaction/receipt/expense-entry'
+      path: '/transaction/receipt/expense-entry'
+      fullPath: '/transaction/receipt/expense-entry'
+      preLoaderRoute: typeof TransactionReceiptExpenseEntryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/transaction/receipt/expense-authorize': {
       id: '/transaction/receipt/expense-authorize'
       path: '/transaction/receipt/expense-authorize'
@@ -922,11 +1067,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TransactionReceiptExpenseAuthorizeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/transaction/receipt/debit-note': {
+      id: '/transaction/receipt/debit-note'
+      path: '/transaction/receipt/debit-note'
+      fullPath: '/transaction/receipt/debit-note'
+      preLoaderRoute: typeof TransactionReceiptDebitNoteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/receipt/customer-payment': {
+      id: '/transaction/receipt/customer-payment'
+      path: '/transaction/receipt/customer-payment'
+      fullPath: '/transaction/receipt/customer-payment'
+      preLoaderRoute: typeof TransactionReceiptCustomerPaymentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/receipt/credit-note': {
+      id: '/transaction/receipt/credit-note'
+      path: '/transaction/receipt/credit-note'
+      fullPath: '/transaction/receipt/credit-note'
+      preLoaderRoute: typeof TransactionReceiptCreditNoteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/rate-compare/vendor-rate-compare': {
+      id: '/transaction/rate-compare/vendor-rate-compare'
+      path: '/transaction/rate-compare/vendor-rate-compare'
+      fullPath: '/transaction/rate-compare/vendor-rate-compare'
+      preLoaderRoute: typeof TransactionRateCompareVendorRateCompareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/rate-compare/customer-rate-compare': {
+      id: '/transaction/rate-compare/customer-rate-compare'
+      path: '/transaction/rate-compare/customer-rate-compare'
+      fullPath: '/transaction/rate-compare/customer-rate-compare'
+      preLoaderRoute: typeof TransactionRateCompareCustomerRateCompareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/transaction/out-scan/obc-entry': {
       id: '/transaction/out-scan/obc-entry'
       path: '/transaction/out-scan/obc-entry'
       fullPath: '/transaction/out-scan/obc-entry'
       preLoaderRoute: typeof TransactionOutScanObcEntryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/bulk-import/pod-to-excel': {
+      id: '/transaction/bulk-import/pod-to-excel'
+      path: '/transaction/bulk-import/pod-to-excel'
+      fullPath: '/transaction/bulk-import/pod-to-excel'
+      preLoaderRoute: typeof TransactionBulkImportPodToExcelRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/master/vendor/vendor-contract': {
@@ -1141,6 +1328,8 @@ const rootRouteChildren: RootRouteChildren = {
   DemoRoute: DemoRoute,
   MasterSplatRoute: MasterSplatRoute,
   ReportsSplatRoute: ReportsSplatRoute,
+  ReportsOperationsRoute: ReportsOperationsRoute,
+  ReportsStatementsRoute: ReportsStatementsRoute,
   TransactionSplatRoute: TransactionSplatRoute,
   TransactionAwbEntryRoute: TransactionAwbEntryRoute,
   TransactionBaggingRoute: TransactionBaggingRoute,
@@ -1182,9 +1371,19 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSalesZoneRoute: MasterSalesZoneRoute,
   MasterVendorVendorRoute: MasterVendorVendorRoute,
   MasterVendorVendorContractRoute: MasterVendorVendorContractRoute,
+  TransactionBulkImportPodToExcelRoute: TransactionBulkImportPodToExcelRoute,
   TransactionOutScanObcEntryRoute: TransactionOutScanObcEntryRoute,
+  TransactionRateCompareCustomerRateCompareRoute:
+    TransactionRateCompareCustomerRateCompareRoute,
+  TransactionRateCompareVendorRateCompareRoute:
+    TransactionRateCompareVendorRateCompareRoute,
+  TransactionReceiptCreditNoteRoute: TransactionReceiptCreditNoteRoute,
+  TransactionReceiptCustomerPaymentRoute:
+    TransactionReceiptCustomerPaymentRoute,
+  TransactionReceiptDebitNoteRoute: TransactionReceiptDebitNoteRoute,
   TransactionReceiptExpenseAuthorizeRoute:
     TransactionReceiptExpenseAuthorizeRoute,
+  TransactionReceiptExpenseEntryRoute: TransactionReceiptExpenseEntryRoute,
   TransactionReceiptReceiptEntryRoute: TransactionReceiptReceiptEntryRoute,
   TransactionTrackingAwbQueryRoute: TransactionTrackingAwbQueryRoute,
   TransactionTrackingForwardingUpdationRoute:

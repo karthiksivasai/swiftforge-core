@@ -22,7 +22,10 @@ export type LookupKey =
   | "contactType"
   | "customer"
   | "shipper"
-  | "exception";
+  | "exception"
+  | "paymentType"
+  | "obc"
+  | "serviceType";
 
 const STATES: LookupOption[] = [
   { code: "AN", name: "Andaman & Nicobar Islands" },
@@ -294,6 +297,29 @@ const EXCEPTIONS: LookupOption[] = [
   { code: "CA", name: "CUSTOMS AUTHORIZED" },
 ];
 
+const PAYMENT_TYPES: LookupOption[] = [
+  { code: "CSH", name: "Cash" },
+  { code: "CHQ", name: "Cheque" },
+  { code: "CRD", name: "Credit" },
+  { code: "TPY", name: "To Pay" },
+  { code: "FOD", name: "FOD" },
+];
+
+const OBC_ENTRIES: LookupOption[] = [
+  { code: "OBC001", name: "OBC HYD - BOM" },
+  { code: "OBC002", name: "OBC DEL - BLR" },
+  { code: "OBC003", name: "OBC MUM - CCU" },
+  { code: "OBC004", name: "OBC BLR - MAA" },
+  { code: "OBC005", name: "OBC HYD - DEL" },
+];
+
+const SERVICE_TYPES: LookupOption[] = [
+  { code: "DOX", name: "DOX" },
+  { code: "SPX", name: "SPX" },
+  { code: "NDOX", name: "NDOX" },
+  { code: "ENV", name: "ENV" },
+];
+
 export const MASTER_LOOKUPS: Record<LookupKey, { title: string; options: LookupOption[]; hintLabel?: string }> = {
   state: { title: "Select State", options: STATES },
   serviceCentre: { title: "Select Service Centre", options: SERVICE_CENTRES, hintLabel: "Branch" },
@@ -313,4 +339,7 @@ export const MASTER_LOOKUPS: Record<LookupKey, { title: string; options: LookupO
   customer: { title: "Select Customer", options: CUSTOMERS },
   shipper: { title: "Select Shipper", options: SHIPPERS },
   exception: { title: "Select Exception", options: EXCEPTIONS },
+  paymentType: { title: "Select Payment Type", options: PAYMENT_TYPES },
+  obc: { title: "Select OBC", options: OBC_ENTRIES },
+  serviceType: { title: "Select Service Type", options: SERVICE_TYPES },
 };

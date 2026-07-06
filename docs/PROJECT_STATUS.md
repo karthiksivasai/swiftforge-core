@@ -2,7 +2,7 @@
 
 Living tracker of module implementation. Update this file whenever a module is completed.
 
-Last updated: **2026-07-05**
+Last updated: **2026-07-06**
 
 ---
 
@@ -38,6 +38,19 @@ Each of these has a real page, table, add/edit dialog with validation, CSV impor
 - **Manifest In Scan** — `src/routes/transaction.manifest-in-scan.tsx` (2026-07-04)
 - **Manifest View** — `src/routes/transaction.manifest-view.tsx` (2026-07-04)
 - **DRS Scan** — `src/routes/transaction.drs-scan.tsx` (2026-07-05)
+- **Expense Authorize** — `src/routes/transaction.receipt.expense-authorize.tsx` (2026-07-05)
+- **Receipt Entry** — `src/routes/transaction.receipt.receipt-entry.tsx` (2026-07-05)
+- **Expense Entry** — `src/routes/transaction.receipt.expense-entry.tsx` (2026-07-06)
+- **Debit Note** — `src/routes/transaction.receipt.debit-note.tsx` (2026-07-06)
+- **Credit Note** — `src/routes/transaction.receipt.credit-note.tsx` (2026-07-06)
+- **Customer Payment** — `src/routes/transaction.receipt.customer-payment.tsx` (2026-07-06)
+- **POD Excel View** — `src/routes/transaction.bulk-import.pod-to-excel.tsx` (2026-07-06)
+- **Vendor Rate Compare** — `src/routes/transaction.rate-compare.vendor-rate-compare.tsx` (2026-07-06)
+- **Customer Rate Compare** — `src/routes/transaction.rate-compare.customer-rate-compare.tsx` (2026-07-06)
+
+### Reports
+- **Operations** — `src/routes/reports.operations.tsx` (2026-07-06)
+- **Statements** — `src/routes/reports.statements.tsx` (2026-07-06)
 
 ### Shell / global
 - Sidebar navigation (`app-sidebar.tsx` + `lib/navigation.ts`)
@@ -95,16 +108,14 @@ _None — operation group complete._
 - Miss Route Scan
 - **Out Scan:** OBC Entry
 - **Tracking / Delivery:** AWB Query, Forwarding Updation, Progress / Comment, KYC Tracking, Update Entry
-- **Receipt / Expenses:** Expense Authorize, Receipt Entry, Expense Entry, Debit Note, Credit Note, Customer Payment
-- **Bulk Import:** POD to Excel
-- **Rate Compare:** Vendor Rate Compare, Customer Rate Compare
+- **Receipt / Expenses:** _complete_
+- **Bulk Import:** _complete_
+_None — rate compare group complete._
 
 ---
 
 ## Pending — Reports (`/reports/*`)
 
-- Operations
-- Statements
 - AWB
 - Scan
 - AR Report
