@@ -12,15 +12,28 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as DemoRouteImport } from './routes/demo'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as TransactionUnDeliveryScanRouteImport } from './routes/transaction.un-delivery-scan'
+import { Route as TransactionTransferRunRouteImport } from './routes/transaction.transfer-run'
 import { Route as TransactionPickupInscanRouteImport } from './routes/transaction.pickup-inscan'
 import { Route as TransactionPickupRouteImport } from './routes/transaction.pickup'
+import { Route as TransactionMissRouteScanRouteImport } from './routes/transaction.miss-route-scan'
 import { Route as TransactionManifestViewRouteImport } from './routes/transaction.manifest-view'
 import { Route as TransactionManifestScanRouteImport } from './routes/transaction.manifest-scan'
 import { Route as TransactionManifestInScanRouteImport } from './routes/transaction.manifest-in-scan'
+import { Route as TransactionDrsScanRouteImport } from './routes/transaction.drs-scan'
+import { Route as TransactionBaggingRouteImport } from './routes/transaction.bagging'
 import { Route as TransactionAwbEntryRouteImport } from './routes/transaction.awb-entry'
 import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
+import { Route as TransactionTrackingUpdateEntryRouteImport } from './routes/transaction.tracking.update-entry'
+import { Route as TransactionTrackingProgressCommentRouteImport } from './routes/transaction.tracking.progress-comment'
+import { Route as TransactionTrackingKycTrackingRouteImport } from './routes/transaction.tracking.kyc-tracking'
+import { Route as TransactionTrackingForwardingUpdationRouteImport } from './routes/transaction.tracking.forwarding-updation'
+import { Route as TransactionTrackingAwbQueryRouteImport } from './routes/transaction.tracking.awb-query'
+import { Route as TransactionReceiptReceiptEntryRouteImport } from './routes/transaction.receipt.receipt-entry'
+import { Route as TransactionReceiptExpenseAuthorizeRouteImport } from './routes/transaction.receipt.expense-authorize'
+import { Route as TransactionOutScanObcEntryRouteImport } from './routes/transaction.out-scan.obc-entry'
 import { Route as MasterVendorVendorContractRouteImport } from './routes/master.vendor.vendor-contract'
 import { Route as MasterVendorVendorRouteImport } from './routes/master.vendor.vendor'
 import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
@@ -66,6 +79,17 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TransactionUnDeliveryScanRoute =
+  TransactionUnDeliveryScanRouteImport.update({
+    id: '/transaction/un-delivery-scan',
+    path: '/transaction/un-delivery-scan',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionTransferRunRoute = TransactionTransferRunRouteImport.update({
+  id: '/transaction/transfer-run',
+  path: '/transaction/transfer-run',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TransactionPickupInscanRoute = TransactionPickupInscanRouteImport.update({
   id: '/transaction/pickup-inscan',
   path: '/transaction/pickup-inscan',
@@ -76,6 +100,12 @@ const TransactionPickupRoute = TransactionPickupRouteImport.update({
   path: '/transaction/pickup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TransactionMissRouteScanRoute =
+  TransactionMissRouteScanRouteImport.update({
+    id: '/transaction/miss-route-scan',
+    path: '/transaction/miss-route-scan',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const TransactionManifestViewRoute = TransactionManifestViewRouteImport.update({
   id: '/transaction/manifest-view',
   path: '/transaction/manifest-view',
@@ -92,6 +122,16 @@ const TransactionManifestInScanRoute =
     path: '/transaction/manifest-in-scan',
     getParentRoute: () => rootRouteImport,
   } as any)
+const TransactionDrsScanRoute = TransactionDrsScanRouteImport.update({
+  id: '/transaction/drs-scan',
+  path: '/transaction/drs-scan',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionBaggingRoute = TransactionBaggingRouteImport.update({
+  id: '/transaction/bagging',
+  path: '/transaction/bagging',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TransactionAwbEntryRoute = TransactionAwbEntryRouteImport.update({
   id: '/transaction/awb-entry',
   path: '/transaction/awb-entry',
@@ -112,6 +152,54 @@ const MasterSplatRoute = MasterSplatRouteImport.update({
   path: '/master/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TransactionTrackingUpdateEntryRoute =
+  TransactionTrackingUpdateEntryRouteImport.update({
+    id: '/transaction/tracking/update-entry',
+    path: '/transaction/tracking/update-entry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionTrackingProgressCommentRoute =
+  TransactionTrackingProgressCommentRouteImport.update({
+    id: '/transaction/tracking/progress-comment',
+    path: '/transaction/tracking/progress-comment',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionTrackingKycTrackingRoute =
+  TransactionTrackingKycTrackingRouteImport.update({
+    id: '/transaction/tracking/kyc-tracking',
+    path: '/transaction/tracking/kyc-tracking',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionTrackingForwardingUpdationRoute =
+  TransactionTrackingForwardingUpdationRouteImport.update({
+    id: '/transaction/tracking/forwarding-updation',
+    path: '/transaction/tracking/forwarding-updation',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionTrackingAwbQueryRoute =
+  TransactionTrackingAwbQueryRouteImport.update({
+    id: '/transaction/tracking/awb-query',
+    path: '/transaction/tracking/awb-query',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionReceiptReceiptEntryRoute =
+  TransactionReceiptReceiptEntryRouteImport.update({
+    id: '/transaction/receipt/receipt-entry',
+    path: '/transaction/receipt/receipt-entry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionReceiptExpenseAuthorizeRoute =
+  TransactionReceiptExpenseAuthorizeRouteImport.update({
+    id: '/transaction/receipt/expense-authorize',
+    path: '/transaction/receipt/expense-authorize',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionOutScanObcEntryRoute =
+  TransactionOutScanObcEntryRouteImport.update({
+    id: '/transaction/out-scan/obc-entry',
+    path: '/transaction/out-scan/obc-entry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const MasterVendorVendorContractRoute =
   MasterVendorVendorContractRouteImport.update({
     id: '/master/vendor/vendor-contract',
@@ -275,11 +363,16 @@ export interface FileRoutesByFullPath {
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/transaction/awb-entry': typeof TransactionAwbEntryRoute
+  '/transaction/bagging': typeof TransactionBaggingRoute
+  '/transaction/drs-scan': typeof TransactionDrsScanRoute
   '/transaction/manifest-in-scan': typeof TransactionManifestInScanRoute
   '/transaction/manifest-scan': typeof TransactionManifestScanRoute
   '/transaction/manifest-view': typeof TransactionManifestViewRoute
+  '/transaction/miss-route-scan': typeof TransactionMissRouteScanRoute
   '/transaction/pickup': typeof TransactionPickupRoute
   '/transaction/pickup-inscan': typeof TransactionPickupInscanRoute
+  '/transaction/transfer-run': typeof TransactionTransferRunRoute
+  '/transaction/un-delivery-scan': typeof TransactionUnDeliveryScanRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -309,6 +402,14 @@ export interface FileRoutesByFullPath {
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
   '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
+  '/transaction/out-scan/obc-entry': typeof TransactionOutScanObcEntryRoute
+  '/transaction/receipt/expense-authorize': typeof TransactionReceiptExpenseAuthorizeRoute
+  '/transaction/receipt/receipt-entry': typeof TransactionReceiptReceiptEntryRoute
+  '/transaction/tracking/awb-query': typeof TransactionTrackingAwbQueryRoute
+  '/transaction/tracking/forwarding-updation': typeof TransactionTrackingForwardingUpdationRoute
+  '/transaction/tracking/kyc-tracking': typeof TransactionTrackingKycTrackingRoute
+  '/transaction/tracking/progress-comment': typeof TransactionTrackingProgressCommentRoute
+  '/transaction/tracking/update-entry': typeof TransactionTrackingUpdateEntryRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -318,11 +419,16 @@ export interface FileRoutesByTo {
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/transaction/awb-entry': typeof TransactionAwbEntryRoute
+  '/transaction/bagging': typeof TransactionBaggingRoute
+  '/transaction/drs-scan': typeof TransactionDrsScanRoute
   '/transaction/manifest-in-scan': typeof TransactionManifestInScanRoute
   '/transaction/manifest-scan': typeof TransactionManifestScanRoute
   '/transaction/manifest-view': typeof TransactionManifestViewRoute
+  '/transaction/miss-route-scan': typeof TransactionMissRouteScanRoute
   '/transaction/pickup': typeof TransactionPickupRoute
   '/transaction/pickup-inscan': typeof TransactionPickupInscanRoute
+  '/transaction/transfer-run': typeof TransactionTransferRunRoute
+  '/transaction/un-delivery-scan': typeof TransactionUnDeliveryScanRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -352,6 +458,14 @@ export interface FileRoutesByTo {
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
   '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
+  '/transaction/out-scan/obc-entry': typeof TransactionOutScanObcEntryRoute
+  '/transaction/receipt/expense-authorize': typeof TransactionReceiptExpenseAuthorizeRoute
+  '/transaction/receipt/receipt-entry': typeof TransactionReceiptReceiptEntryRoute
+  '/transaction/tracking/awb-query': typeof TransactionTrackingAwbQueryRoute
+  '/transaction/tracking/forwarding-updation': typeof TransactionTrackingForwardingUpdationRoute
+  '/transaction/tracking/kyc-tracking': typeof TransactionTrackingKycTrackingRoute
+  '/transaction/tracking/progress-comment': typeof TransactionTrackingProgressCommentRoute
+  '/transaction/tracking/update-entry': typeof TransactionTrackingUpdateEntryRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -362,11 +476,16 @@ export interface FileRoutesById {
   '/reports/$': typeof ReportsSplatRoute
   '/transaction/$': typeof TransactionSplatRoute
   '/transaction/awb-entry': typeof TransactionAwbEntryRoute
+  '/transaction/bagging': typeof TransactionBaggingRoute
+  '/transaction/drs-scan': typeof TransactionDrsScanRoute
   '/transaction/manifest-in-scan': typeof TransactionManifestInScanRoute
   '/transaction/manifest-scan': typeof TransactionManifestScanRoute
   '/transaction/manifest-view': typeof TransactionManifestViewRoute
+  '/transaction/miss-route-scan': typeof TransactionMissRouteScanRoute
   '/transaction/pickup': typeof TransactionPickupRoute
   '/transaction/pickup-inscan': typeof TransactionPickupInscanRoute
+  '/transaction/transfer-run': typeof TransactionTransferRunRoute
+  '/transaction/un-delivery-scan': typeof TransactionUnDeliveryScanRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -396,6 +515,14 @@ export interface FileRoutesById {
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
   '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
+  '/transaction/out-scan/obc-entry': typeof TransactionOutScanObcEntryRoute
+  '/transaction/receipt/expense-authorize': typeof TransactionReceiptExpenseAuthorizeRoute
+  '/transaction/receipt/receipt-entry': typeof TransactionReceiptReceiptEntryRoute
+  '/transaction/tracking/awb-query': typeof TransactionTrackingAwbQueryRoute
+  '/transaction/tracking/forwarding-updation': typeof TransactionTrackingForwardingUpdationRoute
+  '/transaction/tracking/kyc-tracking': typeof TransactionTrackingKycTrackingRoute
+  '/transaction/tracking/progress-comment': typeof TransactionTrackingProgressCommentRoute
+  '/transaction/tracking/update-entry': typeof TransactionTrackingUpdateEntryRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -407,11 +534,16 @@ export interface FileRouteTypes {
     | '/reports/$'
     | '/transaction/$'
     | '/transaction/awb-entry'
+    | '/transaction/bagging'
+    | '/transaction/drs-scan'
     | '/transaction/manifest-in-scan'
     | '/transaction/manifest-scan'
     | '/transaction/manifest-view'
+    | '/transaction/miss-route-scan'
     | '/transaction/pickup'
     | '/transaction/pickup-inscan'
+    | '/transaction/transfer-run'
+    | '/transaction/un-delivery-scan'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -441,6 +573,14 @@ export interface FileRouteTypes {
     | '/master/sales/zone'
     | '/master/vendor/vendor'
     | '/master/vendor/vendor-contract'
+    | '/transaction/out-scan/obc-entry'
+    | '/transaction/receipt/expense-authorize'
+    | '/transaction/receipt/receipt-entry'
+    | '/transaction/tracking/awb-query'
+    | '/transaction/tracking/forwarding-updation'
+    | '/transaction/tracking/kyc-tracking'
+    | '/transaction/tracking/progress-comment'
+    | '/transaction/tracking/update-entry'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -450,11 +590,16 @@ export interface FileRouteTypes {
     | '/reports/$'
     | '/transaction/$'
     | '/transaction/awb-entry'
+    | '/transaction/bagging'
+    | '/transaction/drs-scan'
     | '/transaction/manifest-in-scan'
     | '/transaction/manifest-scan'
     | '/transaction/manifest-view'
+    | '/transaction/miss-route-scan'
     | '/transaction/pickup'
     | '/transaction/pickup-inscan'
+    | '/transaction/transfer-run'
+    | '/transaction/un-delivery-scan'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -484,6 +629,14 @@ export interface FileRouteTypes {
     | '/master/sales/zone'
     | '/master/vendor/vendor'
     | '/master/vendor/vendor-contract'
+    | '/transaction/out-scan/obc-entry'
+    | '/transaction/receipt/expense-authorize'
+    | '/transaction/receipt/receipt-entry'
+    | '/transaction/tracking/awb-query'
+    | '/transaction/tracking/forwarding-updation'
+    | '/transaction/tracking/kyc-tracking'
+    | '/transaction/tracking/progress-comment'
+    | '/transaction/tracking/update-entry'
   id:
     | '__root__'
     | '/'
@@ -493,11 +646,16 @@ export interface FileRouteTypes {
     | '/reports/$'
     | '/transaction/$'
     | '/transaction/awb-entry'
+    | '/transaction/bagging'
+    | '/transaction/drs-scan'
     | '/transaction/manifest-in-scan'
     | '/transaction/manifest-scan'
     | '/transaction/manifest-view'
+    | '/transaction/miss-route-scan'
     | '/transaction/pickup'
     | '/transaction/pickup-inscan'
+    | '/transaction/transfer-run'
+    | '/transaction/un-delivery-scan'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -527,6 +685,14 @@ export interface FileRouteTypes {
     | '/master/sales/zone'
     | '/master/vendor/vendor'
     | '/master/vendor/vendor-contract'
+    | '/transaction/out-scan/obc-entry'
+    | '/transaction/receipt/expense-authorize'
+    | '/transaction/receipt/receipt-entry'
+    | '/transaction/tracking/awb-query'
+    | '/transaction/tracking/forwarding-updation'
+    | '/transaction/tracking/kyc-tracking'
+    | '/transaction/tracking/progress-comment'
+    | '/transaction/tracking/update-entry'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -537,11 +703,16 @@ export interface RootRouteChildren {
   ReportsSplatRoute: typeof ReportsSplatRoute
   TransactionSplatRoute: typeof TransactionSplatRoute
   TransactionAwbEntryRoute: typeof TransactionAwbEntryRoute
+  TransactionBaggingRoute: typeof TransactionBaggingRoute
+  TransactionDrsScanRoute: typeof TransactionDrsScanRoute
   TransactionManifestInScanRoute: typeof TransactionManifestInScanRoute
   TransactionManifestScanRoute: typeof TransactionManifestScanRoute
   TransactionManifestViewRoute: typeof TransactionManifestViewRoute
+  TransactionMissRouteScanRoute: typeof TransactionMissRouteScanRoute
   TransactionPickupRoute: typeof TransactionPickupRoute
   TransactionPickupInscanRoute: typeof TransactionPickupInscanRoute
+  TransactionTransferRunRoute: typeof TransactionTransferRunRoute
+  TransactionUnDeliveryScanRoute: typeof TransactionUnDeliveryScanRoute
   MasterCustomerConsigneeRoute: typeof MasterCustomerConsigneeRoute
   MasterCustomerCustomerRoute: typeof MasterCustomerCustomerRoute
   MasterCustomerCustomerRateRoute: typeof MasterCustomerCustomerRateRoute
@@ -571,6 +742,14 @@ export interface RootRouteChildren {
   MasterSalesZoneRoute: typeof MasterSalesZoneRoute
   MasterVendorVendorRoute: typeof MasterVendorVendorRoute
   MasterVendorVendorContractRoute: typeof MasterVendorVendorContractRoute
+  TransactionOutScanObcEntryRoute: typeof TransactionOutScanObcEntryRoute
+  TransactionReceiptExpenseAuthorizeRoute: typeof TransactionReceiptExpenseAuthorizeRoute
+  TransactionReceiptReceiptEntryRoute: typeof TransactionReceiptReceiptEntryRoute
+  TransactionTrackingAwbQueryRoute: typeof TransactionTrackingAwbQueryRoute
+  TransactionTrackingForwardingUpdationRoute: typeof TransactionTrackingForwardingUpdationRoute
+  TransactionTrackingKycTrackingRoute: typeof TransactionTrackingKycTrackingRoute
+  TransactionTrackingProgressCommentRoute: typeof TransactionTrackingProgressCommentRoute
+  TransactionTrackingUpdateEntryRoute: typeof TransactionTrackingUpdateEntryRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -596,6 +775,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/transaction/un-delivery-scan': {
+      id: '/transaction/un-delivery-scan'
+      path: '/transaction/un-delivery-scan'
+      fullPath: '/transaction/un-delivery-scan'
+      preLoaderRoute: typeof TransactionUnDeliveryScanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/transfer-run': {
+      id: '/transaction/transfer-run'
+      path: '/transaction/transfer-run'
+      fullPath: '/transaction/transfer-run'
+      preLoaderRoute: typeof TransactionTransferRunRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/transaction/pickup-inscan': {
       id: '/transaction/pickup-inscan'
       path: '/transaction/pickup-inscan'
@@ -608,6 +801,13 @@ declare module '@tanstack/react-router' {
       path: '/transaction/pickup'
       fullPath: '/transaction/pickup'
       preLoaderRoute: typeof TransactionPickupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/miss-route-scan': {
+      id: '/transaction/miss-route-scan'
+      path: '/transaction/miss-route-scan'
+      fullPath: '/transaction/miss-route-scan'
+      preLoaderRoute: typeof TransactionMissRouteScanRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/transaction/manifest-view': {
@@ -629,6 +829,20 @@ declare module '@tanstack/react-router' {
       path: '/transaction/manifest-in-scan'
       fullPath: '/transaction/manifest-in-scan'
       preLoaderRoute: typeof TransactionManifestInScanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/drs-scan': {
+      id: '/transaction/drs-scan'
+      path: '/transaction/drs-scan'
+      fullPath: '/transaction/drs-scan'
+      preLoaderRoute: typeof TransactionDrsScanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/bagging': {
+      id: '/transaction/bagging'
+      path: '/transaction/bagging'
+      fullPath: '/transaction/bagging'
+      preLoaderRoute: typeof TransactionBaggingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/transaction/awb-entry': {
@@ -657,6 +871,62 @@ declare module '@tanstack/react-router' {
       path: '/master/$'
       fullPath: '/master/$'
       preLoaderRoute: typeof MasterSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/tracking/update-entry': {
+      id: '/transaction/tracking/update-entry'
+      path: '/transaction/tracking/update-entry'
+      fullPath: '/transaction/tracking/update-entry'
+      preLoaderRoute: typeof TransactionTrackingUpdateEntryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/tracking/progress-comment': {
+      id: '/transaction/tracking/progress-comment'
+      path: '/transaction/tracking/progress-comment'
+      fullPath: '/transaction/tracking/progress-comment'
+      preLoaderRoute: typeof TransactionTrackingProgressCommentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/tracking/kyc-tracking': {
+      id: '/transaction/tracking/kyc-tracking'
+      path: '/transaction/tracking/kyc-tracking'
+      fullPath: '/transaction/tracking/kyc-tracking'
+      preLoaderRoute: typeof TransactionTrackingKycTrackingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/tracking/forwarding-updation': {
+      id: '/transaction/tracking/forwarding-updation'
+      path: '/transaction/tracking/forwarding-updation'
+      fullPath: '/transaction/tracking/forwarding-updation'
+      preLoaderRoute: typeof TransactionTrackingForwardingUpdationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/tracking/awb-query': {
+      id: '/transaction/tracking/awb-query'
+      path: '/transaction/tracking/awb-query'
+      fullPath: '/transaction/tracking/awb-query'
+      preLoaderRoute: typeof TransactionTrackingAwbQueryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/receipt/receipt-entry': {
+      id: '/transaction/receipt/receipt-entry'
+      path: '/transaction/receipt/receipt-entry'
+      fullPath: '/transaction/receipt/receipt-entry'
+      preLoaderRoute: typeof TransactionReceiptReceiptEntryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/receipt/expense-authorize': {
+      id: '/transaction/receipt/expense-authorize'
+      path: '/transaction/receipt/expense-authorize'
+      fullPath: '/transaction/receipt/expense-authorize'
+      preLoaderRoute: typeof TransactionReceiptExpenseAuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/out-scan/obc-entry': {
+      id: '/transaction/out-scan/obc-entry'
+      path: '/transaction/out-scan/obc-entry'
+      fullPath: '/transaction/out-scan/obc-entry'
+      preLoaderRoute: typeof TransactionOutScanObcEntryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/master/vendor/vendor-contract': {
@@ -873,11 +1143,16 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsSplatRoute: ReportsSplatRoute,
   TransactionSplatRoute: TransactionSplatRoute,
   TransactionAwbEntryRoute: TransactionAwbEntryRoute,
+  TransactionBaggingRoute: TransactionBaggingRoute,
+  TransactionDrsScanRoute: TransactionDrsScanRoute,
   TransactionManifestInScanRoute: TransactionManifestInScanRoute,
   TransactionManifestScanRoute: TransactionManifestScanRoute,
   TransactionManifestViewRoute: TransactionManifestViewRoute,
+  TransactionMissRouteScanRoute: TransactionMissRouteScanRoute,
   TransactionPickupRoute: TransactionPickupRoute,
   TransactionPickupInscanRoute: TransactionPickupInscanRoute,
+  TransactionTransferRunRoute: TransactionTransferRunRoute,
+  TransactionUnDeliveryScanRoute: TransactionUnDeliveryScanRoute,
   MasterCustomerConsigneeRoute: MasterCustomerConsigneeRoute,
   MasterCustomerCustomerRoute: MasterCustomerCustomerRoute,
   MasterCustomerCustomerRateRoute: MasterCustomerCustomerRateRoute,
@@ -907,6 +1182,17 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSalesZoneRoute: MasterSalesZoneRoute,
   MasterVendorVendorRoute: MasterVendorVendorRoute,
   MasterVendorVendorContractRoute: MasterVendorVendorContractRoute,
+  TransactionOutScanObcEntryRoute: TransactionOutScanObcEntryRoute,
+  TransactionReceiptExpenseAuthorizeRoute:
+    TransactionReceiptExpenseAuthorizeRoute,
+  TransactionReceiptReceiptEntryRoute: TransactionReceiptReceiptEntryRoute,
+  TransactionTrackingAwbQueryRoute: TransactionTrackingAwbQueryRoute,
+  TransactionTrackingForwardingUpdationRoute:
+    TransactionTrackingForwardingUpdationRoute,
+  TransactionTrackingKycTrackingRoute: TransactionTrackingKycTrackingRoute,
+  TransactionTrackingProgressCommentRoute:
+    TransactionTrackingProgressCommentRoute,
+  TransactionTrackingUpdateEntryRoute: TransactionTrackingUpdateEntryRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

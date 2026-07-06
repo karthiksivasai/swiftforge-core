@@ -2,7 +2,7 @@
 
 Living tracker of module implementation. Update this file whenever a module is completed.
 
-Last updated: **2026-07-04**
+Last updated: **2026-07-05**
 
 ---
 
@@ -37,6 +37,7 @@ Each of these has a real page, table, add/edit dialog with validation, CSV impor
 - **Manifest Scan** — `src/routes/transaction.manifest-scan.tsx` (2026-07-04)
 - **Manifest In Scan** — `src/routes/transaction.manifest-in-scan.tsx` (2026-07-04)
 - **Manifest View** — `src/routes/transaction.manifest-view.tsx` (2026-07-04)
+- **DRS Scan** — `src/routes/transaction.drs-scan.tsx` (2026-07-05)
 
 ### Shell / global
 - Sidebar navigation (`app-sidebar.tsx` + `lib/navigation.ts`)
@@ -88,7 +89,6 @@ _None — operation group complete._
 
 ## Pending — Transaction modules (`/transaction/*`)
 
-- DRS Scan
 - Un-Delivery Scan
 - Bagging
 - Transfer Run
