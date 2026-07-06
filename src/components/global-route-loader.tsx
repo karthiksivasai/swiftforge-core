@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "@tanstack/react-router";
-import { useStore } from "@tanstack/react-store";
+import { useRouterState } from "@tanstack/react-router";
 
 import { Loader3 } from "@/components/ui/loader-3";
 
