@@ -782,6 +782,7 @@ function ManifestScanPage() {
       instruction: a.instruction,
     }));
     const payload: ManifestForm = {
+      ...emptyForm(),
       manifestNo: nextManifestNo,
       manifestDate: generateHeader.manifestDate,
       manifestTime: nowManifestTime(),
