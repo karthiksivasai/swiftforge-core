@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "@tanstack/react-router";
-import { useStore } from "@tanstack/react-store";
+import { useRouterState } from "@tanstack/react-router";
 
 import { Loader3 } from "@/components/ui/loader-3";
 
@@ -17,10 +16,9 @@ export function RoutePendingLoader() {
 
 /** Full-screen overlay for refresh and in-app navigation. */
 export function GlobalRouteLoader() {
-  const router = useRouter();
-  const isLoading = useStore(router.stores.isLoading, (value) => value);
-  const hasPending = useStore(router.stores.hasPending, (value) => value);
-  const routeBusy = isLoading || hasPending;
+  const routeBusy = useRouterState({
+    select: (s) => s.isLoading || s.status === "pending",
+  });
 
   const [visible, setVisible] = useState(true);
   const shownAt = useRef(Date.now());
