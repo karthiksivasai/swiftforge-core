@@ -18,6 +18,7 @@ import {
   Scale,
   Send,
   ScanLine,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -212,6 +213,55 @@ export const NAVIGATION: NavSection[] = [
       { label: "Scan", slug: "scan" },
       { label: "AR Report", slug: "ar-report" },
     ]),
+  },
+  {
+    label: "Utility",
+    slug: "utility",
+    icon: Wrench,
+    items: makeLeaves("/utility", [
+      { label: "Serviceable Pincode", slug: "serviceable-pincode" },
+      { label: "Notification", slug: "notification" },
+    ]),
+    groups: [
+      makeGroup("utility", {
+        label: "Users",
+        slug: "users",
+        items: [
+          { label: "User Setup", slug: "user-setup" },
+          { label: "Access Rights", slug: "access-rights" },
+          { label: "Loggedin Users", slug: "loggedin-users" },
+        ],
+      }),
+      makeGroup("utility", {
+        label: "Excel Import",
+        slug: "excel-import",
+        items: [
+          { label: "AWB Merging", slug: "awb-merging" },
+          { label: "POD Merging", slug: "pod-merging" },
+          { label: "Forwarding Merging", slug: "forwarding-merging" },
+          { label: "Data Import", slug: "data-import" },
+          { label: "Data Updation", slug: "data-updation" },
+        ],
+      }),
+      makeGroup("utility", {
+        label: "Tax / Charges Setup",
+        slug: "tax-charges-setup",
+        items: [
+          { label: "Fuel Setup", slug: "fuel-setup" },
+          { label: "Tax Setup", slug: "tax-setup" },
+          { label: "Setup", slug: "setup" },
+        ],
+      }),
+      makeGroup("utility", {
+        label: "Rate / Zone Update",
+        slug: "rate-zone-update",
+        items: [
+          { label: "Rate Update", slug: "rate-update" },
+          { label: "Zone Update", slug: "zone-update" },
+          { label: "Rate Import", slug: "rate-import" },
+        ],
+      }),
+    ],
   },
 ];
 

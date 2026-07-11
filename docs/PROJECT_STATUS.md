@@ -51,9 +51,31 @@ Each of these has a real page, table, add/edit dialog with validation, CSV impor
 ### Reports
 - **Operations** — `src/routes/reports.operations.tsx` (2026-07-06)
 - **Statements** — `src/routes/reports.statements.tsx` (2026-07-06)
+- **AWB** — `src/routes/reports.awb.tsx` (2026-07-10)
+- **Scan** — `src/routes/reports.scan.tsx` (2026-07-10)
+- **AR Report** — `src/routes/reports.ar-report.tsx` (2026-07-10)
+
+### Utility
+- **Serviceable Pincode** — `src/routes/utility.serviceable-pincode.tsx` (2026-07-10)
+- **Notification** — `src/routes/utility.notification.tsx` (2026-07-10)
+- **User Setup** — `src/routes/utility.users.user-setup.tsx` (2026-07-11)
+- **Access Rights** — `src/routes/utility.users.access-rights.tsx` (2026-07-11)
+- **Loggedin Users** — `src/routes/utility.users.loggedin-users.tsx` (2026-07-11)
+- **AWB Import** — `src/routes/utility.excel-import.awb-merging.tsx` (2026-07-11)
+- **POD Merging** — `src/routes/utility.excel-import.pod-merging.tsx` (2026-07-11)
+- **Forwarding Merging** — `src/routes/utility.excel-import.forwarding-merging.tsx` (2026-07-11)
+- **Data Import** — `src/routes/utility.excel-import.data-import.tsx` (2026-07-11)
+- **Data Updation** — `src/routes/utility.excel-import.data-updation.tsx` (2026-07-11)
+- **Fuel Setup** — `src/routes/utility.tax-charges-setup.fuel-setup.tsx` (2026-07-11)
+- **Tax Setup** — `src/routes/utility.tax-charges-setup.tax-setup.tsx` (2026-07-11)
+- **Setup** — `src/routes/utility.tax-charges-setup.setup.tsx` (2026-07-11)
+- **Rate Update** — `src/routes/utility.rate-zone-update.rate-update.tsx` (2026-07-11)
+- **Zone Update** — `src/routes/utility.rate-zone-update.zone-update.tsx` (2026-07-11)
+- **Rate Import** — `src/routes/utility.rate-zone-update.rate-import.tsx` (2026-07-11)
 
 ### Shell / global
 - Sidebar navigation (`app-sidebar.tsx` + `lib/navigation.ts`)
+- Utility sidebar navigation (`lib/navigation.ts` + `routes/utility.$.tsx`)
 - App header (`app-header.tsx`) — branch selector, theme toggle
 - Dashboard shell — `src/routes/dashboard.tsx`
 - Splat placeholders for un-built pages (`master.$.tsx`, `transaction.$.tsx`, `reports.$.tsx`)
@@ -116,9 +138,7 @@ _None — rate compare group complete._
 
 ## Pending — Reports (`/reports/*`)
 
-- AWB
-- Scan
-- AR Report
+_None._
 
 ---
 
