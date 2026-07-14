@@ -1,7 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LogOut, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
+
+import { useAuth } from "@/lib/auth";
+import { forceLogoff, listActiveSessions } from "@/lib/rbac-data";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -58,9 +61,35 @@ export const Route = createFileRoute("/utility/users/loggedin-users")({
 });
 
 function LoggedInUsersPage() {
+  const { isAuthenticated } = useAuth();
   const [rows, setRows] = useState<LoggedInUserRow[]>(INITIAL_ROWS);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+
+  const loadLive = useCallback(async () => {
+    const sessions = await listActiveSessions();
+    setRows(
+      sessions.map((s) => {
+        const dt = new Date(s.created_at);
+        return {
+          id: s.id,
+          userName: s.username,
+          loginDate: dt.toLocaleDateString(),
+          loginTime: dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          userType: s.app === "MOBILE" ? "Mobile Login" : "Web Login",
+          ipAddress: s.ip_address ?? "—",
+        };
+      }),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    loadLive().catch((error) => {
+      const message = error instanceof Error ? error.message : "Could not load sessions";
+      toast.error(message);
+    });
+  }, [isAuthenticated, loadLive]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -78,7 +107,18 @@ function LoggedInUsersPage() {
   const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const endIdx = Math.min(currentPage * PAGE_SIZE, filtered.length);
 
-  const logOff = (row: LoggedInUserRow) => {
+  const logOff = async (row: LoggedInUserRow) => {
+    if (isAuthenticated) {
+      try {
+        await forceLogoff(row.id);
+        await loadLive();
+        toast.success(`${row.userName} logged off`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Force logoff failed";
+        toast.error(message);
+      }
+      return;
+    }
     setRows((current) => current.filter((item) => item.id !== row.id));
     toast.success(`${row.userName} logged off`);
   };
@@ -86,6 +126,12 @@ function LoggedInUsersPage() {
   const refresh = () => {
     setSearch("");
     setPage(1);
+    if (isAuthenticated) {
+      loadLive()
+        .then(() => toast.success("Loggedin users refreshed"))
+        .catch(() => toast.error("Refresh failed"));
+      return;
+    }
     toast.success("Loggedin users refreshed");
   };
 
@@ -95,12 +141,20 @@ function LoggedInUsersPage() {
 
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Loggedin Users</h1>
-        <p className="text-sm text-muted-foreground">Monitor active sessions and force log off users when needed.</p>
+        <p className="text-sm text-muted-foreground">
+          Monitor active sessions and force log off users when needed.
+        </p>
       </div>
 
       <Card className="overflow-hidden p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
-          <Button variant="outline" size="icon" className="h-9 w-9 bg-background" onClick={refresh} aria-label="Refresh">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-9 w-9 bg-background"
+            onClick={refresh}
+            aria-label="Refresh"
+          >
             <RefreshCw className="h-4 w-4" />
           </Button>
 
@@ -124,14 +178,16 @@ function LoggedInUsersPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
-                {["User Name", "Login Date", "Login Time", "User Type", "IP Address", "Action"].map((heading) => (
-                  <TableHead key={heading} className="whitespace-nowrap text-sidebar-foreground">
-                    <span className="flex items-center justify-between gap-2">
-                      {heading}
-                      {heading !== "Action" ? <span className="text-xs">⇅</span> : null}
-                    </span>
-                  </TableHead>
-                ))}
+                {["User Name", "Login Date", "Login Time", "User Type", "IP Address", "Action"].map(
+                  (heading) => (
+                    <TableHead key={heading} className="whitespace-nowrap text-sidebar-foreground">
+                      <span className="flex items-center justify-between gap-2">
+                        {heading}
+                        {heading !== "Action" ? <span className="text-xs">⇅</span> : null}
+                      </span>
+                    </TableHead>
+                  ),
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -146,7 +202,7 @@ function LoggedInUsersPage() {
                     <Button
                       type="button"
                       size="sm"
-                      onClick={() => logOff(row)}
+                      onClick={() => void logOff(row)}
                       className="h-7 rounded-md bg-slate-600 px-4 text-xs text-white hover:bg-slate-700"
                     >
                       <LogOut className="mr-1.5 h-3.5 w-3.5" />

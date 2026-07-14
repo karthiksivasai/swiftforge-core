@@ -13,8 +13,8 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Check,
-  X,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,12 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -41,12 +36,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,6 +50,22 @@ import {
 import { toast } from "sonner";
 import { BRANCHES } from "@/lib/branches-data";
 import { cn } from "@/lib/utils";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import {
+  serviceCentersResource,
+  fetchServiceCenterTerms,
+  saveServiceCenter,
+  type ServiceCenterRow as ServiceCenterDbRow,
+} from "@/lib/masters/resources/serviceCenters";
+import {
+  serviceCenterCreateSchema,
+  serviceCenterUpdateSchema,
+} from "@/lib/masters/schemas/serviceCenters";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
 
 type ServiceCentre = {
   id: string;
@@ -114,7 +120,21 @@ type ServiceCentre = {
   creditNoteLastInvoiceNo?: string;
   creditNoteSuffix?: string;
   rcpLastNo?: string;
+  row_version?: number;
 };
+
+const TERM_KEYS = [
+  "terms1",
+  "terms2",
+  "terms3",
+  "terms4",
+  "terms5",
+  "terms6",
+  "terms7",
+  "terms8",
+  "terms9",
+  "terms10",
+] as const;
 
 const SEED: ServiceCentre[] = [
   { id: "sc-1", code: "AKL", name: "AUCKLAND", branch: "AKL" },
@@ -142,7 +162,8 @@ export const Route = createFileRoute("/master/sales/service-center")({
       { title: "Service Centre — Master — Courier ERP" },
       {
         name: "description",
-        content: "Manage service centre master records including bank, terms, and voucher settings.",
+        content:
+          "Manage service centre master records including bank, terms, and voucher settings.",
       },
     ],
   }),
@@ -155,6 +176,101 @@ function emptyForm(): Omit<ServiceCentre, "id"> {
     name: "",
     branch: "",
   };
+}
+
+/** Map a persisted DB row (snake_case) to the form/view shape (camelCase). */
+function rowToView(r: ServiceCenterDbRow): ServiceCentre {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    subName: r.sub_name ?? "",
+    branch: r.branch ?? "",
+    address1: r.address1 ?? "",
+    address2: r.address2 ?? "",
+    address3: r.address3 ?? "",
+    address4: r.address4 ?? "",
+    destination: r.destination ?? "",
+    state: r.state ?? "",
+    stateCode: r.state_code ?? "",
+    telephone: r.telephone ?? "",
+    email: r.email ?? "",
+    gstNo: r.gst_no ?? "",
+    gstTelephone: r.gst_telephone ?? "",
+    panNo: r.pan_no ?? "",
+    icnNo: r.icn_no ?? "",
+    stNo: r.st_no ?? "",
+    pinCode: r.pin_code ?? "",
+    bankName: r.bank_name ?? "",
+    accountNo: r.account_no ?? "",
+    accountName: r.account_name ?? "",
+    bankAddress: r.bank_address ?? "",
+    rtgsIfsc: r.rtgs_ifsc ?? "",
+    micr: r.micr ?? "",
+    lastInvoicePrefix: r.last_invoice_prefix ?? "",
+    lastInvoiceNo: r.last_invoice_no ?? "",
+    lastInvoiceSuffix: r.last_invoice_suffix ?? "",
+    freeFormPrefix: r.free_form_prefix ?? "",
+    lastFreeFormInvoiceNo: r.last_free_form_invoice_no ?? "",
+    freeFormSuffix: r.free_form_suffix ?? "",
+    debitNotePrefix: r.debit_note_prefix ?? "",
+    debitNoteLastInvoiceNo: r.debit_note_last_invoice_no ?? "",
+    debitNoteSuffix: r.debit_note_suffix ?? "",
+    creditNotePrefix: r.credit_note_prefix ?? "",
+    creditNoteLastInvoiceNo: r.credit_note_last_invoice_no ?? "",
+    creditNoteSuffix: r.credit_note_suffix ?? "",
+    rcpLastNo: r.rcp_last_no ?? "",
+    row_version: r.row_version,
+  };
+}
+
+/** Map the form (camelCase) to the aggregate RPC root fields (snake_case). */
+function formToFields(f: Omit<ServiceCentre, "id">): Record<string, unknown> {
+  return {
+    code: f.code,
+    name: f.name,
+    sub_name: f.subName,
+    address1: f.address1,
+    address2: f.address2,
+    address3: f.address3,
+    address4: f.address4,
+    destination: f.destination,
+    branch: f.branch,
+    state: f.state,
+    state_code: f.stateCode,
+    pin_code: f.pinCode,
+    telephone: f.telephone,
+    email: f.email,
+    gst_no: f.gstNo,
+    gst_telephone: f.gstTelephone,
+    pan_no: f.panNo,
+    icn_no: f.icnNo,
+    st_no: f.stNo,
+    bank_name: f.bankName,
+    account_no: f.accountNo,
+    account_name: f.accountName,
+    bank_address: f.bankAddress,
+    rtgs_ifsc: f.rtgsIfsc,
+    micr: f.micr,
+    last_invoice_prefix: f.lastInvoicePrefix,
+    last_invoice_no: f.lastInvoiceNo,
+    last_invoice_suffix: f.lastInvoiceSuffix,
+    free_form_prefix: f.freeFormPrefix,
+    last_free_form_invoice_no: f.lastFreeFormInvoiceNo,
+    free_form_suffix: f.freeFormSuffix,
+    debit_note_prefix: f.debitNotePrefix,
+    debit_note_last_invoice_no: f.debitNoteLastInvoiceNo,
+    debit_note_suffix: f.debitNoteSuffix,
+    credit_note_prefix: f.creditNotePrefix,
+    credit_note_last_invoice_no: f.creditNoteLastInvoiceNo,
+    credit_note_suffix: f.creditNoteSuffix,
+    rcp_last_no: f.rcpLastNo,
+  };
+}
+
+/** The Terms child collection, in display order, blanks dropped. */
+function termsFromForm(f: Omit<ServiceCentre, "id">): string[] {
+  return TERM_KEYS.map((k) => (f[k] ?? "").trim()).filter((t) => t.length > 0);
 }
 
 function getPageItems(current: number, total: number): (number | "…")[] {
@@ -170,7 +286,12 @@ function getPageItems(current: number, total: number): (number | "…")[] {
 }
 
 function ServiceCentrePage() {
-  const [rows, setRows] = useState<ServiceCentre[]>(SEED);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(serviceCentersResource);
+  const live = useMasterList(serviceCentersResource, { enabled: authed });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<ServiceCentre[]>(SEED);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [view, setView] = useState<"list" | "form">("list");
@@ -178,7 +299,16 @@ function ServiceCentrePage() {
   const [form, setForm] = useState<Omit<ServiceCentre, "id">>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<ServiceCentre | null>(null);
   const [branchDialogOpen, setBranchDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: ServiceCentre[] = authed
+    ? (live.rows as ServiceCenterDbRow[]).map(rowToView)
+    : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -201,33 +331,84 @@ function ServiceCentrePage() {
     setView("form");
   }
 
-  function openEdit(row: ServiceCentre) {
+  async function openEdit(row: ServiceCentre) {
     setEditing(row);
-    const { id: _, ...rest } = row;
+    const { id: _id, row_version: _rv, ...rest } = row;
     setForm(rest);
     setView("form");
+    // Live: load the Terms child collection into the fixed slots (top-filled).
+    if (authed) {
+      try {
+        const terms = await fetchServiceCenterTerms(row.id);
+        setForm((f) => {
+          const next = { ...f };
+          TERM_KEYS.forEach((k, i) => {
+            next[k] = terms[i] ?? "";
+          });
+          return next;
+        });
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not load terms"));
+      }
+    }
   }
 
-  function save() {
+  async function save() {
+    if (authed) {
+      const raw = formToFields(form);
+      setSaving(true);
+      try {
+        const fields = editing
+          ? serviceCenterUpdateSchema.parse(raw)
+          : serviceCenterCreateSchema.parse(raw);
+        await saveServiceCenter({
+          id: editing?.id ?? null,
+          rowVersion: editing?.row_version ?? null,
+          fields,
+          terms: termsFromForm(form),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: masterKeys.all(serviceCentersResource.key),
+        });
+        toast.success(editing ? "Service centre updated" : "Service centre added");
+        setView("list");
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save service centre"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     if (!form.code.trim() || !form.name.trim()) {
       toast.error("Code and Name are required");
       return;
     }
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
       toast.success("Service centre updated");
     } else {
       const id = `sc-${Date.now()}`;
-      setRows((prev) => [{ id, ...form }, ...prev]);
+      setDemoRows((prev) => [{ id, ...form }, ...prev]);
       toast.success("Service centre added");
     }
     setView("list");
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success("Deleted");
+    const row = deleteTarget;
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success("Deleted");
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete service centre"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success("Deleted");
+    }
     setDeleteTarget(null);
   }
 
@@ -235,7 +416,9 @@ function ServiceCentrePage() {
     const headers = ["Code", "Name", "Branch"];
     const lines = [headers.join(",")];
     for (const r of rows) {
-      lines.push([r.code, r.name, r.branch].map((v) => `"${(v ?? "").replace(/"/g, '""')}"`).join(","));
+      lines.push(
+        [r.code, r.name, r.branch].map((v) => `"${(v ?? "").replace(/"/g, '""')}"`).join(","),
+      );
     }
     const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -247,27 +430,39 @@ function ServiceCentrePage() {
     toast.success("Exported CSV");
   }
 
-  function importCsv(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result || "");
-      const lines = text.split(/\r?\n/).filter(Boolean);
-      if (lines.length < 2) return;
-      const parsed: ServiceCentre[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cells = parseCsvLine(lines[i]);
-        if (cells.length < 3) continue;
-        parsed.push({
-          id: `sc-imp-${Date.now()}-${i}`,
-          code: cells[0] ?? "",
-          name: cells[1] ?? "",
-          branch: cells[2] ?? "",
+  async function importFile(file: File) {
+    try {
+      const text = await file.text();
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) return toast.error("File is empty");
+
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          serviceCentersResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
+
+      const parsedRows: ServiceCentre[] = [];
+      let i = 0;
+      for (const rec of mapCsvToImportRows(parsed.rows, ["code", "name", "branch"])) {
+        if (!rec.code?.trim()) continue;
+        parsedRows.push({
+          id: `sc-imp-${Date.now()}-${i++}`,
+          code: rec.code.trim(),
+          name: (rec.name || "").trim(),
+          branch: (rec.branch || "").trim(),
         });
       }
-      setRows((prev) => [...parsed, ...prev]);
-      toast.success(`Imported ${parsed.length} rows`);
-    };
-    reader.readAsText(file);
+      if (parsedRows.length === 0) return toast.error("No valid rows found");
+      setDemoRows((prev) => [...parsedRows, ...prev]);
+      toast.success(`Imported ${parsedRows.length} rows`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
   }
 
   const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
@@ -313,7 +508,7 @@ function ServiceCentrePage() {
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) importCsv(f);
+              if (f) importFile(f);
               e.target.value = "";
             }}
           />
@@ -322,33 +517,50 @@ function ServiceCentrePage() {
               <div className="flex items-center gap-1.5">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="outline" size="icon" className="h-9 w-9 bg-background" onClick={exportCsv} aria-label="Export">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 bg-background"
+                      onClick={exportCsv}
+                      aria-label="Export"
+                    >
                       <Download className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Export</TooltipContent>
                 </Tooltip>
+                {canAdd ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 bg-background"
+                        onClick={() => importInputRef.current?.click()}
+                        aria-label="Import"
+                      >
+                        <Upload className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Import</TooltipContent>
+                  </Tooltip>
+                ) : null}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="outline"
                       size="icon"
                       className="h-9 w-9 bg-background"
-                      onClick={() => importInputRef.current?.click()}
-                      aria-label="Import"
-                    >
-                      <Upload className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Import</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-9 w-9 bg-background"
-                      onClick={() => setRows(SEED)}
+                      onClick={() => {
+                        setSearch("");
+                        setPage(1);
+                        if (authed)
+                          queryClient.invalidateQueries({
+                            queryKey: masterKeys.all(serviceCentersResource.key),
+                          });
+                        else setDemoRows(SEED);
+                        toast.success("Refreshed");
+                      }}
                       aria-label="Refresh"
                     >
                       <RefreshCw className="h-4 w-4" />
@@ -372,10 +584,12 @@ function ServiceCentrePage() {
                   className="h-9 w-56 pl-8"
                 />
               </div>
-              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-                <Plus className="h-4 w-4" />
-                Add
-              </Button>
+              {canAdd ? (
+                <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                  <Plus className="h-4 w-4" />
+                  Add
+                </Button>
+              ) : null}
             </div>
           </div>
 
@@ -392,7 +606,10 @@ function ServiceCentrePage() {
               <TableBody>
                 {pageRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="h-32 text-center text-sm text-muted-foreground">
+                    <TableCell
+                      colSpan={4}
+                      className="h-32 text-center text-sm text-muted-foreground"
+                    >
                       No data available in table.
                     </TableCell>
                   </TableRow>
@@ -404,24 +621,28 @@ function ServiceCentrePage() {
                       <TableCell>{r.branch}</TableCell>
                       <TableCell className="text-center">
                         <div className="flex justify-center gap-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            onClick={() => openEdit(r)}
-                            aria-label={`Edit ${r.code}`}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-destructive hover:text-destructive"
-                            onClick={() => setDeleteTarget(r)}
-                            aria-label={`Delete ${r.code}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {canModify ? (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              onClick={() => openEdit(r)}
+                              aria-label={`Edit ${r.code}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          ) : null}
+                          {canDelete ? (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => setDeleteTarget(r)}
+                              aria-label={`Delete ${r.code}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          ) : null}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -502,6 +723,7 @@ function ServiceCentrePage() {
           form={form}
           setForm={setForm}
           editing={editing}
+          saving={saving}
           onCancel={() => setView("list")}
           onSave={save}
           openBranchDialog={() => setBranchDialogOpen(true)}
@@ -535,33 +757,6 @@ function ServiceCentrePage() {
   );
 }
 
-function parseCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"' && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else if (ch === '"') {
-        inQuotes = false;
-      } else {
-        cur += ch;
-      }
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ",") {
-        out.push(cur);
-        cur = "";
-      } else cur += ch;
-    }
-  }
-  out.push(cur);
-  return out;
-}
-
 function Field({
   label,
   children,
@@ -579,13 +774,7 @@ function Field({
   );
 }
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <Card className="p-5 space-y-4">
       <div className="inline-flex items-center px-3 py-1 rounded-full bg-sidebar text-sidebar-foreground text-xs font-medium">
@@ -600,6 +789,7 @@ function ServiceCentreForm({
   form,
   setForm,
   editing,
+  saving,
   onCancel,
   onSave,
   openBranchDialog,
@@ -607,6 +797,7 @@ function ServiceCentreForm({
   form: Omit<ServiceCentre, "id">;
   setForm: React.Dispatch<React.SetStateAction<Omit<ServiceCentre, "id">>>;
   editing: ServiceCentre | null;
+  saving: boolean;
   onCancel: () => void;
   onSave: () => void;
   openBranchDialog: () => void;
@@ -662,7 +853,10 @@ function ServiceCentreForm({
             </div>
           </Field>
           <Field label="Telephone">
-            <Input value={form.telephone ?? ""} onChange={(e) => set("telephone", e.target.value)} />
+            <Input
+              value={form.telephone ?? ""}
+              onChange={(e) => set("telephone", e.target.value)}
+            />
           </Field>
           <Field label="Email Address">
             <Input value={form.email ?? ""} onChange={(e) => set("email", e.target.value)} />
@@ -699,20 +893,7 @@ function ServiceCentreForm({
 
       <Section title="Terms">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {(
-            [
-              "terms1",
-              "terms2",
-              "terms3",
-              "terms4",
-              "terms5",
-              "terms6",
-              "terms7",
-              "terms8",
-              "terms9",
-              "terms10",
-            ] as const
-          ).map((k, i) => (
+          {TERM_KEYS.map((k, i) => (
             <Field key={k} label={`Terms ${i + 1}`}>
               <Input value={form[k] ?? ""} onChange={(e) => set(k, e.target.value)} />
             </Field>
@@ -726,7 +907,10 @@ function ServiceCentreForm({
             <Input value={form.bankName ?? ""} onChange={(e) => set("bankName", e.target.value)} />
           </Field>
           <Field label="Account No">
-            <Input value={form.accountNo ?? ""} onChange={(e) => set("accountNo", e.target.value)} />
+            <Input
+              value={form.accountNo ?? ""}
+              onChange={(e) => set("accountNo", e.target.value)}
+            />
           </Field>
           <Field label="Account Name">
             <Input
@@ -824,7 +1008,10 @@ function ServiceCentreForm({
             />
           </Field>
           <Field label="RCP Last No.">
-            <Input value={form.rcpLastNo ?? ""} onChange={(e) => set("rcpLastNo", e.target.value)} />
+            <Input
+              value={form.rcpLastNo ?? ""}
+              onChange={(e) => set("rcpLastNo", e.target.value)}
+            />
           </Field>
         </div>
       </Section>
@@ -832,15 +1019,14 @@ function ServiceCentreForm({
       <div className="flex justify-end gap-2 pb-6">
         <Button
           onClick={onSave}
+          disabled={saving}
           className="bg-emerald-600 text-white hover:bg-emerald-600/90"
         >
-          {editing ? "Update" : "Save"}
+          {saving ? "Saving…" : editing ? "Update" : "Save"}
         </Button>
         <Button variant="destructive" onClick={onCancel}>
           Cancel
         </Button>
-
-
       </div>
     </div>
   );

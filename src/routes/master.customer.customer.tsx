@@ -60,12 +60,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -77,8 +72,27 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { MasterLookupDialog, type LookupReturn } from "@/components/master-lookup-dialog";
 import type { LookupKey } from "@/lib/master-lookups";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import {
+  customersResource,
+  fetchCustomerChildren,
+  saveCustomer,
+  type CustomerRow as CustomerDbRow,
+} from "@/lib/masters/resources/customers";
+import { customerCreateSchema } from "@/lib/masters/schemas/customers";
+import {
+  dbCustomerToUi,
+  uiCustomerToSavePayload,
+  type UiCustomerRow,
+} from "@/lib/masters/customerUiMap";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
 
 // ---------- Types ----------
 type CustomerStatus = "Active" | "In-Active";
@@ -105,6 +119,7 @@ type CustomerRow = {
   volumetrics: VolumetricRow[];
   kyc: KycRow[];
   addresses: AddressRow[];
+  row_version?: number;
 };
 
 type PersonalDetails = {
@@ -470,12 +485,7 @@ const PAYMENT_TYPES = ["Credit", "Cash", "Cheque"];
 const BILLING_TYPES = ["Select Billing Type", "Weekly", "Monthly", "Fortnightly"];
 const FIRMS = ["Select Firm", "Govt", "Non Govt"];
 const SHIPPER_TYPES = ["Select Lsp Type", "Individual", "Company"];
-const BUSINESS_CHANNELS = [
-  "Select Customer Type",
-  "Retail",
-  "Corporate",
-  "E-commerce",
-];
+const BUSINESS_CHANNELS = ["Select Customer Type", "Retail", "Corporate", "E-commerce"];
 const MEASUREMENT_UNITS = ["Centimeter", "Inch"];
 const API_NAMES = ["", "DTDC", "BlueDart", "FedEx"];
 const INCENTIVE_TYPES = ["Percentage", "Flat"];
@@ -499,7 +509,19 @@ export const Route = createFileRoute("/master/customer/customer")({
 
 // ---------- Main ----------
 function CustomerPage() {
-  const [rows, setRows] = useState<CustomerRow[]>([]);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(customersResource);
+  const live = useMasterList(customersResource, {
+    enabled: authed,
+    labelRefs: [
+      { idField: "service_center_id", table: "service_centers", as: "service_center" },
+      { idField: "state_id", table: "states", as: "state" },
+      { idField: "billing_state_id", table: "states", as: "billing_state" },
+    ],
+  });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<CustomerRow[]>([]);
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState({
     code: "",
@@ -517,21 +539,40 @@ function CustomerPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CustomerRow | null>(null);
   const [form, setForm] = useState<CustomerRow>(emptyCustomer());
-  const [activeTab, setActiveTab] =
-    useState<"personal" | "fuel" | "other" | "volumetric" | "kyc" | "address">("personal");
+  const [activeTab, setActiveTab] = useState<
+    "personal" | "fuel" | "other" | "volumetric" | "kyc" | "address"
+  >("personal");
   const [personalStep, setPersonalStep] = useState<0 | 1 | 2 | 3 | 4>(0);
 
   const [deleteTarget, setDeleteTarget] = useState<CustomerRow | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: CustomerRow[] = authed
+    ? (live.rows as CustomerDbRow[]).map((r) => dbCustomerToUi(r) as unknown as CustomerRow)
+    : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       if (q) {
         const hay = [
-          r.code, r.branch, r.serviceCentre, r.name,
-          r.contact, r.phone, r.email, r.status, r.contractHead,
-        ].join(" ").toLowerCase();
+          r.code,
+          r.branch,
+          r.serviceCentre,
+          r.name,
+          r.contact,
+          r.phone,
+          r.email,
+          r.status,
+          r.contractHead,
+        ]
+          .join(" ")
+          .toLowerCase();
         if (!hay.includes(q)) return false;
       }
       const entries: [keyof typeof colFilters, string][] = [
@@ -555,10 +596,7 @@ function CustomerPage() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const pageRows = filtered.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE,
-  );
+  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const endIdx = Math.min(currentPage * PAGE_SIZE, filtered.length);
 
@@ -570,9 +608,26 @@ function CustomerPage() {
     setOpen(true);
   };
 
-  const openEdit = (row: CustomerRow) => {
-    setEditing(row);
-    setForm(structuredClone(row));
+  const openEdit = async (row: CustomerRow) => {
+    if (authed) {
+      try {
+        const children = await fetchCustomerChildren(row.id);
+        const dbRow = (live.rows as CustomerDbRow[]).find((r) => r.id === row.id);
+        if (!dbRow) {
+          toast.error("Customer not found");
+          return;
+        }
+        const ui = dbCustomerToUi(dbRow, children) as unknown as CustomerRow;
+        setEditing({ ...ui, row_version: dbRow.row_version });
+        setForm(structuredClone({ ...ui, row_version: dbRow.row_version }));
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not load customer"));
+        return;
+      }
+    } else {
+      setEditing(row);
+      setForm(structuredClone(row));
+    }
     setActiveTab("personal");
     setPersonalStep(0);
     setOpen(true);
@@ -596,7 +651,7 @@ function CustomerPage() {
     return patched;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.personal.name.trim()) {
       toast.error("Customer Name is required");
       setActiveTab("personal");
@@ -610,35 +665,88 @@ function CustomerPage() {
       return;
     }
     const patched = commitCustomer();
+    if (authed) {
+      setSaving(true);
+      try {
+        const payload = uiCustomerToSavePayload(patched as unknown as UiCustomerRow);
+        const fields = customerCreateSchema.parse(payload.fields);
+        await saveCustomer({
+          id: editing?.id ?? null,
+          rowVersion: editing?.row_version ?? null,
+          fields,
+          addresses: payload.addresses,
+          wizardExtras: payload.wizardExtras,
+          fuelSurcharges: payload.fuelSurcharges,
+          otherCharges: payload.otherCharges,
+          volumetrics: payload.volumetrics,
+          kycDocuments: payload.kycDocuments,
+        });
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(customersResource.key) });
+        toast.success(editing ? "Customer updated" : "Customer added");
+        setOpen(false);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save customer"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     if (editing) {
-      setRows((prev) =>
+      setDemoRows((prev) =>
         prev.map((r) => (r.id === editing.id ? { ...patched, id: editing.id } : r)),
       );
       toast.success("Customer updated");
     } else {
       const id = crypto.randomUUID();
-      setRows((prev) => [{ ...patched, id }, ...prev]);
+      setDemoRows((prev) => [{ ...patched, id }, ...prev]);
       toast.success("Customer added");
     }
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success(`Deleted ${deleteTarget.code || deleteTarget.name}`);
+    const row = deleteTarget;
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.code || row.name}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete customer"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.code || row.name}`);
+    }
     setDeleteTarget(null);
   };
 
   const handleExport = () => {
     const header = [
-      "Customer Code", "Branch", "Service Centre", "Name",
-      "Contact", "Phone", "Email", "Status", "Contract Head",
+      "Customer Code",
+      "Branch",
+      "Service Centre",
+      "Name",
+      "Contact",
+      "Phone",
+      "Email",
+      "Status",
+      "Contract Head",
     ];
     const csv = [
       header.join(","),
       ...rows.map((r) =>
-        [r.code, r.branch, r.serviceCentre, r.name, r.contact, r.phone, r.email, r.status, r.contractHead]
+        [
+          r.code,
+          r.branch,
+          r.serviceCentre,
+          r.name,
+          r.contact,
+          r.phone,
+          r.email,
+          r.status,
+          r.contractHead,
+        ]
           .map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`)
           .join(","),
       ),
@@ -660,16 +768,42 @@ function CustomerPage() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    toast.success(`Selected ${file.name}`);
+    try {
+      const text = await file.text();
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) return toast.error("File is empty");
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          customersResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
+      toast.success(`Selected ${file.name}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
   };
 
   const handleRefresh = () => {
     setSearch("");
     setColFilters({
-      code: "", branch: "", serviceCentre: "", name: "",
-      contact: "", phone: "", email: "", status: "", contractHead: "",
+      code: "",
+      branch: "",
+      serviceCentre: "",
+      name: "",
+      contact: "",
+      phone: "",
+      email: "",
+      status: "",
+      contractHead: "",
     });
     setPage(1);
+    if (authed) {
+      void queryClient.invalidateQueries({ queryKey: masterKeys.all(customersResource.key) });
+    }
     toast.success("Refreshed");
   };
 
@@ -733,15 +867,20 @@ function CustomerPage() {
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
                 placeholder="Search..."
                 className="h-9 w-56 pl-8"
               />
             </div>
-            <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add
-            </Button>
+            {canAdd && (
+              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            )}
           </div>
         </div>
 
@@ -792,7 +931,10 @@ function CustomerPage() {
             <TableBody>
               {pageRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="h-32 text-center text-sm text-muted-foreground">
+                  <TableCell
+                    colSpan={10}
+                    className="h-32 text-center text-sm text-muted-foreground"
+                  >
                     No data available in table
                   </TableCell>
                 </TableRow>
@@ -820,12 +962,28 @@ function CustomerPage() {
                     <TableCell>{r.contractHead}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
-                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)} aria-label={`Edit ${r.code}`}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(r)} aria-label={`Delete ${r.code}`}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canModify && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => void openEdit(r)}
+                            aria-label={`Edit ${r.code}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(r)}
+                            aria-label={`Delete ${r.code}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -842,11 +1000,22 @@ function CustomerPage() {
               : `Showing ${startIdx} to ${endIdx} of ${filtered.length} entries`}
           </span>
           <div className="flex items-center gap-1">
-            <PagerButton disabled={currentPage === 1} onClick={() => setPage(1)}><ChevronsLeft className="h-4 w-4" /></PagerButton>
-            <PagerButton disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft className="h-4 w-4" /></PagerButton>
+            <PagerButton disabled={currentPage === 1} onClick={() => setPage(1)}>
+              <ChevronsLeft className="h-4 w-4" />
+            </PagerButton>
+            <PagerButton disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </PagerButton>
             <CompactPager total={totalPages} current={currentPage} onSelect={setPage} />
-            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}><ChevronRight className="h-4 w-4" /></PagerButton>
-            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}><ChevronsRight className="h-4 w-4" /></PagerButton>
+            <PagerButton
+              disabled={currentPage === totalPages}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </PagerButton>
+            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
+              <ChevronsRight className="h-4 w-4" />
+            </PagerButton>
           </div>
         </div>
       </Card>
@@ -874,6 +1043,7 @@ function CustomerPage() {
               setForm={setForm}
               onSave={handleSave}
               onClose={() => setOpen(false)}
+              saving={saving}
             />
           )}
 
@@ -990,6 +1160,7 @@ function PersonalInformationTab({
   setForm,
   onSave,
   onClose,
+  saving = false,
 }: {
   step: 0 | 1 | 2 | 3 | 4;
   onStep: (n: 0 | 1 | 2 | 3 | 4) => void;
@@ -997,6 +1168,7 @@ function PersonalInformationTab({
   setForm: React.Dispatch<React.SetStateAction<CustomerRow>>;
   onSave: () => void;
   onClose: () => void;
+  saving?: boolean;
 }) {
   const steps = [
     { icon: User, label: "Personal Details" },
@@ -1056,19 +1228,30 @@ function PersonalInformationTab({
       <DialogFooter className="mt-2 items-center justify-between gap-2 sm:justify-between">
         <div>
           {step > 0 && (
-            <Button variant="outline" onClick={prev}>Previous</Button>
+            <Button variant="outline" onClick={prev}>
+              Previous
+            </Button>
           )}
         </div>
         <div className="flex gap-2">
-          <Button onClick={onSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+          <Button
+            onClick={onSave}
+            disabled={saving}
+            className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+          >
             Save
           </Button>
           {step < 4 && (
-            <Button onClick={next} className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
+            <Button
+              onClick={next}
+              className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+            >
               Next
             </Button>
           )}
-          <Button variant="destructive" onClick={onClose}>Close</Button>
+          <Button variant="destructive" onClick={onClose}>
+            Close
+          </Button>
         </div>
       </DialogFooter>
     </div>
@@ -1077,7 +1260,8 @@ function PersonalInformationTab({
 
 // ---------- Step 1: Personal Details ----------
 function StepPersonalDetails({
-  form, setForm,
+  form,
+  setForm,
 }: {
   form: CustomerRow;
   setForm: React.Dispatch<React.SetStateAction<CustomerRow>>;
@@ -1096,7 +1280,10 @@ function StepPersonalDetails({
           <Input value={p.name} onChange={(e) => patch({ name: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Contact Person">
-          <Input value={p.contactPerson} onChange={(e) => patch({ contactPerson: e.target.value })} />
+          <Input
+            value={p.contactPerson}
+            onChange={(e) => patch({ contactPerson: e.target.value })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Address1">
           <Input value={p.address1} onChange={(e) => patch({ address1: e.target.value })} />
@@ -1106,7 +1293,12 @@ function StepPersonalDetails({
           <Input value={p.address2} onChange={(e) => patch({ address2: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Pin Code">
-          <SearchField lookup="pinCode" returnField="code" value={p.pinCode} onChange={(v) => patch({ pinCode: v })} />
+          <SearchField
+            lookup="pinCode"
+            returnField="code"
+            value={p.pinCode}
+            onChange={(v) => patch({ pinCode: v })}
+          />
         </FieldWrapper>
         <FieldWrapper label="City">
           <Input value={p.city} onChange={(e) => patch({ city: e.target.value })} />
@@ -1122,7 +1314,11 @@ function StepPersonalDetails({
           <Input value={p.tel2} onChange={(e) => patch({ tel2: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Email ID">
-          <Input placeholder="abc@xyz.com; mno@pqr.net" value={p.emailId} onChange={(e) => patch({ emailId: e.target.value })} />
+          <Input
+            placeholder="abc@xyz.com; mno@pqr.net"
+            value={p.emailId}
+            onChange={(e) => patch({ emailId: e.target.value })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Mobile" required>
           <Input value={p.mobile} onChange={(e) => patch({ mobile: e.target.value })} />
@@ -1132,10 +1328,18 @@ function StepPersonalDetails({
           <Input value={p.faxNo} onChange={(e) => patch({ faxNo: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Customer Billing State" required>
-          <SearchField lookup="state" value={p.customerBillingState} onChange={(v) => patch({ customerBillingState: v })} />
+          <SearchField
+            lookup="state"
+            value={p.customerBillingState}
+            onChange={(v) => patch({ customerBillingState: v })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Service Centre" required>
-          <SearchField lookup="serviceCentre" value={p.serviceCentre} onChange={(v) => patch({ serviceCentre: v })} />
+          <SearchField
+            lookup="serviceCentre"
+            value={p.serviceCentre}
+            onChange={(v) => patch({ serviceCentre: v })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Start Date" required>
           <DateField value={p.startDate} onChange={(v) => patch({ startDate: v })} />
@@ -1143,7 +1347,9 @@ function StepPersonalDetails({
 
         <FieldWrapper label="Status" required>
           <Select value={p.status} onValueChange={(v) => patch({ status: v as CustomerStatus })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="Active">Active</SelectItem>
               <SelectItem value="In-Active">In-Active</SelectItem>
@@ -1151,7 +1357,11 @@ function StepPersonalDetails({
           </Select>
         </FieldWrapper>
         <FieldWrapper label="Origin" required>
-          <SearchField lookup="destination" value={p.origin} onChange={(v) => patch({ origin: v })} />
+          <SearchField
+            lookup="destination"
+            value={p.origin}
+            onChange={(v) => patch({ origin: v })}
+          />
         </FieldWrapper>
         <FieldWrapper label="GST No.">
           <Input value={p.gstNo} onChange={(e) => patch({ gstNo: e.target.value })} />
@@ -1174,21 +1384,36 @@ function StepPersonalDetails({
         </FieldWrapper>
 
         <FieldWrapper label="Invoice Format">
-          <Input value={p.invoiceFormat} onChange={(e) => patch({ invoiceFormat: e.target.value })} />
+          <Input
+            value={p.invoiceFormat}
+            onChange={(e) => patch({ invoiceFormat: e.target.value })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Customer Type">
           <Select value={p.customerType} onValueChange={(v) => patch({ customerType: v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {CUSTOMER_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {CUSTOMER_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FieldWrapper>
         <FieldWrapper label="Register Type">
           <Select value={p.registerType} onValueChange={(v) => patch({ registerType: v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {REGISTER_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {REGISTER_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FieldWrapper>
@@ -1207,7 +1432,8 @@ function StepPersonalDetails({
 
 // ---------- Step 2: Billing Details ----------
 function StepBillingDetails({
-  form, setForm,
+  form,
+  setForm,
 }: {
   form: CustomerRow;
   setForm: React.Dispatch<React.SetStateAction<CustomerRow>>;
@@ -1221,17 +1447,32 @@ function StepBillingDetails({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <FieldWrapper label="Payment Type" required>
           <Select value={b.paymentType} onValueChange={(v) => patch({ paymentType: v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {PAYMENT_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {PAYMENT_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FieldWrapper>
         <FieldWrapper label="Billing Type">
-          <Select value={b.billingType || "Select Billing Type"} onValueChange={(v) => patch({ billingType: v === "Select Billing Type" ? "" : v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+          <Select
+            value={b.billingType || "Select Billing Type"}
+            onValueChange={(v) => patch({ billingType: v === "Select Billing Type" ? "" : v })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {BILLING_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {BILLING_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FieldWrapper>
@@ -1243,20 +1484,32 @@ function StepBillingDetails({
         </FieldWrapper>
 
         <FieldWrapper label="Registration No.">
-          <Input value={b.registrationNo} onChange={(e) => patch({ registrationNo: e.target.value })} />
+          <Input
+            value={b.registrationNo}
+            onChange={(e) => patch({ registrationNo: e.target.value })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Instructions">
           <Input value={b.instructions} onChange={(e) => patch({ instructions: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Credit %">
-          <Input value={b.creditPercent} onChange={(e) => patch({ creditPercent: e.target.value })} />
+          <Input
+            value={b.creditPercent}
+            onChange={(e) => patch({ creditPercent: e.target.value })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Closing Balance">
-          <Input value={b.closingBalance} onChange={(e) => patch({ closingBalance: e.target.value })} />
+          <Input
+            value={b.closingBalance}
+            onChange={(e) => patch({ closingBalance: e.target.value })}
+          />
         </FieldWrapper>
 
         <FieldWrapper label="Unbilled Amount">
-          <Input value={b.unbilledAmount} onChange={(e) => patch({ unbilledAmount: e.target.value })} />
+          <Input
+            value={b.unbilledAmount}
+            onChange={(e) => patch({ unbilledAmount: e.target.value })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Rupee">
           <Input value={b.rupee} onChange={(e) => patch({ rupee: e.target.value })} />
@@ -1265,20 +1518,41 @@ function StepBillingDetails({
           <Input value={b.paisa} onChange={(e) => patch({ paisa: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Contract Head">
-          <SearchField lookup="contractHead" value={b.contractHead} onChange={(v) => patch({ contractHead: v })} />
+          <SearchField
+            lookup="contractHead"
+            value={b.contractHead}
+            onChange={(v) => patch({ contractHead: v })}
+          />
         </FieldWrapper>
 
         <FieldWrapper label="Ledger Head">
-          <SearchField lookup="ledgerHead" value={b.ledgerHead} onChange={(v) => patch({ ledgerHead: v })} />
+          <SearchField
+            lookup="ledgerHead"
+            value={b.ledgerHead}
+            onChange={(v) => patch({ ledgerHead: v })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Contract Origin">
-          <SearchField lookup="destination" value={b.contractOrigin} onChange={(v) => patch({ contractOrigin: v })} />
+          <SearchField
+            lookup="destination"
+            value={b.contractOrigin}
+            onChange={(v) => patch({ contractOrigin: v })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Business Channel">
-          <Select value={b.businessChannel || "Select Customer Type"} onValueChange={(v) => patch({ businessChannel: v === "Select Customer Type" ? "" : v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+          <Select
+            value={b.businessChannel || "Select Customer Type"}
+            onValueChange={(v) => patch({ businessChannel: v === "Select Customer Type" ? "" : v })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {BUSINESS_CHANNELS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {BUSINESS_CHANNELS.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FieldWrapper>
@@ -1296,10 +1570,19 @@ function StepBillingDetails({
           <Input value={b.bankIfsc} onChange={(e) => patch({ bankIfsc: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Firm">
-          <Select value={b.firm || "Select Firm"} onValueChange={(v) => patch({ firm: v === "Select Firm" ? "" : v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+          <Select
+            value={b.firm || "Select Firm"}
+            onValueChange={(v) => patch({ firm: v === "Select Firm" ? "" : v })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {FIRMS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {FIRMS.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FieldWrapper>
@@ -1314,10 +1597,19 @@ function StepBillingDetails({
           <DateField value={b.lutTillDate} onChange={(v) => patch({ lutTillDate: v })} />
         </FieldWrapper>
         <FieldWrapper label="Shipper Type">
-          <Select value={b.shipperType || "Select Lsp Type"} onValueChange={(v) => patch({ shipperType: v === "Select Lsp Type" ? "" : v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+          <Select
+            value={b.shipperType || "Select Lsp Type"}
+            onValueChange={(v) => patch({ shipperType: v === "Select Lsp Type" ? "" : v })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {SHIPPER_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {SHIPPER_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FieldWrapper>
@@ -1325,11 +1617,27 @@ function StepBillingDetails({
 
       <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
         <CheckField label="NFEI" checked={b.nfei} onChange={(v) => patch({ nfei: v })} />
-        <CheckField label="Fuel Surcharge" checked={b.fuelSurcharge} onChange={(v) => patch({ fuelSurcharge: v })} />
+        <CheckField
+          label="Fuel Surcharge"
+          checked={b.fuelSurcharge}
+          onChange={(v) => patch({ fuelSurcharge: v })}
+        />
         <CheckField label="Tax" checked={b.tax} onChange={(v) => patch({ tax: v })} />
-        <CheckField label="No Tarrif" checked={b.noTariff} onChange={(v) => patch({ noTariff: v })} />
-        <CheckField label="Inclusive Tax" checked={b.inclusiveTax} onChange={(v) => patch({ inclusiveTax: v })} />
-        <CheckField label="Allow Login With OTP" checked={b.allowLoginWithOtp} onChange={(v) => patch({ allowLoginWithOtp: v })} />
+        <CheckField
+          label="No Tarrif"
+          checked={b.noTariff}
+          onChange={(v) => patch({ noTariff: v })}
+        />
+        <CheckField
+          label="Inclusive Tax"
+          checked={b.inclusiveTax}
+          onChange={(v) => patch({ inclusiveTax: v })}
+        />
+        <CheckField
+          label="Allow Login With OTP"
+          checked={b.allowLoginWithOtp}
+          onChange={(v) => patch({ allowLoginWithOtp: v })}
+        />
       </div>
     </Section>
   );
@@ -1337,7 +1645,8 @@ function StepBillingDetails({
 
 // ---------- Step 3: Contract Details ----------
 function StepContractDetails({
-  form, setForm,
+  form,
+  setForm,
 }: {
   form: CustomerRow;
   setForm: React.Dispatch<React.SetStateAction<CustomerRow>>;
@@ -1357,7 +1666,9 @@ function StepContractDetails({
             setForm((s) => ({ ...s, contract: { ...s.contract, fileName: f?.name ?? "" } }));
           }}
         />
-        <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>Choose</Button>
+        <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+          Choose
+        </Button>
         <span className="text-xs text-muted-foreground">{c.fileName || "No file selected"}</span>
         <Button
           size="sm"
@@ -1376,7 +1687,8 @@ function StepContractDetails({
 
 // ---------- Step 4: Other Details ----------
 function StepOtherDetails({
-  form, setForm,
+  form,
+  setForm,
 }: {
   form: CustomerRow;
   setForm: React.Dispatch<React.SetStateAction<CustomerRow>>;
@@ -1390,25 +1702,42 @@ function StepOtherDetails({
     <Section title="Other Details">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <FieldWrapper label="Sales Executive">
-          <SearchField lookup="salesExecutive" value={o.salesExecutive} onChange={(v) => patch({ salesExecutive: v })} />
+          <SearchField
+            lookup="salesExecutive"
+            value={o.salesExecutive}
+            onChange={(v) => patch({ salesExecutive: v })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Incentive Type">
           <Select value={o.incentiveType} onValueChange={(v) => patch({ incentiveType: v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {INCENTIVE_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {INCENTIVE_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FieldWrapper>
         <FieldWrapper label="Incentive Percent">
-          <Input value={o.incentivePercent} onChange={(e) => patch({ incentivePercent: e.target.value })} />
+          <Input
+            value={o.incentivePercent}
+            onChange={(e) => patch({ incentivePercent: e.target.value })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Customer Msg">
           <Input value={o.customerMsg} onChange={(e) => patch({ customerMsg: e.target.value })} />
         </FieldWrapper>
 
         <FieldWrapper label="Account Email">
-          <Input placeholder="abc@xyz.com; pqr@mno.net" value={o.accountEmail} onChange={(e) => patch({ accountEmail: e.target.value })} />
+          <Input
+            placeholder="abc@xyz.com; pqr@mno.net"
+            value={o.accountEmail}
+            onChange={(e) => patch({ accountEmail: e.target.value })}
+          />
         </FieldWrapper>
         <FieldWrapper label="Best Rate">
           <SearchField value={o.bestRate} onChange={(v) => patch({ bestRate: v })} />
@@ -1417,7 +1746,10 @@ function StepOtherDetails({
           <Input value={o.monthlySales} onChange={(e) => patch({ monthlySales: e.target.value })} />
         </FieldWrapper>
         <FieldWrapper label="Default Vendor">
-          <Input value={o.defaultVendor} onChange={(e) => patch({ defaultVendor: e.target.value })} />
+          <Input
+            value={o.defaultVendor}
+            onChange={(e) => patch({ defaultVendor: e.target.value })}
+          />
         </FieldWrapper>
 
         <FieldWrapper label="User">
@@ -1445,7 +1777,11 @@ function StepOtherDetails({
           <SearchField lookup="area" value={o.area} onChange={(v) => patch({ area: v })} />
         </FieldWrapper>
         <FieldWrapper label="Field Executive">
-          <SearchField lookup="fieldExecutive" value={o.fieldExecutive} onChange={(v) => patch({ fieldExecutive: v })} />
+          <SearchField
+            lookup="fieldExecutive"
+            value={o.fieldExecutive}
+            onChange={(v) => patch({ fieldExecutive: v })}
+          />
         </FieldWrapper>
 
         <FieldWrapper label="Monday">
@@ -1471,32 +1807,59 @@ function StepOtherDetails({
           <Input value={o.sunday} onChange={(e) => patch({ sunday: e.target.value })} />
         </FieldWrapper>
         <div className="flex items-end">
-          <CheckField label="Global Customer" checked={o.globalCustomer} onChange={(v) => patch({ globalCustomer: v })} />
+          <CheckField
+            label="Global Customer"
+            checked={o.globalCustomer}
+            onChange={(v) => patch({ globalCustomer: v })}
+          />
         </div>
 
         <FieldWrapper label="API Names">
-          <Select value={o.apiNames || "__none"} onValueChange={(v) => patch({ apiNames: v === "__none" ? "" : v })}>
-            <SelectTrigger><SelectValue placeholder="API Names" /></SelectTrigger>
+          <Select
+            value={o.apiNames || "__none"}
+            onValueChange={(v) => patch({ apiNames: v === "__none" ? "" : v })}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="API Names" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="__none">API Names</SelectItem>
-              {API_NAMES.filter(Boolean).map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {API_NAMES.filter(Boolean).map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FieldWrapper>
         <FieldWrapper label="Measurement Unit">
           <Select value={o.measurementUnit} onValueChange={(v) => patch({ measurementUnit: v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {MEASUREMENT_UNITS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {MEASUREMENT_UNITS.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FieldWrapper>
         <FieldWrapper label="Industry">
-          <SearchField lookup="industry" value={o.industry} onChange={(v) => patch({ industry: v })} />
+          <SearchField
+            lookup="industry"
+            value={o.industry}
+            onChange={(v) => patch({ industry: v })}
+          />
         </FieldWrapper>
         <FieldWrapper label="GeoLocation">
           <div className="relative">
-            <Input value={o.geoLocation} onChange={(e) => patch({ geoLocation: e.target.value })} className="pr-9" />
+            <Input
+              value={o.geoLocation}
+              onChange={(e) => patch({ geoLocation: e.target.value })}
+              className="pr-9"
+            />
             <button
               type="button"
               className="absolute right-1 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
@@ -1510,9 +1873,21 @@ function StepOtherDetails({
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-        <CheckField label="Disable Customer Origin" checked={o.disableCustomerOrigin} onChange={(v) => patch({ disableCustomerOrigin: v })} />
-        <CheckField label="Enable Customer Tax And Duties Paid By" checked={o.enableCustomerTaxAndDutiesPaidBy} onChange={(v) => patch({ enableCustomerTaxAndDutiesPaidBy: v })} />
-        <CheckField label="Enable AWBNo" checked={o.enableAwbNo} onChange={(v) => patch({ enableAwbNo: v })} />
+        <CheckField
+          label="Disable Customer Origin"
+          checked={o.disableCustomerOrigin}
+          onChange={(v) => patch({ disableCustomerOrigin: v })}
+        />
+        <CheckField
+          label="Enable Customer Tax And Duties Paid By"
+          checked={o.enableCustomerTaxAndDutiesPaidBy}
+          onChange={(v) => patch({ enableCustomerTaxAndDutiesPaidBy: v })}
+        />
+        <CheckField
+          label="Enable AWBNo"
+          checked={o.enableAwbNo}
+          onChange={(v) => patch({ enableAwbNo: v })}
+        />
       </div>
     </Section>
   );
@@ -1520,7 +1895,8 @@ function StepOtherDetails({
 
 // ---------- Step 5: Notification ----------
 function StepNotification({
-  form, setForm,
+  form,
+  setForm,
 }: {
   form: CustomerRow;
   setForm: React.Dispatch<React.SetStateAction<CustomerRow>>;
@@ -1531,16 +1907,56 @@ function StepNotification({
   return (
     <Section title="Notification">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <CheckField label="Email Forwarding Info" checked={n.emailForwardingInfo} onChange={(v) => patch({ emailForwardingInfo: v })} />
-        <CheckField label="Email on Progress" checked={n.emailOnProgress} onChange={(v) => patch({ emailOnProgress: v })} />
-        <CheckField label="EStatement" checked={n.eStatement} onChange={(v) => patch({ eStatement: v })} />
-        <CheckField label="E-Invoice" checked={n.eInvoice} onChange={(v) => patch({ eInvoice: v })} />
-        <CheckField label="Email Weight Change" checked={n.emailWeightChange} onChange={(v) => patch({ emailWeightChange: v })} />
-        <CheckField label="Whatsapp Booking Info" checked={n.whatsappBookingInfo} onChange={(v) => patch({ whatsappBookingInfo: v })} />
-        <CheckField label="Whatsapp Delivery Info" checked={n.whatsappDeliveryInfo} onChange={(v) => patch({ whatsappDeliveryInfo: v })} />
-        <CheckField label="Allow Booking when Credit Limit Over" checked={n.allowBookingWhenCreditLimitOver} onChange={(v) => patch({ allowBookingWhenCreditLimitOver: v })} />
-        <CheckField label="Allow Zero Amount" checked={n.allowZeroAmount} onChange={(v) => patch({ allowZeroAmount: v })} />
-        <CheckField label="Booking Not to VOID Shipment" checked={n.bookingNotToVoidShipment} onChange={(v) => patch({ bookingNotToVoidShipment: v })} />
+        <CheckField
+          label="Email Forwarding Info"
+          checked={n.emailForwardingInfo}
+          onChange={(v) => patch({ emailForwardingInfo: v })}
+        />
+        <CheckField
+          label="Email on Progress"
+          checked={n.emailOnProgress}
+          onChange={(v) => patch({ emailOnProgress: v })}
+        />
+        <CheckField
+          label="EStatement"
+          checked={n.eStatement}
+          onChange={(v) => patch({ eStatement: v })}
+        />
+        <CheckField
+          label="E-Invoice"
+          checked={n.eInvoice}
+          onChange={(v) => patch({ eInvoice: v })}
+        />
+        <CheckField
+          label="Email Weight Change"
+          checked={n.emailWeightChange}
+          onChange={(v) => patch({ emailWeightChange: v })}
+        />
+        <CheckField
+          label="Whatsapp Booking Info"
+          checked={n.whatsappBookingInfo}
+          onChange={(v) => patch({ whatsappBookingInfo: v })}
+        />
+        <CheckField
+          label="Whatsapp Delivery Info"
+          checked={n.whatsappDeliveryInfo}
+          onChange={(v) => patch({ whatsappDeliveryInfo: v })}
+        />
+        <CheckField
+          label="Allow Booking when Credit Limit Over"
+          checked={n.allowBookingWhenCreditLimitOver}
+          onChange={(v) => patch({ allowBookingWhenCreditLimitOver: v })}
+        />
+        <CheckField
+          label="Allow Zero Amount"
+          checked={n.allowZeroAmount}
+          onChange={(v) => patch({ allowZeroAmount: v })}
+        />
+        <CheckField
+          label="Booking Not to VOID Shipment"
+          checked={n.bookingNotToVoidShipment}
+          onChange={(v) => patch({ bookingNotToVoidShipment: v })}
+        />
       </div>
     </Section>
   );
@@ -1558,11 +1974,24 @@ function FuelSurchargesTab({
 }) {
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState({
-    entryCode: "", fromDate: "", toDate: "", vendor: "", product: "", destination: "", percentage: "",
+    entryCode: "",
+    fromDate: "",
+    toDate: "",
+    vendor: "",
+    product: "",
+    destination: "",
+    percentage: "",
   });
   const [dialog, setDialog] = useState<null | FuelSurchargeRow>(null);
   const [form, setForm] = useState<FuelSurchargeRow>({
-    id: "", entryCode: "", fromDate: "", toDate: "", vendor: "", product: "", destination: "", percentage: "",
+    id: "",
+    entryCode: "",
+    fromDate: "",
+    toDate: "",
+    vendor: "",
+    product: "",
+    destination: "",
+    percentage: "",
   });
 
   const filtered = useMemo(() => {
@@ -1570,15 +1999,34 @@ function FuelSurchargesTab({
     return rows.filter((r) => {
       if (q && !Object.values(r).join(" ").toLowerCase().includes(q)) return false;
       for (const k of Object.keys(filters) as (keyof typeof filters)[]) {
-        if (filters[k] && !String(r[k]).toLowerCase().includes(filters[k].toLowerCase())) return false;
+        if (filters[k] && !String(r[k]).toLowerCase().includes(filters[k].toLowerCase()))
+          return false;
       }
       return true;
     });
   }, [rows, search, filters]);
 
   const openAdd = () => {
-    setForm({ id: "", entryCode: "", fromDate: "", toDate: "", vendor: "", product: "", destination: "", percentage: "" });
-    setDialog({ id: "", entryCode: "", fromDate: "", toDate: "", vendor: "", product: "", destination: "", percentage: "" });
+    setForm({
+      id: "",
+      entryCode: "",
+      fromDate: "",
+      toDate: "",
+      vendor: "",
+      product: "",
+      destination: "",
+      percentage: "",
+    });
+    setDialog({
+      id: "",
+      entryCode: "",
+      fromDate: "",
+      toDate: "",
+      vendor: "",
+      product: "",
+      destination: "",
+      percentage: "",
+    });
   };
   const save = () => {
     if (dialog?.id) {
@@ -1595,10 +2043,29 @@ function FuelSurchargesTab({
     <div className="flex flex-col gap-4 pt-2">
       <SubTableToolbar
         onAdd={openAdd}
-        onExport={() => exportSimpleCsv("fuel_surcharges.csv",
-          ["Entry Code","From Date","To Date","Vendor","Product","Destination","Percentage"],
-          rows.map((r) => [r.entryCode, r.fromDate, r.toDate, r.vendor, r.product, r.destination, r.percentage]),
-        )}
+        onExport={() =>
+          exportSimpleCsv(
+            "fuel_surcharges.csv",
+            [
+              "Entry Code",
+              "From Date",
+              "To Date",
+              "Vendor",
+              "Product",
+              "Destination",
+              "Percentage",
+            ],
+            rows.map((r) => [
+              r.entryCode,
+              r.fromDate,
+              r.toDate,
+              r.vendor,
+              r.product,
+              r.destination,
+              r.percentage,
+            ]),
+          )
+        }
         search={search}
         onSearch={setSearch}
       />
@@ -1616,9 +2083,23 @@ function FuelSurchargesTab({
               <TableHead className="w-24 text-center text-sidebar-foreground">Action</TableHead>
             </TableRow>
             <TableRow className="bg-muted/20 hover:bg-muted/20">
-              {(["entryCode","fromDate","toDate","vendor","product","destination","percentage"] as const).map((k) => (
+              {(
+                [
+                  "entryCode",
+                  "fromDate",
+                  "toDate",
+                  "vendor",
+                  "product",
+                  "destination",
+                  "percentage",
+                ] as const
+              ).map((k) => (
                 <TableHead key={k} className="py-2">
-                  <Input value={filters[k]} onChange={(e) => setFilters((f) => ({ ...f, [k]: e.target.value }))} className="h-8" />
+                  <Input
+                    value={filters[k]}
+                    onChange={(e) => setFilters((f) => ({ ...f, [k]: e.target.value }))}
+                    className="h-8"
+                  />
                 </TableHead>
               ))}
               <TableHead />
@@ -1626,47 +2107,113 @@ function FuelSurchargesTab({
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">No data available in table</TableCell></TableRow>
-            ) : filtered.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell>{r.entryCode}</TableCell>
-                <TableCell>{r.fromDate}</TableCell>
-                <TableCell>{r.toDate}</TableCell>
-                <TableCell>{r.vendor}</TableCell>
-                <TableCell>{r.product}</TableCell>
-                <TableCell>{r.destination}</TableCell>
-                <TableCell>{r.percentage}</TableCell>
-                <TableCell className="text-center">
-                  <div className="flex justify-center gap-1">
-                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setForm(r); setDialog(r); }}><Pencil className="h-4 w-4" /></Button>
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}><Trash2 className="h-4 w-4" /></Button>
-                  </div>
+              <TableRow>
+                <TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">
+                  No data available in table
                 </TableCell>
               </TableRow>
-            ))}
+            ) : (
+              filtered.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{r.entryCode}</TableCell>
+                  <TableCell>{r.fromDate}</TableCell>
+                  <TableCell>{r.toDate}</TableCell>
+                  <TableCell>{r.vendor}</TableCell>
+                  <TableCell>{r.product}</TableCell>
+                  <TableCell>{r.destination}</TableCell>
+                  <TableCell>{r.percentage}</TableCell>
+                  <TableCell className="text-center">
+                    <div className="flex justify-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => {
+                          setForm(r);
+                          setDialog(r);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
 
       <DialogFooter>
-        <Button variant="destructive" onClick={onClose}>Close</Button>
+        <Button variant="destructive" onClick={onClose}>
+          Close
+        </Button>
       </DialogFooter>
 
       <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>{dialog?.id ? "Edit Fuel Surcharge" : "Fuel Surcharge"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{dialog?.id ? "Edit Fuel Surcharge" : "Fuel Surcharge"}</DialogTitle>
+          </DialogHeader>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 py-2">
-            <FieldWrapper label="Entry Code"><Input value={form.entryCode} onChange={(e) => setForm({ ...form, entryCode: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="From Date"><DateField value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} /></FieldWrapper>
-            <FieldWrapper label="To Date"><DateField value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} /></FieldWrapper>
-            <FieldWrapper label="Vendor"><SearchField lookup="vendor" value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} /></FieldWrapper>
-            <FieldWrapper label="Product"><SearchField lookup="product" value={form.product} onChange={(v) => setForm({ ...form, product: v })} /></FieldWrapper>
-            <FieldWrapper label="Destination"><SearchField lookup="destination" value={form.destination} onChange={(v) => setForm({ ...form, destination: v })} /></FieldWrapper>
-            <FieldWrapper label="Percentage"><Input value={form.percentage} onChange={(e) => setForm({ ...form, percentage: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="Entry Code">
+              <Input
+                value={form.entryCode}
+                onChange={(e) => setForm({ ...form, entryCode: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="From Date">
+              <DateField
+                value={form.fromDate}
+                onChange={(v) => setForm({ ...form, fromDate: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="To Date">
+              <DateField value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} />
+            </FieldWrapper>
+            <FieldWrapper label="Vendor">
+              <SearchField
+                lookup="vendor"
+                value={form.vendor}
+                onChange={(v) => setForm({ ...form, vendor: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Product">
+              <SearchField
+                lookup="product"
+                value={form.product}
+                onChange={(v) => setForm({ ...form, product: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Destination">
+              <SearchField
+                lookup="destination"
+                value={form.destination}
+                onChange={(v) => setForm({ ...form, destination: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Percentage">
+              <Input
+                value={form.percentage}
+                onChange={(e) => setForm({ ...form, percentage: e.target.value })}
+              />
+            </FieldWrapper>
           </div>
           <DialogFooter className="gap-2">
-            <Button onClick={save} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-            <Button variant="destructive" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button onClick={save} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+              Save
+            </Button>
+            <Button variant="destructive" onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1687,7 +2234,17 @@ function OtherChargesTab({
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<null | OtherChargeRow>(null);
   const emptyRow = (): OtherChargeRow => ({
-    id: "", chargeType: "", fromDate: "", toDate: "", vendor: "", service: "", product: "", origin: "", destination: "", amount: "", minimumValue: "",
+    id: "",
+    chargeType: "",
+    fromDate: "",
+    toDate: "",
+    vendor: "",
+    service: "",
+    product: "",
+    origin: "",
+    destination: "",
+    amount: "",
+    minimumValue: "",
   });
   const [form, setForm] = useState<OtherChargeRow>(emptyRow());
 
@@ -1710,21 +2267,70 @@ function OtherChargesTab({
     <div className="flex flex-col gap-4 pt-2">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Button size="sm" className="h-9 gap-1.5" onClick={() => { setForm(emptyRow()); setDialog(emptyRow()); }}>
+          <Button
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => {
+              setForm(emptyRow());
+              setDialog(emptyRow());
+            }}
+          >
             <Plus className="h-4 w-4" /> Add
           </Button>
-          <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => toast.info("Bulk Update")}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 gap-1.5"
+            onClick={() => toast.info("Bulk Update")}
+          >
             <Plus className="h-4 w-4" /> Bulk Update
           </Button>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" className="h-9" onClick={() => exportSimpleCsv("other_charges.csv",
-            ["Charge Type","From Date","To Date","Vendor","Service","Product","Origin","Destination","Amount","Minimum Value"],
-            rows.map((r) => [r.chargeType, r.fromDate, r.toDate, r.vendor, r.service, r.product, r.origin, r.destination, r.amount, r.minimumValue]),
-          )}>Export</Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9"
+            onClick={() =>
+              exportSimpleCsv(
+                "other_charges.csv",
+                [
+                  "Charge Type",
+                  "From Date",
+                  "To Date",
+                  "Vendor",
+                  "Service",
+                  "Product",
+                  "Origin",
+                  "Destination",
+                  "Amount",
+                  "Minimum Value",
+                ],
+                rows.map((r) => [
+                  r.chargeType,
+                  r.fromDate,
+                  r.toDate,
+                  r.vendor,
+                  r.service,
+                  r.product,
+                  r.origin,
+                  r.destination,
+                  r.amount,
+                  r.minimumValue,
+                ]),
+              )
+            }
+          >
+            Export
+          </Button>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." className="h-9 w-56 pl-8" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search..."
+              className="h-9 w-56 pl-8"
+            />
           </div>
         </div>
       </div>
@@ -1749,54 +2355,136 @@ function OtherChargesTab({
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={12} className="h-24 text-center text-sm text-muted-foreground">No data available in table</TableCell></TableRow>
-            ) : filtered.map((r, i) => (
-              <TableRow key={r.id}>
-                <TableCell>{i + 1}</TableCell>
-                <TableCell>{r.chargeType}</TableCell>
-                <TableCell>{r.fromDate}</TableCell>
-                <TableCell>{r.toDate}</TableCell>
-                <TableCell>{r.vendor}</TableCell>
-                <TableCell>{r.service}</TableCell>
-                <TableCell>{r.product}</TableCell>
-                <TableCell>{r.origin}</TableCell>
-                <TableCell>{r.destination}</TableCell>
-                <TableCell>{r.amount}</TableCell>
-                <TableCell>{r.minimumValue}</TableCell>
-                <TableCell className="text-center">
-                  <div className="flex justify-center gap-1">
-                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setForm(r); setDialog(r); }}><Pencil className="h-4 w-4" /></Button>
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}><Trash2 className="h-4 w-4" /></Button>
-                  </div>
+              <TableRow>
+                <TableCell colSpan={12} className="h-24 text-center text-sm text-muted-foreground">
+                  No data available in table
                 </TableCell>
               </TableRow>
-            ))}
+            ) : (
+              filtered.map((r, i) => (
+                <TableRow key={r.id}>
+                  <TableCell>{i + 1}</TableCell>
+                  <TableCell>{r.chargeType}</TableCell>
+                  <TableCell>{r.fromDate}</TableCell>
+                  <TableCell>{r.toDate}</TableCell>
+                  <TableCell>{r.vendor}</TableCell>
+                  <TableCell>{r.service}</TableCell>
+                  <TableCell>{r.product}</TableCell>
+                  <TableCell>{r.origin}</TableCell>
+                  <TableCell>{r.destination}</TableCell>
+                  <TableCell>{r.amount}</TableCell>
+                  <TableCell>{r.minimumValue}</TableCell>
+                  <TableCell className="text-center">
+                    <div className="flex justify-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => {
+                          setForm(r);
+                          setDialog(r);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
 
       <DialogFooter>
-        <Button variant="destructive" onClick={onClose}>Close</Button>
+        <Button variant="destructive" onClick={onClose}>
+          Close
+        </Button>
       </DialogFooter>
 
       <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent className="max-w-3xl">
-          <DialogHeader><DialogTitle>{dialog?.id ? "Edit Charge" : "Other Charge"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{dialog?.id ? "Edit Charge" : "Other Charge"}</DialogTitle>
+          </DialogHeader>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3 py-2">
-            <FieldWrapper label="Charge Type"><Input value={form.chargeType} onChange={(e) => setForm({ ...form, chargeType: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="From Date"><DateField value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} /></FieldWrapper>
-            <FieldWrapper label="To Date"><DateField value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} /></FieldWrapper>
-            <FieldWrapper label="Vendor"><SearchField lookup="vendor" value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} /></FieldWrapper>
-            <FieldWrapper label="Service"><SearchField value={form.service} onChange={(v) => setForm({ ...form, service: v })} /></FieldWrapper>
-            <FieldWrapper label="Product"><SearchField lookup="product" value={form.product} onChange={(v) => setForm({ ...form, product: v })} /></FieldWrapper>
-            <FieldWrapper label="Origin"><SearchField lookup="destination" value={form.origin} onChange={(v) => setForm({ ...form, origin: v })} /></FieldWrapper>
-            <FieldWrapper label="Destination"><SearchField lookup="destination" value={form.destination} onChange={(v) => setForm({ ...form, destination: v })} /></FieldWrapper>
-            <FieldWrapper label="Amount"><Input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Minimum Value"><Input value={form.minimumValue} onChange={(e) => setForm({ ...form, minimumValue: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="Charge Type">
+              <Input
+                value={form.chargeType}
+                onChange={(e) => setForm({ ...form, chargeType: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="From Date">
+              <DateField
+                value={form.fromDate}
+                onChange={(v) => setForm({ ...form, fromDate: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="To Date">
+              <DateField value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} />
+            </FieldWrapper>
+            <FieldWrapper label="Vendor">
+              <SearchField
+                lookup="vendor"
+                value={form.vendor}
+                onChange={(v) => setForm({ ...form, vendor: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Service">
+              <SearchField
+                value={form.service}
+                onChange={(v) => setForm({ ...form, service: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Product">
+              <SearchField
+                lookup="product"
+                value={form.product}
+                onChange={(v) => setForm({ ...form, product: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Origin">
+              <SearchField
+                lookup="destination"
+                value={form.origin}
+                onChange={(v) => setForm({ ...form, origin: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Destination">
+              <SearchField
+                lookup="destination"
+                value={form.destination}
+                onChange={(v) => setForm({ ...form, destination: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Amount">
+              <Input
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Minimum Value">
+              <Input
+                value={form.minimumValue}
+                onChange={(e) => setForm({ ...form, minimumValue: e.target.value })}
+              />
+            </FieldWrapper>
           </div>
           <DialogFooter className="gap-2">
-            <Button onClick={save} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-            <Button variant="destructive" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button onClick={save} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+              Save
+            </Button>
+            <Button variant="destructive" onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1816,14 +2504,24 @@ function VolumetricTab({
 }) {
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<null | VolumetricRow>(null);
-  const emptyRow = (): VolumetricRow => ({ id: "", customerName: "", product: "", vendor: "", service: "", cmDivide: "", inchDivide: "", cft: "" });
+  const emptyRow = (): VolumetricRow => ({
+    id: "",
+    customerName: "",
+    product: "",
+    vendor: "",
+    service: "",
+    cmDivide: "",
+    inchDivide: "",
+    cft: "",
+  });
   const [form, setForm] = useState<VolumetricRow>(emptyRow());
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => !q || Object.values(r).join(" ").toLowerCase().includes(q));
   }, [rows, search]);
   const save = () => {
-    if (dialog?.id) setRows((prev) => prev.map((r) => (r.id === dialog.id ? { ...form, id: dialog.id } : r)));
+    if (dialog?.id)
+      setRows((prev) => prev.map((r) => (r.id === dialog.id ? { ...form, id: dialog.id } : r)));
     else setRows((prev) => [{ ...form, id: crypto.randomUUID() }, ...prev]);
     toast.success("Volumetric saved");
     setDialog(null);
@@ -1832,11 +2530,25 @@ function VolumetricTab({
   return (
     <div className="flex flex-col gap-4 pt-2">
       <SubTableToolbar
-        onAdd={() => { setForm(emptyRow()); setDialog(emptyRow()); }}
-        onExport={() => exportSimpleCsv("volumetrics.csv",
-          ["Customer Name","Product","Vendor","Service","CM Divide","Inch Divide","CFT"],
-          rows.map((r) => [r.customerName, r.product, r.vendor, r.service, r.cmDivide, r.inchDivide, r.cft]),
-        )}
+        onAdd={() => {
+          setForm(emptyRow());
+          setDialog(emptyRow());
+        }}
+        onExport={() =>
+          exportSimpleCsv(
+            "volumetrics.csv",
+            ["Customer Name", "Product", "Vendor", "Service", "CM Divide", "Inch Divide", "CFT"],
+            rows.map((r) => [
+              r.customerName,
+              r.product,
+              r.vendor,
+              r.service,
+              r.cmDivide,
+              r.inchDivide,
+              r.cft,
+            ]),
+          )
+        }
         search={search}
         onSearch={setSearch}
       />
@@ -1856,45 +2568,112 @@ function VolumetricTab({
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">No data available in table</TableCell></TableRow>
-            ) : filtered.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell>{r.customerName}</TableCell>
-                <TableCell>{r.product}</TableCell>
-                <TableCell>{r.vendor}</TableCell>
-                <TableCell>{r.service}</TableCell>
-                <TableCell>{r.cmDivide}</TableCell>
-                <TableCell>{r.inchDivide}</TableCell>
-                <TableCell>{r.cft}</TableCell>
-                <TableCell className="text-center">
-                  <div className="flex justify-center gap-1">
-                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setForm(r); setDialog(r); }}><Pencil className="h-4 w-4" /></Button>
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}><Trash2 className="h-4 w-4" /></Button>
-                  </div>
+              <TableRow>
+                <TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">
+                  No data available in table
                 </TableCell>
               </TableRow>
-            ))}
+            ) : (
+              filtered.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{r.customerName}</TableCell>
+                  <TableCell>{r.product}</TableCell>
+                  <TableCell>{r.vendor}</TableCell>
+                  <TableCell>{r.service}</TableCell>
+                  <TableCell>{r.cmDivide}</TableCell>
+                  <TableCell>{r.inchDivide}</TableCell>
+                  <TableCell>{r.cft}</TableCell>
+                  <TableCell className="text-center">
+                    <div className="flex justify-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => {
+                          setForm(r);
+                          setDialog(r);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
 
-      <DialogFooter><Button variant="destructive" onClick={onClose}>Close</Button></DialogFooter>
+      <DialogFooter>
+        <Button variant="destructive" onClick={onClose}>
+          Close
+        </Button>
+      </DialogFooter>
 
       <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>{dialog?.id ? "Edit Volumetric" : "Volumetric"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{dialog?.id ? "Edit Volumetric" : "Volumetric"}</DialogTitle>
+          </DialogHeader>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 py-2">
-            <FieldWrapper label="Customer Name"><Input value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Product"><SearchField lookup="product" value={form.product} onChange={(v) => setForm({ ...form, product: v })} /></FieldWrapper>
-            <FieldWrapper label="Vendor"><SearchField lookup="vendor" value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} /></FieldWrapper>
-            <FieldWrapper label="Service"><SearchField value={form.service} onChange={(v) => setForm({ ...form, service: v })} /></FieldWrapper>
-            <FieldWrapper label="CM Divide"><Input value={form.cmDivide} onChange={(e) => setForm({ ...form, cmDivide: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Inch Divide"><Input value={form.inchDivide} onChange={(e) => setForm({ ...form, inchDivide: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="CFT"><Input value={form.cft} onChange={(e) => setForm({ ...form, cft: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="Customer Name">
+              <Input
+                value={form.customerName}
+                onChange={(e) => setForm({ ...form, customerName: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Product">
+              <SearchField
+                lookup="product"
+                value={form.product}
+                onChange={(v) => setForm({ ...form, product: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Vendor">
+              <SearchField
+                lookup="vendor"
+                value={form.vendor}
+                onChange={(v) => setForm({ ...form, vendor: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Service">
+              <SearchField
+                value={form.service}
+                onChange={(v) => setForm({ ...form, service: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="CM Divide">
+              <Input
+                value={form.cmDivide}
+                onChange={(e) => setForm({ ...form, cmDivide: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Inch Divide">
+              <Input
+                value={form.inchDivide}
+                onChange={(e) => setForm({ ...form, inchDivide: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="CFT">
+              <Input value={form.cft} onChange={(e) => setForm({ ...form, cft: e.target.value })} />
+            </FieldWrapper>
           </div>
           <DialogFooter className="gap-2">
-            <Button onClick={save} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-            <Button variant="destructive" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button onClick={save} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+              Save
+            </Button>
+            <Button variant="destructive" onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1922,16 +2701,29 @@ function KycTab({
         <div className="min-w-56">
           <Label className="text-xs font-medium text-muted-foreground">KYC Type</Label>
           <Select value={type} onValueChange={setType}>
-            <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="mt-1">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {KYC_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              {KYC_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
         <div className="flex items-center gap-2">
           <Label className="text-xs font-medium text-muted-foreground">Select File</Label>
-          <input ref={fileRef} type="file" className="hidden" onChange={(e) => setFileName(e.target.files?.[0]?.name ?? "")} />
-          <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>Choose</Button>
+          <input
+            ref={fileRef}
+            type="file"
+            className="hidden"
+            onChange={(e) => setFileName(e.target.files?.[0]?.name ?? "")}
+          />
+          <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+            Choose
+          </Button>
           <span className="text-xs text-muted-foreground">{fileName || "No file selected"}</span>
         </div>
         <Button
@@ -1964,7 +2756,14 @@ function KycTab({
                   <TableCell>{r.type}</TableCell>
                   <TableCell>{r.fileName}</TableCell>
                   <TableCell className="text-center">
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}><Trash2 className="h-4 w-4" /></Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-destructive hover:text-destructive"
+                      onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -1973,7 +2772,11 @@ function KycTab({
         </div>
       )}
 
-      <DialogFooter><Button variant="destructive" onClick={onClose}>Close</Button></DialogFooter>
+      <DialogFooter>
+        <Button variant="destructive" onClick={onClose}>
+          Close
+        </Button>
+      </DialogFooter>
     </div>
   );
 }
@@ -1998,9 +2801,13 @@ function AddressTab({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return rows.filter((r) =>
-      !q || [r.name, r.designation, r.mobile, r.city, r.kycFileName, r.fromDate]
-        .join(" ").toLowerCase().includes(q),
+    return rows.filter(
+      (r) =>
+        !q ||
+        [r.name, r.designation, r.mobile, r.city, r.kycFileName, r.fromDate]
+          .join(" ")
+          .toLowerCase()
+          .includes(q),
     );
   }, [rows, search]);
 
@@ -2028,10 +2835,13 @@ function AddressTab({
     <div className="flex flex-col gap-4 pt-2">
       <SubTableToolbar
         onAdd={openAdd}
-        onExport={() => exportSimpleCsv("customer_addresses.csv",
-          ["Contact Person","Start Date","Designation","Mobile","City","Filename"],
-          rows.map((r) => [r.name, r.fromDate, r.designation, r.mobile, r.city, r.kycFileName]),
-        )}
+        onExport={() =>
+          exportSimpleCsv(
+            "customer_addresses.csv",
+            ["Contact Person", "Start Date", "Designation", "Mobile", "City", "Filename"],
+            rows.map((r) => [r.name, r.fromDate, r.designation, r.mobile, r.city, r.kycFileName]),
+          )
+        }
         search={search}
         onSearch={setSearch}
       />
@@ -2050,83 +2860,247 @@ function AddressTab({
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={7} className="h-24 text-center text-sm text-muted-foreground">No data available in table</TableCell></TableRow>
-            ) : filtered.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell>{r.name}</TableCell>
-                <TableCell>{r.fromDate}</TableCell>
-                <TableCell>{r.designation}</TableCell>
-                <TableCell>{r.mobile}</TableCell>
-                <TableCell>{r.city}</TableCell>
-                <TableCell>{r.kycFileName}</TableCell>
-                <TableCell className="text-center">
-                  <div className="flex justify-center gap-1">
-                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setForm(r); setDialog(r); }}><Pencil className="h-4 w-4" /></Button>
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}><Trash2 className="h-4 w-4" /></Button>
-                  </div>
+              <TableRow>
+                <TableCell colSpan={7} className="h-24 text-center text-sm text-muted-foreground">
+                  No data available in table
                 </TableCell>
               </TableRow>
-            ))}
+            ) : (
+              filtered.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{r.name}</TableCell>
+                  <TableCell>{r.fromDate}</TableCell>
+                  <TableCell>{r.designation}</TableCell>
+                  <TableCell>{r.mobile}</TableCell>
+                  <TableCell>{r.city}</TableCell>
+                  <TableCell>{r.kycFileName}</TableCell>
+                  <TableCell className="text-center">
+                    <div className="flex justify-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => {
+                          setForm(r);
+                          setDialog(r);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
 
-      <DialogFooter><Button variant="destructive" onClick={onClose}>Close</Button></DialogFooter>
+      <DialogFooter>
+        <Button variant="destructive" onClick={onClose}>
+          Close
+        </Button>
+      </DialogFooter>
 
       {/* Address form dialog */}
       <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{dialog?.id ? "Edit Address" : "Address"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{dialog?.id ? "Edit Address" : "Address"}</DialogTitle>
+          </DialogHeader>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4 py-2">
-            <FieldWrapper label="Customer"><Input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="Customer">
+              <Input
+                value={form.customer}
+                onChange={(e) => setForm({ ...form, customer: e.target.value })}
+              />
+            </FieldWrapper>
             <FieldWrapper label="Contact Type" required>
               <div className="flex gap-1">
-                <SearchField lookup="contactType" value={form.contactType} onChange={(v) => setForm({ ...form, contactType: v })} />
-                <Button size="icon" className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90" onClick={() => setContactTypeOpen(true)} aria-label="Manage Contact Types">
+                <SearchField
+                  lookup="contactType"
+                  value={form.contactType}
+                  onChange={(v) => setForm({ ...form, contactType: v })}
+                />
+                <Button
+                  size="icon"
+                  className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                  onClick={() => setContactTypeOpen(true)}
+                  aria-label="Manage Contact Types"
+                >
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
             </FieldWrapper>
             <FieldWrapper label="From Date" required>
-              <DateField value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} />
+              <DateField
+                value={form.fromDate}
+                onChange={(v) => setForm({ ...form, fromDate: v })}
+              />
             </FieldWrapper>
-            <FieldWrapper label="Name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="Name" required>
+              <Input
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </FieldWrapper>
 
-            <FieldWrapper label="Designation"><Input value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Email"><Input placeholder="abc@xyz.com, pqr@mno.net" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Mobile No." required><Input value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Landline No."><Input value={form.landline} onChange={(e) => setForm({ ...form, landline: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="Designation">
+              <Input
+                value={form.designation}
+                onChange={(e) => setForm({ ...form, designation: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Email">
+              <Input
+                placeholder="abc@xyz.com, pqr@mno.net"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Mobile No." required>
+              <Input
+                value={form.mobile}
+                onChange={(e) => setForm({ ...form, mobile: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Landline No.">
+              <Input
+                value={form.landline}
+                onChange={(e) => setForm({ ...form, landline: e.target.value })}
+              />
+            </FieldWrapper>
 
-            <FieldWrapper label="Extension No."><Input value={form.extension} onChange={(e) => setForm({ ...form, extension: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Address 1"><Input value={form.address1} onChange={(e) => setForm({ ...form, address1: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Address 2"><Input value={form.address2} onChange={(e) => setForm({ ...form, address2: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Address 3"><Input value={form.address3} onChange={(e) => setForm({ ...form, address3: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="Extension No.">
+              <Input
+                value={form.extension}
+                onChange={(e) => setForm({ ...form, extension: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Address 1">
+              <Input
+                value={form.address1}
+                onChange={(e) => setForm({ ...form, address1: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Address 2">
+              <Input
+                value={form.address2}
+                onChange={(e) => setForm({ ...form, address2: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Address 3">
+              <Input
+                value={form.address3}
+                onChange={(e) => setForm({ ...form, address3: e.target.value })}
+              />
+            </FieldWrapper>
 
-            <FieldWrapper label="PinCode" required><SearchField lookup="pinCode" returnField="code" value={form.pinCode} onChange={(v) => setForm({ ...form, pinCode: v })} /></FieldWrapper>
-            <FieldWrapper label="City"><SearchField value={form.city} onChange={(v) => setForm({ ...form, city: v })} /></FieldWrapper>
-            <FieldWrapper label="State"><SearchField lookup="state" value={form.state} onChange={(v) => setForm({ ...form, state: v })} /></FieldWrapper>
-            <FieldWrapper label="Country"><SearchField lookup="country" value={form.country} onChange={(v) => setForm({ ...form, country: v })} /></FieldWrapper>
+            <FieldWrapper label="PinCode" required>
+              <SearchField
+                lookup="pinCode"
+                returnField="code"
+                value={form.pinCode}
+                onChange={(v) => setForm({ ...form, pinCode: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="City">
+              <SearchField value={form.city} onChange={(v) => setForm({ ...form, city: v })} />
+            </FieldWrapper>
+            <FieldWrapper label="State">
+              <SearchField
+                lookup="state"
+                value={form.state}
+                onChange={(v) => setForm({ ...form, state: v })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Country">
+              <SearchField
+                lookup="country"
+                value={form.country}
+                onChange={(v) => setForm({ ...form, country: v })}
+              />
+            </FieldWrapper>
 
-            <FieldWrapper label="Remark"><Input value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Passport No."><Input value={form.passportNo} onChange={(e) => setForm({ ...form, passportNo: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="Aadhar No."><Input value={form.aadharNo} onChange={(e) => setForm({ ...form, aadharNo: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="GST No."><Input value={form.gstNo} onChange={(e) => setForm({ ...form, gstNo: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="Remark">
+              <Input
+                value={form.remark}
+                onChange={(e) => setForm({ ...form, remark: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Passport No.">
+              <Input
+                value={form.passportNo}
+                onChange={(e) => setForm({ ...form, passportNo: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Aadhar No.">
+              <Input
+                value={form.aadharNo}
+                onChange={(e) => setForm({ ...form, aadharNo: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="GST No.">
+              <Input
+                value={form.gstNo}
+                onChange={(e) => setForm({ ...form, gstNo: e.target.value })}
+              />
+            </FieldWrapper>
 
-            <FieldWrapper label="PAN No."><Input value={form.panNo} onChange={(e) => setForm({ ...form, panNo: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="PAN No.">
+              <Input
+                value={form.panNo}
+                onChange={(e) => setForm({ ...form, panNo: e.target.value })}
+              />
+            </FieldWrapper>
             <div className="flex items-end">
-              <CheckField label="Default Shipper" checked={form.defaultShipper} onChange={(v) => setForm({ ...form, defaultShipper: v })} />
+              <CheckField
+                label="Default Shipper"
+                checked={form.defaultShipper}
+                onChange={(v) => setForm({ ...form, defaultShipper: v })}
+              />
             </div>
-            <FieldWrapper label="IEC No."><Input value={form.iecNo} onChange={(e) => setForm({ ...form, iecNo: e.target.value })} /></FieldWrapper>
-            <FieldWrapper label="AD Code"><Input value={form.adCode} onChange={(e) => setForm({ ...form, adCode: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="IEC No.">
+              <Input
+                value={form.iecNo}
+                onChange={(e) => setForm({ ...form, iecNo: e.target.value })}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="AD Code">
+              <Input
+                value={form.adCode}
+                onChange={(e) => setForm({ ...form, adCode: e.target.value })}
+              />
+            </FieldWrapper>
 
-            <FieldWrapper label="LUT No."><Input value={form.lutNo} onChange={(e) => setForm({ ...form, lutNo: e.target.value })} /></FieldWrapper>
+            <FieldWrapper label="LUT No.">
+              <Input
+                value={form.lutNo}
+                onChange={(e) => setForm({ ...form, lutNo: e.target.value })}
+              />
+            </FieldWrapper>
             <FieldWrapper label="KYC Image">
-              <FileChoose value={form.kycFileName} onChange={(v) => setForm({ ...form, kycFileName: v })} />
+              <FileChoose
+                value={form.kycFileName}
+                onChange={(v) => setForm({ ...form, kycFileName: v })}
+              />
             </FieldWrapper>
           </div>
           <DialogFooter className="gap-2">
-            <Button onClick={save} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-            <Button variant="destructive" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button onClick={save} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+              Save
+            </Button>
+            <Button variant="destructive" onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2144,7 +3118,11 @@ function AddressTab({
 }
 
 function ContactTypeMasterDialog({
-  open, onOpenChange, rows, setRows, onPick,
+  open,
+  onOpenChange,
+  rows,
+  setRows,
+  onPick,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -2180,7 +3158,11 @@ function ContactTypeMasterDialog({
       <DialogContent className="max-w-2xl p-0">
         <div className="flex items-center justify-between rounded-t-lg bg-sidebar px-4 py-3 text-sidebar-foreground">
           <span className="text-sm font-semibold">Contact Master</span>
-          <button onClick={() => onOpenChange(false)} className="text-sidebar-foreground/80 hover:text-sidebar-foreground" aria-label="Close">
+          <button
+            onClick={() => onOpenChange(false)}
+            className="text-sidebar-foreground/80 hover:text-sidebar-foreground"
+            aria-label="Close"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -2190,11 +3172,18 @@ function ContactTypeMasterDialog({
               <FieldWrapper label="Contact Type" required>
                 <Input value={value} onChange={(e) => setValue(e.target.value)} className="w-56" />
               </FieldWrapper>
-              <Button onClick={save} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
+              <Button onClick={save} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+                Save
+              </Button>
             </div>
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search:" className="h-9 w-56 pl-8" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search:"
+                className="h-9 w-56 pl-8"
+              />
             </div>
           </div>
 
@@ -2208,26 +3197,54 @@ function ContactTypeMasterDialog({
               </TableHeader>
               <TableBody>
                 {filtered.length === 0 ? (
-                  <TableRow><TableCell colSpan={2} className="h-16 text-center text-sm text-muted-foreground">No data</TableCell></TableRow>
-                ) : filtered.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>
-                      <button className="text-left hover:text-primary" onClick={() => { onPick(r.name); onOpenChange(false); }}>
-                        {r.name}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setEditingId(r.id); setValue(r.name); }}>
-                          <Pencil className="h-4 w-4 text-primary" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                  <TableRow>
+                    <TableCell
+                      colSpan={2}
+                      className="h-16 text-center text-sm text-muted-foreground"
+                    >
+                      No data
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  filtered.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell>
+                        <button
+                          className="text-left hover:text-primary"
+                          onClick={() => {
+                            onPick(r.name);
+                            onOpenChange(false);
+                          }}
+                        >
+                          {r.name}
+                        </button>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => {
+                              setEditingId(r.id);
+                              setValue(r.name);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4 text-primary" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </div>
@@ -2242,14 +3259,24 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   return (
     <div className="rounded-md border">
       <div className="border-b bg-sidebar px-3 py-1.5">
-        <span className="inline-block rounded-full bg-sidebar text-xs font-medium text-sidebar-foreground">{title}</span>
+        <span className="inline-block rounded-full bg-sidebar text-xs font-medium text-sidebar-foreground">
+          {title}
+        </span>
       </div>
       <div className="p-4">{children}</div>
     </div>
   );
 }
 
-function FieldWrapper({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function FieldWrapper({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-1.5">
       <Label className="text-xs font-medium text-muted-foreground">
@@ -2306,13 +3333,26 @@ function SearchField({
 function DateField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <div className="relative">
-      <Input type="date" value={value} onChange={(e) => onChange(e.target.value)} className="pr-9" />
+      <Input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="pr-9"
+      />
       <CalendarIcon className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
     </div>
   );
 }
 
-function CheckField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function CheckField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <label className="flex items-center gap-2 text-sm">
       <Checkbox checked={checked} onCheckedChange={(v) => onChange(!!v)} />
@@ -2326,19 +3366,29 @@ function FileChoose({ value, onChange }: { value?: string; onChange?: (v: string
   const [name, setName] = useState(value ?? "");
   return (
     <div className="flex items-center gap-2">
-      <input ref={ref} type="file" className="hidden" onChange={(e) => {
-        const f = e.target.files?.[0]?.name ?? "";
-        setName(f);
-        onChange?.(f);
-      }} />
-      <Button variant="outline" size="sm" type="button" onClick={() => ref.current?.click()}>Choose</Button>
+      <input
+        ref={ref}
+        type="file"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]?.name ?? "";
+          setName(f);
+          onChange?.(f);
+        }}
+      />
+      <Button variant="outline" size="sm" type="button" onClick={() => ref.current?.click()}>
+        Choose
+      </Button>
       <span className="text-xs text-muted-foreground">{(value ?? name) || "No file selected"}</span>
     </div>
   );
 }
 
 function SubTableToolbar({
-  onAdd, onExport, search, onSearch,
+  onAdd,
+  onExport,
+  search,
+  onSearch,
 }: {
   onAdd: () => void;
   onExport: () => void;
@@ -2351,10 +3401,17 @@ function SubTableToolbar({
         <Plus className="h-4 w-4" /> Add
       </Button>
       <div className="flex items-center gap-2">
-        <Button size="sm" variant="outline" className="h-9" onClick={onExport}>Export</Button>
+        <Button size="sm" variant="outline" className="h-9" onClick={onExport}>
+          Export
+        </Button>
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={search} onChange={(e) => onSearch(e.target.value)} placeholder="Search:" className="h-9 w-56 pl-8" />
+          <Input
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            placeholder="Search:"
+            className="h-9 w-56 pl-8"
+          />
         </div>
       </div>
     </div>
@@ -2378,7 +3435,15 @@ function exportSimpleCsv(filename: string, header: string[], rows: (string | num
   toast.success(`Exported ${filename}`);
 }
 
-function CompactPager({ total, current, onSelect }: { total: number; current: number; onSelect: (n: number) => void }) {
+function CompactPager({
+  total,
+  current,
+  onSelect,
+}: {
+  total: number;
+  current: number;
+  onSelect: (n: number) => void;
+}) {
   const pages: (number | "…")[] = [];
   if (total <= 7) {
     for (let i = 1; i <= total; i++) pages.push(i);
@@ -2393,23 +3458,44 @@ function CompactPager({ total, current, onSelect }: { total: number; current: nu
   }
   return (
     <>
-      {pages.map((p, i) => p === "…" ? (
-        <span key={`e${i}`} className="px-1 text-muted-foreground">…</span>
-      ) : (
-        <button key={p} onClick={() => onSelect(p)}
-          className={`h-8 min-w-8 rounded-md px-2 text-sm font-medium transition-colors ${p === current ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-accent"}`}>
-          {p}
-        </button>
-      ))}
+      {pages.map((p, i) =>
+        p === "…" ? (
+          <span key={`e${i}`} className="px-1 text-muted-foreground">
+            …
+          </span>
+        ) : (
+          <button
+            key={p}
+            onClick={() => onSelect(p)}
+            className={`h-8 min-w-8 rounded-md px-2 text-sm font-medium transition-colors ${p === current ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-accent"}`}
+          >
+            {p}
+          </button>
+        ),
+      )}
     </>
   );
 }
 
-function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+function IconButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button size="icon" variant="outline" className="h-9 w-9 bg-background" onClick={onClick} aria-label={label}>
+        <Button
+          size="icon"
+          variant="outline"
+          className="h-9 w-9 bg-background"
+          onClick={onClick}
+          aria-label={label}
+        >
           {children}
         </Button>
       </TooltipTrigger>
@@ -2418,10 +3504,21 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
   );
 }
 
-function PagerButton({ disabled, onClick, children }: { disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
+function PagerButton({
+  disabled,
+  onClick,
+  children,
+}: {
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <button onClick={onClick} disabled={disabled}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40">
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+    >
       {children}
     </button>
   );

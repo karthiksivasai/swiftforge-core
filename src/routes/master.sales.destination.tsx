@@ -51,11 +51,31 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { BRANCHES } from "@/lib/branches-data";
 import { BranchSelect } from "@/components/branch-select";
 import { DOMESTIC_DESTINATIONS } from "@/lib/destinations-data";
 import { INTERNATIONAL_DESTINATIONS } from "@/lib/destinations-international-data";
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import {
+  destinationsResource,
+  type DestinationRow as DestinationDbRow,
+} from "@/lib/masters/resources/destinations";
+import {
+  destinationCreateSchema,
+  destinationUpdateSchema,
+} from "@/lib/masters/schemas/destinations";
+import {
+  useMasterList,
+  useBranchOptions,
+  toErrorMessage,
+  importSummary,
+} from "@/lib/masters/screen";
+import { LookupCombobox, EntityCombobox } from "@/components/masters/lookup-combobox";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -64,12 +84,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -99,6 +114,23 @@ type Destination = {
   mainBranch?: string;
   zone?: string;
   branchManifest?: string;
+  countryId?: string;
+  stateId?: string;
+  zoneId?: string;
+  mainBranchId?: string;
+  manifestBranchId?: string;
+  row_version?: number;
+};
+
+const TYPE_TO_DB: Record<DestinationType, "DOMESTIC" | "INTERNATIONAL" | "LOCAL"> = {
+  Domestic: "DOMESTIC",
+  International: "INTERNATIONAL",
+  Local: "LOCAL",
+};
+const DB_TO_TYPE: Record<string, DestinationType> = {
+  DOMESTIC: "Domestic",
+  INTERNATIONAL: "International",
+  LOCAL: "Local",
 };
 
 const STATES = [
@@ -203,7 +235,8 @@ export const Route = createFileRoute("/master/sales/destination")({
       { title: "Destination — Master — Courier ERP" },
       {
         name: "description",
-        content: "Manage destination master records for Domestic, International, and Local shipments.",
+        content:
+          "Manage destination master records for Domestic, International, and Local shipments.",
       },
     ],
   }),
@@ -239,9 +272,57 @@ function getPageItems(current: number, total: number): (number | "…")[] {
   return items;
 }
 
+function rowToView(r: DestinationDbRow & Record<string, unknown>): Destination {
+  return {
+    id: r.id,
+    type: DB_TO_TYPE[r.dest_type] ?? "Domestic",
+    code: r.code,
+    name: r.name,
+    country: (r.country_name as string) ?? "",
+    countryId: r.country_id ?? "",
+    state: (r.state_name as string) ?? "",
+    stateId: r.state_id ?? "",
+    zone: (r.zone_name as string) ?? "",
+    zoneId: r.zone_id ?? "",
+    serviceType: r.service_type ?? "",
+    status: r.status === "INACTIVE" ? "In-Active" : "Active",
+    email: r.email ?? "",
+    mobile: r.mobile ?? "",
+    mainBranch: (r.main_branch_name as string) ?? "",
+    mainBranchId: r.main_branch_id ?? "",
+    branchManifest: (r.manifest_branch_name as string) ?? "",
+    manifestBranchId: r.manifest_branch_id ?? "",
+    row_version: r.row_version,
+  };
+}
 
 function DestinationPage() {
-  const [rows, setRows] = useState<Destination[]>(SEED);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(destinationsResource);
+  const live = useMasterList(destinationsResource, {
+    enabled: authed,
+    labelRefs: [
+      { idField: "country_id", table: "countries", as: "country" },
+      { idField: "state_id", table: "states", as: "state" },
+      { idField: "zone_id", table: "zones", as: "zone" },
+      { idField: "main_branch_id", table: "branches", as: "main_branch" },
+      { idField: "manifest_branch_id", table: "branches", as: "manifest_branch" },
+    ],
+  });
+  const branches = useBranchOptions(authed);
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<Destination[]>(SEED);
+  const rows: Destination[] = authed
+    ? (live.rows as (DestinationDbRow & Record<string, unknown>)[]).map(rowToView)
+    : demoRows;
+  const setRows = setDemoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
+  const [saving, setSaving] = useState(false);
+
   const [type, setType] = useState<DestinationType>("Domestic");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -284,7 +365,48 @@ function DestinationPage() {
     setOpen(true);
   };
 
-  const handleSave = () => {
+  const toRaw = (f: Omit<Destination, "id">) => ({
+    dest_type: TYPE_TO_DB[f.type],
+    code: f.code,
+    name: f.name,
+    country_id: f.countryId || null,
+    state_id: f.stateId || null,
+    zone_id: f.zoneId || null,
+    service_type: f.serviceType || null,
+    main_branch_id: f.mainBranchId || null,
+    manifest_branch_id: f.manifestBranchId || null,
+    email: f.email || null,
+    mobile: f.mobile || null,
+    status: f.status === "In-Active" ? "INACTIVE" : "ACTIVE",
+  });
+
+  const handleSave = async () => {
+    if (authed) {
+      setSaving(true);
+      try {
+        const raw = toRaw(form);
+        if (editing) {
+          const patch = destinationUpdateSchema.parse(raw);
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch,
+          });
+          toast.success("Destination updated");
+        } else {
+          const values = destinationCreateSchema.parse(raw);
+          await rc.create.mutateAsync(values);
+          toast.success("Destination added");
+        }
+        setOpen(false);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save destination"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     if (!form.code.trim()) {
       toast.error("Destination Code is required");
       return;
@@ -304,24 +426,48 @@ function DestinationPage() {
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
     const row = deleteTarget;
-    setRows((prev) => prev.filter((r) => r.id !== row.id));
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.code}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete destination"));
+      }
+    } else {
+      setRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.code}`);
+    }
     setSelected((prev) => {
       const n = new Set(prev);
       n.delete(row.id);
       return n;
     });
-    toast.success(`Deleted ${row.code}`);
     setDeleteTarget(null);
   };
 
-  const confirmBulkDelete = () => {
+  const confirmBulkDelete = async () => {
     const ids = selected;
     if (ids.size === 0) return;
-    setRows((prev) => prev.filter((r) => !ids.has(r.id)));
-    toast.success(`Deleted ${ids.size} destination${ids.size === 1 ? "" : "s"}`);
+    if (authed) {
+      const targets = rows.filter((r) => ids.has(r.id));
+      let ok = 0;
+      for (const r of targets) {
+        try {
+          await rc.remove.mutateAsync({ id: r.id, rowVersion: r.row_version ?? 0 });
+          ok++;
+        } catch {
+          /* keep going; report aggregate below */
+        }
+      }
+      if (ok === targets.length) toast.success(`Deleted ${ok} destination${ok === 1 ? "" : "s"}`);
+      else toast.error(`Deleted ${ok} of ${targets.length}; some could not be removed`);
+    } else {
+      setRows((prev) => prev.filter((r) => !ids.has(r.id)));
+      toast.success(`Deleted ${ids.size} destination${ids.size === 1 ? "" : "s"}`);
+    }
     setSelected(new Set());
     setBulkDeleteOpen(false);
   };
@@ -347,7 +493,14 @@ function DestinationPage() {
   };
 
   const handleExport = () => {
-    const header = ["Destination Code", "Destination Name", "Country", "State", "Service Type", "Status"];
+    const header = [
+      "Destination Code",
+      "Destination Name",
+      "Country",
+      "State",
+      "Service Type",
+      "Status",
+    ];
     const csv = [
       header.join(","),
       ...scoped.map((r) =>
@@ -376,47 +529,34 @@ function DestinationPage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) {
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) {
         toast.error("File is empty");
         return;
       }
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "";
-        let inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') {
-              cur += '"';
-              i++;
-            } else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") {
-              out.push(cur);
-              cur = "";
-            } else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          destinationsResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
       const imported: Destination[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const [code, name, country, state, serviceType, status] = parseRow(lines[i]);
-        if (!code?.trim()) continue;
+      for (const rec of parsed.rows) {
+        const code = (rec["Destination Code"] ?? rec["code"] ?? "").trim();
+        if (!code) continue;
+        const status = (rec["Status"] ?? rec["status"] ?? "").trim();
         imported.push({
           id: crypto.randomUUID(),
           type,
-          code: code.trim(),
-          name: (name || "").trim(),
-          country: (country || "").trim(),
-          state: (state || "").trim(),
-          serviceType: (serviceType || "").trim(),
-          status: (status || "").trim() === "In-Active" ? "In-Active" : "Active",
+          code,
+          name: (rec["Destination Name"] ?? rec["name"] ?? "").trim(),
+          country: (rec["Country"] ?? rec["country_code"] ?? "").trim(),
+          state: (rec["State"] ?? rec["state_code"] ?? "").trim(),
+          serviceType: (rec["Service Type"] ?? rec["service_type"] ?? "").trim(),
+          status: status === "In-Active" ? "In-Active" : "Active",
         });
       }
       if (imported.length === 0) {
@@ -425,14 +565,16 @@ function DestinationPage() {
       }
       setRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} destination${imported.length === 1 ? "" : "s"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
   const handleRefresh = () => {
     setSearch("");
     setPage(1);
+    if (authed)
+      queryClient.invalidateQueries({ queryKey: masterKeys.all(destinationsResource.key) });
     toast.success("Refreshed");
   };
 
@@ -503,9 +645,11 @@ function DestinationPage() {
               <IconButton label="Export" onClick={handleExport}>
                 <Download className="h-4 w-4" />
               </IconButton>
-              <IconButton label="Import" onClick={handleImport}>
-                <Upload className="h-4 w-4" />
-              </IconButton>
+              {canAdd ? (
+                <IconButton label="Import" onClick={handleImport}>
+                  <Upload className="h-4 w-4" />
+                </IconButton>
+              ) : null}
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>
@@ -513,7 +657,7 @@ function DestinationPage() {
           </TooltipProvider>
 
           <div className="flex items-center gap-2">
-            {selected.size > 0 && (
+            {selected.size > 0 && canDelete && (
               <Button
                 size="sm"
                 variant="destructive"
@@ -536,10 +680,12 @@ function DestinationPage() {
                 className="h-9 w-56 pl-8"
               />
             </div>
-            <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add
-            </Button>
+            {canAdd ? (
+              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -589,24 +735,28 @@ function DestinationPage() {
                     <TableCell>{r.status}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          onClick={() => openEdit(r)}
-                          aria-label={`Edit ${r.code}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(r)}
-                          aria-label={`Delete ${r.code}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canModify ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(r)}
+                            aria-label={`Edit ${r.code}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        {canDelete ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(r)}
+                            aria-label={`Delete ${r.code}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -649,7 +799,10 @@ function DestinationPage() {
                 </button>
               ),
             )}
-            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>
+            <PagerButton
+              disabled={currentPage === totalPages}
+              onClick={() => setPage(currentPage + 1)}
+            >
               <ChevronRight className="h-4 w-4" />
             </PagerButton>
             <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
@@ -715,50 +868,85 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Main Branch">
-                  <BranchSelect
-                    value={form.mainBranch}
-                    onChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
-                    options={BRANCH_OPTIONS}
-                    placeholder="Select Main Branch"
-                  />
+                  {authed ? (
+                    <EntityCombobox
+                      items={branches.options}
+                      value={form.mainBranchId ?? ""}
+                      valueLabel={form.mainBranch}
+                      loading={branches.isLoading}
+                      onChange={(id, item) =>
+                        setForm((f) => ({ ...f, mainBranchId: id, mainBranch: item?.name ?? "" }))
+                      }
+                      placeholder="Select Main Branch"
+                    />
+                  ) : (
+                    <BranchSelect
+                      value={form.mainBranch}
+                      onChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
+                      options={BRANCH_OPTIONS}
+                      placeholder="Select Main Branch"
+                    />
+                  )}
                 </FieldWrapper>
 
-
-
                 <FieldWrapper label="State">
-                  <Select
-                    value={form.state || undefined}
-                    onValueChange={(v) => setForm((f) => ({ ...f, state: v }))}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select State" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STATES.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {s}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {authed ? (
+                    <LookupCombobox
+                      lookupKey="state"
+                      value={form.stateId ?? ""}
+                      valueLabel={form.state}
+                      onChange={(id, item) =>
+                        setForm((f) => ({ ...f, stateId: id, state: item?.name ?? "" }))
+                      }
+                      placeholder="Select State"
+                    />
+                  ) : (
+                    <Select
+                      value={form.state || undefined}
+                      onValueChange={(v) => setForm((f) => ({ ...f, state: v }))}
+                    >
+                      <SelectTrigger className="h-10">
+                        <SelectValue placeholder="Select State" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STATES.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {s}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </FieldWrapper>
 
                 <FieldWrapper label="Zone">
-                  <Select
-                    value={form.zone || undefined}
-                    onValueChange={(v) => setForm((f) => ({ ...f, zone: v }))}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select Zone" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ZONES.map((z) => (
-                        <SelectItem key={z} value={z}>
-                          {z}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {authed ? (
+                    <LookupCombobox
+                      lookupKey="zone"
+                      value={form.zoneId ?? ""}
+                      valueLabel={form.zone}
+                      onChange={(id, item) =>
+                        setForm((f) => ({ ...f, zoneId: id, zone: item?.name ?? "" }))
+                      }
+                      placeholder="Select Zone"
+                    />
+                  ) : (
+                    <Select
+                      value={form.zone || undefined}
+                      onValueChange={(v) => setForm((f) => ({ ...f, zone: v }))}
+                    >
+                      <SelectTrigger className="h-10">
+                        <SelectValue placeholder="Select Zone" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ZONES.map((z) => (
+                          <SelectItem key={z} value={z}>
+                            {z}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </FieldWrapper>
 
                 <FieldWrapper label="Service Type">
@@ -780,15 +968,30 @@ function DestinationPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Branch Manifest">
-                  <BranchSelect
-                    value={form.branchManifest}
-                    onChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
-                    options={BRANCH_OPTIONS}
-                    placeholder="Select Manifest Branch"
-                  />
+                  {authed ? (
+                    <EntityCombobox
+                      items={branches.options}
+                      value={form.manifestBranchId ?? ""}
+                      valueLabel={form.branchManifest}
+                      loading={branches.isLoading}
+                      onChange={(id, item) =>
+                        setForm((f) => ({
+                          ...f,
+                          manifestBranchId: id,
+                          branchManifest: item?.name ?? "",
+                        }))
+                      }
+                      placeholder="Select Manifest Branch"
+                    />
+                  ) : (
+                    <BranchSelect
+                      value={form.branchManifest}
+                      onChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
+                      options={BRANCH_OPTIONS}
+                      placeholder="Select Manifest Branch"
+                    />
+                  )}
                 </FieldWrapper>
-
-
 
                 <FieldWrapper label="Status">
                   <Select
@@ -811,9 +1014,10 @@ function DestinationPage() {
           <DialogFooter className="gap-2 sm:gap-2">
             <Button
               onClick={handleSave}
+              disabled={saving}
               className="bg-emerald-600 text-white hover:bg-emerald-600/90"
             >
-              Save
+              {saving ? "Saving…" : "Save"}
             </Button>
             <Button variant="destructive" onClick={() => setOpen(false)}>
               Close
@@ -848,9 +1052,12 @@ function DestinationPage() {
       <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {selected.size} destination{selected.size === 1 ? "" : "s"}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Delete {selected.size} destination{selected.size === 1 ? "" : "s"}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove the selected destinations from the destination master. This action cannot be undone.
+              This will permanently remove the selected destinations from the destination master.
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -969,7 +1176,6 @@ function BranchCombobox({
         <Command>
           <CommandInput placeholder="Search branch..." />
           <CommandList className="max-h-72 overflow-y-auto overscroll-contain">
-
             <CommandEmpty>No branch found.</CommandEmpty>
             <CommandGroup>
               {BRANCH_OPTIONS.map((b) => (
@@ -982,10 +1188,7 @@ function BranchCombobox({
                   }}
                 >
                   <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      value === b ? "opacity-100" : "opacity-0",
-                    )}
+                    className={cn("mr-2 h-4 w-4", value === b ? "opacity-100" : "opacity-0")}
                   />
                   {b}
                 </CommandItem>

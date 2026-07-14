@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import {
   CloudUpload,
@@ -10,6 +11,7 @@ import {
   Pencil,
   Trash2,
   Printer,
+  CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,18 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,8 +41,13 @@ import {
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import { toErrorMessage } from "@/lib/masters/screen";
+import { listReceipts, postReceipt, saveReceipt } from "@/lib/transactions/resources/finance";
+import { dbReceiptToUi, receiptFormToFields } from "@/lib/transactions/financeUiMap";
+import { canPostReceipt, canUpdateReceipt } from "@/lib/transactions/schemas/finance";
 
-type LookupPair = { code: string; name: string };
+type LookupPair = { id?: string; code: string; name: string };
 type PageView = "list" | "entry";
 
 type ReceiptForm = {
@@ -59,6 +56,7 @@ type ReceiptForm = {
   customer: LookupPair;
   serviceCenter: LookupPair;
   bankName: string;
+  bankCode: string;
   amount: string;
   narration: string;
 };
@@ -72,6 +70,8 @@ type ReceiptRow = {
   bankName: string;
   amount: string;
   narration: string;
+  status: string;
+  rowVersion: number;
   form: ReceiptForm;
 };
 
@@ -91,17 +91,87 @@ const BANK_OPTIONS = [
   { code: "CASH", name: "Cash" },
 ] as const;
 
-const SEED_TEMPLATE: Omit<ReceiptRow, "id" | "receiptNo" | "form">[] = [
-  { date: "04/07/2026", customerName: "ARS INTERNATIONAL", serviceCenter: "HYD", bankName: "IDFC FIRST BANK", amount: "4500.00", narration: "IDFC FIRST BANK" },
-  { date: "04/07/2026", customerName: "UNIK ENTERPRISE", serviceCenter: "HYD", bankName: "IDFC FIRST BANK", amount: "3300.00", narration: "IDFC FIRST BANK" },
-  { date: "04/07/2026", customerName: "NILESH", serviceCenter: "HYD", bankName: "IDFC FIRST BANK", amount: "5821.00", narration: "IDFC FIRST BANK" },
-  { date: "04/07/2026", customerName: "RL EXPRESS", serviceCenter: "HYD", bankName: "IDFC FIRST BANK", amount: "9503.00", narration: "IDFC FIRST BANK" },
-  { date: "04/07/2026", customerName: "NRI COURIER", serviceCenter: "HYD", bankName: "IDFC FIRST BANK", amount: "5265.00", narration: "IDFC FIRST BANK" },
-  { date: "04/07/2026", customerName: "AIHAN ENTERPRISES", serviceCenter: "HYD", bankName: "IDFC FIRST BANK", amount: "29000.00", narration: "IDFC FIRST BANK" },
-  { date: "04/07/2026", customerName: "HYDERABAD EXPORTS", serviceCenter: "HYD", bankName: "HDFC BANK", amount: "12500.00", narration: "HDFC BANK" },
-  { date: "04/07/2026", customerName: "METRO LOGISTICS", serviceCenter: "HYD", bankName: "IDFC FIRST BANK", amount: "7800.00", narration: "IDFC FIRST BANK" },
-  { date: "03/07/2026", customerName: "GLOBAL TRADERS PVT LTD", serviceCenter: "HYD", bankName: "ICICI BANK", amount: "15400.00", narration: "ICICI BANK" },
-  { date: "03/07/2026", customerName: "TPC ADDANKI", serviceCenter: "HYD", bankName: "IDFC FIRST BANK", amount: "6200.00", narration: "IDFC FIRST BANK" },
+const SEED_TEMPLATE: Omit<ReceiptRow, "id" | "receiptNo" | "form" | "status" | "rowVersion">[] = [
+  {
+    date: "04/07/2026",
+    customerName: "ARS INTERNATIONAL",
+    serviceCenter: "HYD",
+    bankName: "IDFC FIRST BANK",
+    amount: "4500.00",
+    narration: "IDFC FIRST BANK",
+  },
+  {
+    date: "04/07/2026",
+    customerName: "UNIK ENTERPRISE",
+    serviceCenter: "HYD",
+    bankName: "IDFC FIRST BANK",
+    amount: "3300.00",
+    narration: "IDFC FIRST BANK",
+  },
+  {
+    date: "04/07/2026",
+    customerName: "NILESH",
+    serviceCenter: "HYD",
+    bankName: "IDFC FIRST BANK",
+    amount: "5821.00",
+    narration: "IDFC FIRST BANK",
+  },
+  {
+    date: "04/07/2026",
+    customerName: "RL EXPRESS",
+    serviceCenter: "HYD",
+    bankName: "IDFC FIRST BANK",
+    amount: "9503.00",
+    narration: "IDFC FIRST BANK",
+  },
+  {
+    date: "04/07/2026",
+    customerName: "NRI COURIER",
+    serviceCenter: "HYD",
+    bankName: "IDFC FIRST BANK",
+    amount: "5265.00",
+    narration: "IDFC FIRST BANK",
+  },
+  {
+    date: "04/07/2026",
+    customerName: "AIHAN ENTERPRISES",
+    serviceCenter: "HYD",
+    bankName: "IDFC FIRST BANK",
+    amount: "29000.00",
+    narration: "IDFC FIRST BANK",
+  },
+  {
+    date: "04/07/2026",
+    customerName: "HYDERABAD EXPORTS",
+    serviceCenter: "HYD",
+    bankName: "HDFC BANK",
+    amount: "12500.00",
+    narration: "HDFC BANK",
+  },
+  {
+    date: "04/07/2026",
+    customerName: "METRO LOGISTICS",
+    serviceCenter: "HYD",
+    bankName: "IDFC FIRST BANK",
+    amount: "7800.00",
+    narration: "IDFC FIRST BANK",
+  },
+  {
+    date: "03/07/2026",
+    customerName: "GLOBAL TRADERS PVT LTD",
+    serviceCenter: "HYD",
+    bankName: "ICICI BANK",
+    amount: "15400.00",
+    narration: "ICICI BANK",
+  },
+  {
+    date: "03/07/2026",
+    customerName: "TPC ADDANKI",
+    serviceCenter: "HYD",
+    bankName: "IDFC FIRST BANK",
+    amount: "6200.00",
+    narration: "IDFC FIRST BANK",
+  },
 ];
 
 const todayIso = () => {
@@ -132,6 +202,7 @@ const emptyForm = (): ReceiptForm => ({
   customer: emptyPair(),
   serviceCenter: { code: "HYD", name: "HYDERABAD" },
   bankName: "IDFC FIRST BANK",
+  bankCode: "IDFC",
   amount: "",
   narration: "",
 });
@@ -145,17 +216,29 @@ const emptyReportForm = (): ReportForm => ({
   summary: false,
 });
 
-const templateToForm = (row: Omit<ReceiptRow, "id" | "receiptNo" | "form">, receiptNo: string): ReceiptForm => ({
-  receiptNo,
-  date: parseDisplayDate(row.date),
-  customer: { code: row.customerName.slice(0, 4).toUpperCase(), name: row.customerName },
-  serviceCenter: { code: row.serviceCenter, name: row.serviceCenter },
-  bankName: row.bankName,
-  amount: row.amount,
-  narration: row.narration,
-});
+const templateToForm = (
+  row: Omit<ReceiptRow, "id" | "receiptNo" | "form" | "status" | "rowVersion">,
+  receiptNo: string,
+): ReceiptForm => {
+  const bank = BANK_OPTIONS.find((b) => b.name === row.bankName);
+  return {
+    receiptNo,
+    date: parseDisplayDate(row.date),
+    customer: { code: row.customerName.slice(0, 4).toUpperCase(), name: row.customerName },
+    serviceCenter: { code: row.serviceCenter, name: row.serviceCenter },
+    bankName: row.bankName,
+    bankCode: bank?.code ?? "",
+    amount: row.amount,
+    narration: row.narration,
+  };
+};
 
-const formToRow = (form: ReceiptForm, id: string): ReceiptRow => ({
+const formToRow = (
+  form: ReceiptForm,
+  id: string,
+  status = "DRAFT",
+  rowVersion = 1,
+): ReceiptRow => ({
   id,
   receiptNo: form.receiptNo,
   date: formatDisplayDate(form.date),
@@ -164,6 +247,8 @@ const formToRow = (form: ReceiptForm, id: string): ReceiptRow => ({
   bankName: form.bankName,
   amount: form.amount,
   narration: form.narration,
+  status,
+  rowVersion,
   form: { ...form },
 });
 
@@ -177,6 +262,8 @@ const buildSeedRows = (): ReceiptRow[] => {
         id: crypto.randomUUID(),
         receiptNo: no,
         ...template,
+        status: batch === 0 ? "DRAFT" : "POSTED",
+        rowVersion: 1,
         form: templateToForm(template, no),
       });
     }
@@ -200,9 +287,11 @@ export const Route = createFileRoute("/transaction/receipt/receipt-entry")({
 });
 
 function ReceiptEntryPage() {
+  const { isAuthenticated: authed } = useAuth();
+  const queryClient = useQueryClient();
   const importInputRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<PageView>("list");
-  const [rows, setRows] = useState<ReceiptRow[]>(buildSeedRows);
+  const [demoRows, setDemoRows] = useState<ReceiptRow[]>(buildSeedRows);
   const [editing, setEditing] = useState<ReceiptRow | null>(null);
   const [form, setForm] = useState<ReceiptForm>(emptyForm());
   const [search, setSearch] = useState("");
@@ -210,6 +299,19 @@ function ReceiptEntryPage() {
   const [deleteTarget, setDeleteTarget] = useState<ReceiptRow | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportForm, setReportForm] = useState<ReportForm>(emptyReportForm());
+  const [saving, setSaving] = useState(false);
+
+  const liveQuery = useQuery({
+    queryKey: ["receipts", "list"],
+    queryFn: () => listReceipts({ pageSize: 500 }),
+    enabled: authed,
+  });
+
+  const rows: ReceiptRow[] = authed ? (liveQuery.data?.rows ?? []).map(dbReceiptToUi) : demoRows;
+
+  const refreshLive = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["receipts"] });
+  };
 
   const patchForm = (patch: Partial<ReceiptForm>) => setForm((f) => ({ ...f, ...patch }));
   const patchReport = (patch: Partial<ReportForm>) => setReportForm((f) => ({ ...f, ...patch }));
@@ -226,6 +328,7 @@ function ReceiptEntryPage() {
         row.bankName,
         row.amount,
         row.narration,
+        row.status,
       ]
         .join(" ")
         .toLowerCase()
@@ -246,6 +349,9 @@ function ReceiptEntryPage() {
   };
 
   const openEntry = (row: ReceiptRow) => {
+    if (authed && !canUpdateReceipt(row.status)) {
+      return toast.error("Only DRAFT receipts can be edited");
+    }
     setEditing(row);
     setForm({ ...row.form });
     setView("entry");
@@ -257,7 +363,7 @@ function ReceiptEntryPage() {
     setForm(emptyForm());
   };
 
-  const persistEntry = () => {
+  const persistEntry = async () => {
     if (!form.customer.code.trim() && !form.customer.name.trim()) {
       return toast.error("Customer is required");
     }
@@ -266,6 +372,29 @@ function ReceiptEntryPage() {
     }
     if (!form.bankName.trim()) return toast.error("Bank Name is required");
     if (!form.amount.trim()) return toast.error("Amount is required");
+
+    if (authed) {
+      setSaving(true);
+      try {
+        await saveReceipt({
+          id: editing?.id ?? null,
+          row_version: editing?.rowVersion ?? null,
+          fields: receiptFormToFields({
+            ...form,
+            date: editing ? form.date : todayIso(),
+            narration: form.narration || form.bankName,
+          }),
+        });
+        await refreshLive();
+        toast.success(editing ? `Receipt ${editing.receiptNo} saved` : "Receipt created");
+        closeEntry();
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
     const receiptNo = editing?.receiptNo ?? nextReceiptNo(rows);
     const payload = formToRow(
@@ -276,28 +405,58 @@ function ReceiptEntryPage() {
         narration: form.narration || form.bankName,
       },
       editing?.id ?? crypto.randomUUID(),
+      editing?.status ?? "DRAFT",
+      editing?.rowVersion ?? 1,
     );
 
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? payload : r)));
-      toast.success(`Receipt ${receiptNo} saved`);
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? payload : r)));
+      toast.success(`Receipt ${receiptNo} saved (demo)`);
     } else {
-      setRows((prev) => [payload, ...prev]);
-      toast.success(`Receipt ${receiptNo} created`);
+      setDemoRows((prev) => [payload, ...prev]);
+      toast.success(`Receipt ${receiptNo} created (demo)`);
     }
     closeEntry();
   };
 
+  const handlePost = async (row: ReceiptRow) => {
+    if (!canPostReceipt(row.status)) {
+      return toast.error("Only DRAFT receipts can be posted");
+    }
+    if (authed) {
+      try {
+        await postReceipt({ id: row.id, row_version: row.rowVersion });
+        await refreshLive();
+        toast.success(`Receipt ${row.receiptNo} posted`);
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      }
+      return;
+    }
+    setDemoRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id ? { ...r, status: "POSTED", rowVersion: r.rowVersion + 1 } : r,
+      ),
+    );
+    toast.success(`Receipt ${row.receiptNo} posted (demo)`);
+  };
+
   const confirmDelete = () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+    if (authed) {
+      toast.info("Delete is not available for posted finance history");
+      setDeleteTarget(null);
+      return;
+    }
+    setDemoRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
     toast.success(`Deleted receipt ${deleteTarget.receiptNo}`);
     setDeleteTarget(null);
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setSearch("");
     setPage(1);
+    if (authed) await refreshLive();
     toast.success("List refreshed");
   };
 
@@ -329,7 +488,7 @@ function ReceiptEntryPage() {
       return toast.error("Bank/Cash is required");
     }
 
-    let reportRows = filtered.filter((row) => {
+    const reportRows = filtered.filter((row) => {
       const iso = parseDisplayDate(row.date);
       if (reportForm.fromDate && iso < reportForm.fromDate) return false;
       if (reportForm.toDate && iso > reportForm.toDate) return false;
@@ -412,7 +571,10 @@ function ReceiptEntryPage() {
               />
             </FieldWrapper>
             <FieldWrapper label="Bank Name" required>
-              <Input value={form.bankName} onChange={(e) => patchForm({ bankName: e.target.value })} />
+              <Input
+                value={form.bankName}
+                onChange={(e) => patchForm({ bankName: e.target.value })}
+              />
             </FieldWrapper>
             <FieldWrapper label="Amount" required>
               <Input
@@ -422,12 +584,19 @@ function ReceiptEntryPage() {
               />
             </FieldWrapper>
             <FieldWrapper label="Narration" className="md:col-span-2 xl:col-span-2">
-              <Input value={form.narration} onChange={(e) => patchForm({ narration: e.target.value })} />
+              <Input
+                value={form.narration}
+                onChange={(e) => patchForm({ narration: e.target.value })}
+              />
             </FieldWrapper>
           </div>
 
           <div className="mt-6 flex flex-wrap justify-end gap-2">
-            <Button onClick={persistEntry} className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90">
+            <Button
+              onClick={() => void persistEntry()}
+              disabled={saving}
+              className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
               Save
             </Button>
             <Button variant="destructive" onClick={closeEntry} className="min-w-24">
@@ -447,6 +616,7 @@ function ReceiptEntryPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Receipt Entry</h1>
         <p className="text-sm text-muted-foreground">
           Record customer receipts against bank accounts and service centres.
+          {authed ? " Connected to live backend." : " Demo mode — sign in for live receipts."}
         </p>
       </div>
 
@@ -487,14 +657,26 @@ function ReceiptEntryPage() {
           <table className="w-full min-w-[960px] caption-bottom text-sm">
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Receipt No.</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Receipt No.
+                </TableHead>
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Date</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Customer</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Service Center</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Bank Name</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Customer
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Service Center
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Bank Name
+                </TableHead>
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Amount</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Narration</TableHead>
-                <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">Action</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Narration
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">
+                  Action
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -530,6 +712,17 @@ function ReceiptEntryPage() {
                     </TableCell>
                     <TableCell className="whitespace-nowrap px-1 text-center">
                       <div className="flex justify-center gap-0">
+                        {canPostReceipt(row.status) ? (
+                          <IconButton
+                            label="Post"
+                            variant="ghost"
+                            size="row"
+                            className="text-emerald-600"
+                            onClick={() => void handlePost(row)}
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                          </IconButton>
+                        ) : null}
                         <IconButton
                           label="Edit"
                           variant="ghost"
@@ -591,7 +784,9 @@ function ReceiptEntryPage() {
       <Dialog open={reportOpen} onOpenChange={(open) => !open && closeReport()}>
         <DialogContent className="max-w-lg gap-0 overflow-hidden p-0 sm:max-w-lg">
           <div className="bg-sidebar px-4 py-3">
-            <DialogTitle className="text-base font-semibold text-sidebar-foreground">Report</DialogTitle>
+            <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+              Report
+            </DialogTitle>
           </div>
           <div className="space-y-4 p-6">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -639,7 +834,10 @@ function ReceiptEntryPage() {
             </label>
           </div>
           <div className="flex justify-end gap-2 px-6 pb-6">
-            <Button onClick={handleReportOk} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+            <Button
+              onClick={handleReportOk}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
               OK
             </Button>
             <Button variant="destructive" onClick={closeReport}>

@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Download,
   Filter,
@@ -77,11 +78,25 @@ import {
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import { toErrorMessage } from "@/lib/masters/screen";
+import {
+  cancelManifest,
+  closeManifest,
+  fetchManifestChildren,
+  listManifests,
+  saveManifest,
+} from "@/lib/transactions/resources/manifests";
+import {
+  dbManifestToListRow,
+  uiFormToManifestPayload,
+} from "@/lib/transactions/manifestUiMap";
 
 type LookupPair = { code: string; name: string };
 
 type ManifestLine = {
   id: string;
+  shipmentId?: string;
   awbNo: string;
   refNo: string;
   forwardingNo: string;
@@ -124,7 +139,7 @@ type ManifestForm = {
   lines: ManifestLine[];
 };
 
-type ManifestRow = ManifestForm & { id: string };
+type ManifestRow = ManifestForm & { id: string; rowVersion?: number; status?: string };
 
 type LineDraft = {
   bagNo: string;
@@ -473,7 +488,9 @@ export const Route = createFileRoute("/transaction/manifest-scan")({
 });
 
 function ManifestScanPage() {
-  const [rows, setRows] = useState<ManifestRow[]>(seedRows);
+  const { isAuthenticated: authed } = useAuth();
+  const queryClient = useQueryClient();
+  const [demoRows, setDemoRows] = useState<ManifestRow[]>(seedRows);
   const [colFilters, setColFilters] = useState(emptyColFilters());
   const [reportFilters, setReportFilters] = useState<ReportFilters>(emptyReportFilters);
   const [search, setSearch] = useState("");
@@ -485,6 +502,7 @@ function ManifestScanPage() {
   const [lineDraft, setLineDraft] = useState<LineDraft>(emptyLineDraft);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<ManifestRow | null>(null);
+  const [saving, setSaving] = useState(false);
   const [generateHeader, setGenerateHeader] = useState<GenerateHeader>(emptyGenerateHeader);
   const [generateFilters, setGenerateFilters] = useState<GenerateFilters>(emptyGenerateFilters);
   const [generateResults, setGenerateResults] = useState<AwbCandidate[]>([]);
@@ -499,6 +517,24 @@ function ManifestScanPage() {
   const [downloadAllRow, setDownloadAllRow] = useState<ManifestRow | null>(null);
   const [downloadAllForm, setDownloadAllForm] = useState<DownloadAllForm>(emptyDownloadAllForm);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const liveQuery = useQuery({
+    queryKey: ["manifests", "list", search],
+    queryFn: () => listManifests({ pageSize: 500, search: search.trim() || undefined }),
+    enabled: authed,
+  });
+
+  const rows: ManifestRow[] = authed
+    ? (liveQuery.data?.rows ?? []).map((r) => dbManifestToListRow(r) as ManifestRow)
+    : demoRows;
+
+  const refreshLive = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["manifests"] });
+  };
+
+  const formStatus = editing?.status ?? (showForm && !editing ? "DRAFT" : undefined);
+  const isReadOnly = Boolean(formStatus && formStatus !== "DRAFT");
+  const canCloseManifest = Boolean(editing && formStatus === "DRAFT");
 
   const nextManifestNo = useMemo(() => {
     const nums = rows
@@ -540,7 +576,45 @@ function ManifestScanPage() {
     setShowForm(true);
   };
 
-  const openEdit = (row: ManifestRow) => {
+  const openEdit = async (row: ManifestRow) => {
+    if (authed) {
+      try {
+        const full = (liveQuery.data?.rows ?? []).find((r) => r.id === row.id);
+        if (!full) {
+          toast.error("Manifest not found");
+          return;
+        }
+        const children = await fetchManifestChildren(row.id);
+        const mapped = dbManifestToListRow(full);
+        mapped.lines = children.lines.map((l, i) => ({
+          id: `${row.id}-${i}`,
+          shipmentId: l.shipment_id,
+          awbNo: l.awb_no,
+          refNo: l.reference_no ?? "",
+          forwardingNo: l.forwarding_no ?? "",
+          crnMhbsNo: l.crn_mhbs_no ?? "",
+          bagNo: l.bag_no ?? "",
+          pieces: String(l.pieces ?? ""),
+          chargeWeight: String(l.charge_weight ?? ""),
+          bookDate: l.book_date ?? "",
+          origin: l.origin_name || l.origin_code || "",
+          destination: l.destination_name || l.destination_code || "",
+          code: l.customer_code ?? "",
+          customer: l.customer_name ?? "",
+          consignee: l.consignee_name ?? "",
+          instruction: l.instruction ?? "",
+        }));
+        setEditing(mapped as ManifestRow);
+        const { id: _id, rowVersion: _rv, status: _st, ...rest } = mapped;
+        setForm({ ...emptyForm(), ...rest });
+        setLineDraft(emptyLineDraft());
+        setDetailsOpen(true);
+        setShowForm(true);
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      }
+      return;
+    }
     setEditing(row);
     const { id: _id, ...rest } = row;
     const lines = rest.lines.length > 0 ? rest.lines : seedEditLines();
@@ -573,8 +647,31 @@ function ManifestScanPage() {
     setLineDraft(emptyLineDraft());
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (isReadOnly) return toast.error("Only DRAFT manifests can be edited");
     if (!form.manifestDate) return toast.error("Manifest Date is required");
+
+    if (authed) {
+      setSaving(true);
+      try {
+        const { fields, lines } = uiFormToManifestPayload(form);
+        const saved = await saveManifest({
+          id: editing?.id ?? null,
+          rowVersion: editing?.rowVersion ?? null,
+          fields,
+          lines,
+        });
+        await refreshLive();
+        toast.success(editing ? "Manifest updated" : `Manifest ${saved.manifest_no} saved (DRAFT)`);
+        closeForm();
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     const manifestNo = editing ? form.manifestNo : nextManifestNo;
     const payload: ManifestForm = {
       ...form,
@@ -584,18 +681,71 @@ function ManifestScanPage() {
       serviceCentre: form.destinationServiceCenter.code,
     };
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...payload, id: editing.id } : r)));
+      setDemoRows((prev) =>
+        prev.map((r) =>
+          r.id === editing.id
+            ? { ...payload, id: editing.id, rowVersion: r.rowVersion, status: r.status ?? "DRAFT" }
+            : r,
+        ),
+      );
       toast.success("Manifest updated");
     } else {
-      setRows((prev) => [{ id: crypto.randomUUID(), ...payload }, ...prev]);
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), status: "DRAFT", ...payload }, ...prev]);
       toast.success("Manifest saved");
     }
     closeForm();
   };
 
-  const confirmDelete = () => {
+  const handleCloseManifest = async () => {
+    if (!editing?.id || !canCloseManifest) return;
+    if (authed) {
+      setSaving(true);
+      try {
+        const { fields, lines } = uiFormToManifestPayload(form);
+        const saved = await saveManifest({
+          id: editing.id,
+          rowVersion: editing.rowVersion ?? null,
+          fields,
+          lines,
+        });
+        const closed = await closeManifest({ id: saved.id, rowVersion: saved.row_version });
+        await refreshLive();
+        toast.success(`Manifest ${closed.manifest_no} closed`);
+        closeForm();
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    setDemoRows((prev) =>
+      prev.map((r) => (r.id === editing.id ? { ...r, ...form, status: "CLOSED" } : r)),
+    );
+    toast.success("Manifest closed");
+    closeForm();
+  };
+
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+    if (authed) {
+      try {
+        await cancelManifest({
+          id: deleteTarget.id,
+          rowVersion: deleteTarget.rowVersion ?? 1,
+          reason: "Cancelled from Manifest Scan",
+        });
+        await refreshLive();
+        toast.success(`Cancelled manifest ${deleteTarget.manifestNo}`);
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+        return;
+      } finally {
+        setDeleteTarget(null);
+      }
+      return;
+    }
+    setDemoRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
     toast.success(`Deleted manifest ${deleteTarget.manifestNo}`);
     setDeleteTarget(null);
   };
@@ -677,11 +827,20 @@ function ManifestScanPage() {
     if (!silent) toast.success("Column filters cleared");
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setSearch("");
     clearColFilters(true);
     setReportFilters(emptyReportFilters());
     setPage(1);
+    if (authed) {
+      try {
+        await refreshLive();
+        toast.success("Refreshed");
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      }
+      return;
+    }
     toast.success("Refreshed");
   };
 
@@ -796,7 +955,7 @@ function ManifestScanPage() {
       connectStation: generateHeader.serviceCentre.name || selected[0]?.destination || "",
       lines,
     };
-    setRows((prev) => [{ id: crypto.randomUUID(), ...payload }, ...prev]);
+    setDemoRows((prev) => [{ id: crypto.randomUUID(), status: "DRAFT", ...payload }, ...prev]);
     toast.success(`Manifest ${payload.manifestNo} created with ${lines.length} AWB${lines.length === 1 ? "" : "s"}`);
     closeGenerate();
   };
@@ -997,7 +1156,28 @@ function ManifestScanPage() {
           <div className="p-4 md:p-6">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
               <FieldWrapper label="Manifest No" required>
-                <Input value={form.manifestNo} disabled={!editing} onChange={(e) => setForm((f) => ({ ...f, manifestNo: e.target.value }))} />
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={form.manifestNo}
+                    disabled={!!editing || isReadOnly || authed}
+                    onChange={(e) => setForm((f) => ({ ...f, manifestNo: e.target.value }))}
+                    className="flex-1"
+                  />
+                  {formStatus ? (
+                    <Badge
+                      variant={
+                        formStatus === "CLOSED"
+                          ? "default"
+                          : formStatus === "CANCELLED"
+                            ? "destructive"
+                            : "secondary"
+                      }
+                      className="shrink-0"
+                    >
+                      {formStatus}
+                    </Badge>
+                  ) : null}
+                </div>
               </FieldWrapper>
               <FieldWrapper label="Manifest Date" required>
                 <Input type="date" value={form.manifestDate} onChange={(e) => setForm((f) => ({ ...f, manifestDate: e.target.value }))} />
@@ -1080,10 +1260,31 @@ function ManifestScanPage() {
             </Collapsible>
 
             <div className="mt-4 flex flex-wrap justify-center gap-2">
-              <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-              <Button className="bg-cyan-600 text-white hover:bg-cyan-600/90" onClick={() => toast.info("Print will be enabled with backend wiring")}>Print</Button>
-              <Button variant="destructive" onClick={closeForm}>Close</Button>
-              <Button variant="secondary" onClick={() => importInputRef.current?.click()}>Excel Import</Button>
+              {!isReadOnly ? (
+                <Button onClick={handleSave} disabled={saving} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+                  Save
+                </Button>
+              ) : null}
+              {canCloseManifest ? (
+                <Button
+                  onClick={handleCloseManifest}
+                  disabled={saving}
+                  className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                >
+                  Close Manifest
+                </Button>
+              ) : null}
+              <Button className="bg-cyan-600 text-white hover:bg-cyan-600/90" onClick={() => toast.info("Print will be enabled with backend wiring")}>
+                Print
+              </Button>
+              <Button variant="outline" onClick={closeForm} disabled={saving}>
+                Close
+              </Button>
+              {!isReadOnly ? (
+                <Button variant="secondary" onClick={() => importInputRef.current?.click()}>
+                  Excel Import
+                </Button>
+              ) : null}
               <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={() => toast.info("Excel import will be enabled with backend wiring")} />
             </div>
 
@@ -1226,7 +1427,23 @@ function ManifestScanPage() {
                     return (
                       <TableRow key={r.id}>
                         <TableCell className={manifestCol.manifestNo} title={d.manifestNo}>
-                          <button type="button" onClick={() => openEdit(r)} className="block w-full truncate text-left font-medium text-emerald-600 hover:text-emerald-700 hover:underline dark:text-emerald-400">{d.manifestNo}</button>
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <button type="button" onClick={() => openEdit(r)} className="block min-w-0 flex-1 truncate text-left font-medium text-emerald-600 hover:text-emerald-700 hover:underline dark:text-emerald-400">{d.manifestNo}</button>
+                            {r.status ? (
+                              <Badge
+                                variant={
+                                  r.status === "CLOSED"
+                                    ? "default"
+                                    : r.status === "CANCELLED"
+                                      ? "destructive"
+                                      : "secondary"
+                                }
+                                className="shrink-0 text-[10px]"
+                              >
+                                {r.status}
+                              </Badge>
+                            ) : null}
+                          </div>
                         </TableCell>
                         <TableCell className={manifestCol.masterAwbNo} title={d.masterAwbNo}>{d.masterAwbNo}</TableCell>
                         <TableCell className={manifestCol.date}>{d.date}</TableCell>
@@ -1439,12 +1656,18 @@ function ManifestScanPage() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete manifest?</AlertDialogTitle>
-            <AlertDialogDescription>This will permanently remove manifest {deleteTarget?.manifestNo}.</AlertDialogDescription>
+            <AlertDialogTitle>{authed ? "Cancel manifest?" : "Delete manifest?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {authed
+                ? `This will cancel manifest ${deleteTarget?.manifestNo}.`
+                : `This will permanently remove manifest ${deleteTarget?.manifestNo}.`}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+            <AlertDialogCancel>Close</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {authed ? "Cancel Manifest" : "Delete"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

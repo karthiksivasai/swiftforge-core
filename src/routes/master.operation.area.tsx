@@ -1,13 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
-import {
-  Download,
-  Upload,
-  RefreshCw,
-  Plus,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { Download, Upload, RefreshCw, Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -49,18 +42,38 @@ import {
   downloadCsv,
 } from "@/components/master-table-kit";
 import { MASTER_LOOKUPS } from "@/lib/master-lookups";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { areasResource, type AreaRow as AreaDbRow } from "@/lib/masters/resources/areas";
+import { areaCreateSchema, areaUpdateSchema } from "@/lib/masters/schemas/areas";
+import {
+  useMasterList,
+  useBranchOptions,
+  toErrorMessage,
+  importSummary,
+} from "@/lib/masters/screen";
+import { LookupCombobox, EntityCombobox } from "@/components/masters/lookup-combobox";
 
 type AreaRow = {
   id: string;
   areaName: string;
   serviceCenter: string;
   destination: string;
+  branchId?: string;
+  destinationId?: string;
+  row_version?: number;
 };
 
 type AreaForm = {
   areaName: string;
   serviceCenter: string;
   destination: string;
+  branchId?: string;
+  destinationId?: string;
 };
 
 const SERVICE_CENTRES = MASTER_LOOKUPS.serviceCentre.options;
@@ -97,26 +110,79 @@ export const Route = createFileRoute("/master/operation/area")({
   component: AreaPage,
 });
 
+function rowToView(r: AreaDbRow & Record<string, unknown>): AreaRow {
+  return {
+    id: r.id,
+    areaName: r.name,
+    serviceCenter: (r.branch_name as string) ?? "",
+    branchId: r.branch_id,
+    destination: (r.destination_name as string) ?? "",
+    destinationId: r.destination_id ?? "",
+    row_version: r.row_version,
+  };
+}
+
 function AreaPage() {
-  const [rows, setRows] = useState<AreaRow[]>(() =>
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(areasResource);
+  const live = useMasterList(areasResource, {
+    enabled: authed,
+    labelRefs: [
+      { idField: "branch_id", table: "branches", as: "branch" },
+      { idField: "destination_id", table: "destinations", as: "destination" },
+    ],
+  });
+  const branches = useBranchOptions(authed);
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<AreaRow[]>(() =>
     SEED_ROWS.map((r) => ({ id: crypto.randomUUID(), ...r })),
   );
   const [search, setSearch] = useState("");
-  const [colFilters, setColFilters] = useState({ areaName: "", serviceCenter: "", destination: "" });
+  const [colFilters, setColFilters] = useState({
+    areaName: "",
+    serviceCenter: "",
+    destination: "",
+  });
   const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<AreaRow | null>(null);
   const [form, setForm] = useState<AreaForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<AreaRow | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: AreaRow[] = authed
+    ? (live.rows as (AreaDbRow & Record<string, unknown>)[]).map(rowToView)
+    : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
-      if (q && ![r.areaName, r.serviceCenter, r.destination].some((v) => v.toLowerCase().includes(q))) return false;
-      if (colFilters.areaName && !r.areaName.toLowerCase().includes(colFilters.areaName.toLowerCase())) return false;
-      if (colFilters.serviceCenter && !r.serviceCenter.toLowerCase().includes(colFilters.serviceCenter.toLowerCase())) return false;
-      if (colFilters.destination && !r.destination.toLowerCase().includes(colFilters.destination.toLowerCase())) return false;
+      if (
+        q &&
+        ![r.areaName, r.serviceCenter, r.destination].some((v) => v.toLowerCase().includes(q))
+      )
+        return false;
+      if (
+        colFilters.areaName &&
+        !r.areaName.toLowerCase().includes(colFilters.areaName.toLowerCase())
+      )
+        return false;
+      if (
+        colFilters.serviceCenter &&
+        !r.serviceCenter.toLowerCase().includes(colFilters.serviceCenter.toLowerCase())
+      )
+        return false;
+      if (
+        colFilters.destination &&
+        !r.destination.toLowerCase().includes(colFilters.destination.toLowerCase())
+      )
+        return false;
       return true;
     });
   }, [rows, search, colFilters]);
@@ -135,7 +201,13 @@ function AreaPage() {
 
   const openEdit = (row: AreaRow) => {
     setEditing(row);
-    setForm({ areaName: row.areaName, serviceCenter: row.serviceCenter, destination: row.destination });
+    setForm({
+      areaName: row.areaName,
+      serviceCenter: row.serviceCenter,
+      destination: row.destination,
+      branchId: row.branchId,
+      destinationId: row.destinationId,
+    });
     setShowForm(true);
   };
 
@@ -150,7 +222,39 @@ function AreaPage() {
     setForm((f) => ({ ...f, serviceCenter, destination }));
   };
 
-  const handleSave = () => {
+  const toRaw = (f: AreaForm) => ({
+    branch_id: f.branchId || "",
+    name: f.areaName,
+    destination_id: f.destinationId || null,
+  });
+
+  const handleSave = async () => {
+    if (authed) {
+      setSaving(true);
+      try {
+        const raw = toRaw(form);
+        if (editing) {
+          const patch = areaUpdateSchema.parse(raw);
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch,
+          });
+          toast.success("Area updated");
+        } else {
+          const values = areaCreateSchema.parse(raw);
+          await rc.create.mutateAsync(values);
+          toast.success("Area added");
+        }
+        closeForm();
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save area"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     if (!form.areaName.trim()) return toast.error("Area Name is required");
     if (!form.serviceCenter.trim()) return toast.error("Service Center is required");
 
@@ -161,20 +265,33 @@ function AreaPage() {
     };
 
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...payload } : r)));
+      setDemoRows((prev) =>
+        prev.map((r) => (r.id === editing.id ? { ...editing, ...payload } : r)),
+      );
       toast.success("Area updated");
     } else {
-      if (rows.some((r) => r.areaName.toUpperCase() === payload.areaName)) return toast.error("Area Name already exists");
-      setRows((prev) => [{ id: crypto.randomUUID(), ...payload }, ...prev]);
+      if (demoRows.some((r) => r.areaName.toUpperCase() === payload.areaName))
+        return toast.error("Area Name already exists");
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), ...payload }, ...prev]);
       toast.success("Area added");
     }
     closeForm();
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success(`Deleted ${deleteTarget.areaName}`);
+    const row = deleteTarget;
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.areaName}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete area"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.areaName}`);
+    }
     setDeleteTarget(null);
   };
 
@@ -193,42 +310,33 @@ function AreaPage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) return toast.error("File is empty");
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "", inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) return toast.error("File is empty");
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          areasResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
       const imported: AreaRow[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const c = parseRow(lines[i]);
-        if (!c[0]?.trim()) continue;
+      for (const rec of parsed.rows) {
+        const areaName = (rec["Area Name"] ?? rec["name"] ?? "").trim();
+        if (!areaName) continue;
         imported.push({
           id: crypto.randomUUID(),
-          areaName: c[0].trim().toUpperCase(),
-          serviceCenter: (c[1] || "").trim(),
-          destination: (c[2] || "").trim(),
+          areaName: areaName.toUpperCase(),
+          serviceCenter: (rec["Service Center"] ?? rec["branch_code"] ?? "").trim(),
+          destination: (rec["Destination"] ?? rec["destination_code"] ?? "").trim(),
         });
       }
       if (imported.length === 0) return toast.error("No valid rows found");
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
@@ -237,6 +345,7 @@ function AreaPage() {
     setColFilters({ areaName: "", serviceCenter: "", destination: "" });
     setPage(1);
     closeForm();
+    if (authed) queryClient.invalidateQueries({ queryKey: masterKeys.all(areasResource.key) });
     toast.success("Refreshed");
   };
 
@@ -247,30 +356,77 @@ function AreaPage() {
       {showForm ? (
         <Card className="overflow-hidden border p-0">
           <div className="p-4 md:p-6">
-            <Badge className="mb-4 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">Area</Badge>
+            <Badge className="mb-4 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
+              Area
+            </Badge>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
               <FieldWrapper label="Area Name" required>
-                <Input value={form.areaName} onChange={(e) => setForm((f) => ({ ...f, areaName: e.target.value.toUpperCase() }))} />
+                <Input
+                  value={form.areaName}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, areaName: e.target.value.toUpperCase() }))
+                  }
+                />
               </FieldWrapper>
               <FieldWrapper label="Service Center" required>
-                <Select value={form.serviceCenter} onValueChange={handleServiceCenterChange}>
-                  <SelectTrigger><SelectValue placeholder="Select Service Center" /></SelectTrigger>
-                  <SelectContent>
-                    {SERVICE_CENTRES.map((sc) => (
-                      <SelectItem key={sc.code} value={sc.code}>{sc.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {authed ? (
+                  <EntityCombobox
+                    items={branches.options}
+                    value={form.branchId ?? ""}
+                    valueLabel={form.serviceCenter}
+                    loading={branches.isLoading}
+                    onChange={(id, item) =>
+                      setForm((f) => ({ ...f, branchId: id, serviceCenter: item?.name ?? "" }))
+                    }
+                    placeholder="Select Service Center"
+                  />
+                ) : (
+                  <Select value={form.serviceCenter} onValueChange={handleServiceCenterChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Service Center" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SERVICE_CENTRES.map((sc) => (
+                        <SelectItem key={sc.code} value={sc.code}>
+                          {sc.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </FieldWrapper>
               <FieldWrapper label="Destination">
-                <Input value={form.destination} onChange={(e) => setForm((f) => ({ ...f, destination: e.target.value }))} />
+                {authed ? (
+                  <LookupCombobox
+                    lookupKey="destination"
+                    value={form.destinationId ?? ""}
+                    valueLabel={form.destination}
+                    onChange={(id, item) =>
+                      setForm((f) => ({ ...f, destinationId: id, destination: item?.name ?? "" }))
+                    }
+                    placeholder="Select Destination"
+                  />
+                ) : (
+                  <Input
+                    value={form.destination}
+                    onChange={(e) => setForm((f) => ({ ...f, destination: e.target.value }))}
+                  />
+                )}
               </FieldWrapper>
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
-              <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-              <Button variant="destructive" onClick={closeForm}>Cancel</Button>
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+              >
+                {saving ? "Saving…" : "Save"}
+              </Button>
+              <Button variant="destructive" onClick={closeForm}>
+                Cancel
+              </Button>
             </div>
           </div>
         </Card>
@@ -284,26 +440,45 @@ function AreaPage() {
           </div>
 
           <Card className="overflow-hidden p-0">
-            <input ref={importInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFile} />
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportFile}
+            />
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
               <TooltipProvider delayDuration={200}>
                 <div className="flex items-center gap-1.5">
-                  <IconButton label="Export" onClick={handleExport}><Download className="h-4 w-4" /></IconButton>
-                  <IconButton label="Import" onClick={() => importInputRef.current?.click()}><Upload className="h-4 w-4" /></IconButton>
-                  <IconButton label="Refresh" onClick={handleRefresh}><RefreshCw className="h-4 w-4" /></IconButton>
+                  <IconButton label="Export" onClick={handleExport}>
+                    <Download className="h-4 w-4" />
+                  </IconButton>
+                  {canAdd ? (
+                    <IconButton label="Import" onClick={() => importInputRef.current?.click()}>
+                      <Upload className="h-4 w-4" />
+                    </IconButton>
+                  ) : null}
+                  <IconButton label="Refresh" onClick={handleRefresh}>
+                    <RefreshCw className="h-4 w-4" />
+                  </IconButton>
                 </div>
               </TooltipProvider>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Search:</span>
                 <Input
                   value={search}
-                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
                   className="h-9 w-56"
                 />
-                <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-                  <Plus className="h-4 w-4" />
-                  Add
-                </Button>
+                {canAdd ? (
+                  <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                    <Plus className="h-4 w-4" />
+                    Add
+                  </Button>
+                ) : null}
               </div>
             </div>
 
@@ -314,18 +489,25 @@ function AreaPage() {
                     <TableHead className="text-sidebar-foreground">Area Name</TableHead>
                     <TableHead className="text-sidebar-foreground">Service Center</TableHead>
                     <TableHead className="text-sidebar-foreground">Destination</TableHead>
-                    <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
+                    <TableHead className="w-28 text-center text-sidebar-foreground">
+                      Action
+                    </TableHead>
                   </TableRow>
                   <TableRow className="bg-muted/20 hover:bg-muted/20">
-                    {([
-                      ["areaName", "Area Name"],
-                      ["serviceCenter", "Service Center"],
-                      ["destination", "Destination"],
-                    ] as const).map(([k, placeholder]) => (
+                    {(
+                      [
+                        ["areaName", "Area Name"],
+                        ["serviceCenter", "Service Center"],
+                        ["destination", "Destination"],
+                      ] as const
+                    ).map(([k, placeholder]) => (
                       <TableHead key={k} className="py-2">
                         <Input
                           value={colFilters[k]}
-                          onChange={(e) => { setColFilters((f) => ({ ...f, [k]: e.target.value })); setPage(1); }}
+                          onChange={(e) => {
+                            setColFilters((f) => ({ ...f, [k]: e.target.value }));
+                            setPage(1);
+                          }}
                           placeholder={placeholder}
                           className="h-8"
                         />
@@ -337,7 +519,10 @@ function AreaPage() {
                 <TableBody>
                   {pageRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="h-32 text-center text-sm text-muted-foreground">
+                      <TableCell
+                        colSpan={4}
+                        className="h-32 text-center text-sm text-muted-foreground"
+                      >
                         No data available in table
                       </TableCell>
                     </TableRow>
@@ -349,12 +534,28 @@ function AreaPage() {
                         <TableCell>{r.destination}</TableCell>
                         <TableCell className="text-center">
                           <div className="flex justify-center gap-1">
-                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)} aria-label={`Edit ${r.areaName}`}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(r)} aria-label={`Delete ${r.areaName}`}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {canModify ? (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                onClick={() => openEdit(r)}
+                                aria-label={`Edit ${r.areaName}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            ) : null}
+                            {canDelete ? (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => setDeleteTarget(r)}
+                                aria-label={`Delete ${r.areaName}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -364,7 +565,14 @@ function AreaPage() {
               </Table>
             </div>
 
-            <TablePager totalPages={totalPages} currentPage={currentPage} setPage={setPage} startIdx={startIdx} endIdx={endIdx} total={filtered.length} />
+            <TablePager
+              totalPages={totalPages}
+              currentPage={currentPage}
+              setPage={setPage}
+              startIdx={startIdx}
+              endIdx={endIdx}
+              total={filtered.length}
+            />
           </Card>
         </>
       )}
@@ -374,12 +582,16 @@ function AreaPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete area?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove area <span className="font-medium text-foreground">{deleteTarget?.areaName}</span>.
+              This will remove area{" "}
+              <span className="font-medium text-foreground">{deleteTarget?.areaName}</span>.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

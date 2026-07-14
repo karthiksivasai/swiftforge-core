@@ -53,11 +53,27 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import {
+  instructionsResource,
+  type InstructionRow as InstructionDbRow,
+} from "@/lib/masters/resources/instructions";
+import {
+  instructionCreateSchema,
+  instructionUpdateSchema,
+} from "@/lib/masters/schemas/instructions";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
 
 type InstructionRow = {
   id: string;
   code: string;
   name: string;
+  row_version?: number;
 };
 
 const SEED_DATA: Omit<InstructionRow, "id">[] = [
@@ -86,7 +102,10 @@ export const Route = createFileRoute("/master/sales/instruction")({
   head: () => ({
     meta: [
       { title: "Instruction — Master — Courier ERP" },
-      { name: "description", content: "Manage the instruction master used for shipment handling notes." },
+      {
+        name: "description",
+        content: "Manage the instruction master used for shipment handling notes.",
+      },
     ],
   }),
   component: InstructionPage,
@@ -96,22 +115,42 @@ function emptyRow(): Omit<InstructionRow, "id"> {
   return { code: "", name: "" };
 }
 
+function rowToView(r: InstructionDbRow): InstructionRow {
+  return { id: r.id, code: r.code, name: r.name, row_version: r.row_version };
+}
+
+function toRaw(form: Omit<InstructionRow, "id">) {
+  return { code: form.code, name: form.name };
+}
+
 function InstructionPage() {
-  const [rows, setRows] = useState<InstructionRow[]>(SEED);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(instructionsResource);
+  const live = useMasterList(instructionsResource, { enabled: authed });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<InstructionRow[]>(SEED);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InstructionRow | null>(null);
   const [form, setForm] = useState<Omit<InstructionRow, "id">>(emptyRow());
   const [deleteTarget, setDeleteTarget] = useState<InstructionRow | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: InstructionRow[] = authed
+    ? (live.rows as InstructionDbRow[]).map(rowToView)
+    : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) =>
-      [r.code, r.name].some((v) => String(v).toLowerCase().includes(q)),
-    );
+    return rows.filter((r) => [r.code, r.name].some((v) => String(v).toLowerCase().includes(q)));
   }, [rows, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -128,36 +167,68 @@ function InstructionPage() {
 
   const openEdit = (row: InstructionRow) => {
     setEditing(row);
-    const { id: _id, ...rest } = row;
+    const { id: _id, row_version: _rv, ...rest } = row;
     setForm(rest);
     setOpen(true);
   };
 
-  const handleSave = () => {
-    if (!form.code.trim()) {
-      toast.error("Instruction Code is required");
+  const handleSave = async () => {
+    const raw = toRaw(form);
+    if (authed) {
+      setSaving(true);
+      try {
+        if (editing) {
+          const patch = instructionUpdateSchema.parse(raw);
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch,
+          });
+          toast.success("Instruction updated");
+        } else {
+          const values = instructionCreateSchema.parse(raw);
+          await rc.create.mutateAsync(values);
+          toast.success("Instruction added");
+        }
+        setOpen(false);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save instruction"));
+      } finally {
+        setSaving(false);
+      }
       return;
     }
-    if (!form.name.trim()) {
-      toast.error("Instruction Name is required");
+    try {
+      if (editing) instructionUpdateSchema.parse(raw);
+      else instructionCreateSchema.parse(raw);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Please fix the form"));
       return;
     }
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
       toast.success("Instruction updated");
     } else {
-      const id = crypto.randomUUID();
-      setRows((prev) => [{ id, ...form }, ...prev]);
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), ...form }, ...prev]);
       toast.success("Instruction added");
     }
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
     const row = deleteTarget;
-    setRows((prev) => prev.filter((r) => r.id !== row.id));
-    toast.success(`Deleted ${row.code}`);
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.code}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete instruction"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.code}`);
+    }
     setDeleteTarget(null);
   };
 
@@ -166,9 +237,7 @@ function InstructionPage() {
     const csv = [
       header.join(","),
       ...rows.map((r) =>
-        [r.code, r.name]
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-          .join(","),
+        [r.code, r.name].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
       ),
     ].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -191,54 +260,45 @@ function InstructionPage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) {
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) {
         toast.error("File is empty");
         return;
       }
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "";
-        let inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          instructionsResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
       const imported: InstructionRow[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const [code, name] = parseRow(lines[i]);
-        if (!code?.trim()) continue;
+      for (const rec of mapCsvToImportRows(parsed.rows, instructionsResource.importColumns)) {
+        if (!rec.code?.trim()) continue;
         imported.push({
           id: crypto.randomUUID(),
-          code: code.trim(),
-          name: (name || "").trim(),
+          code: rec.code.trim(),
+          name: (rec.name || "").trim(),
         });
       }
       if (imported.length === 0) {
         toast.error("No valid rows found");
         return;
       }
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
   const handleRefresh = () => {
     setSearch("");
     setPage(1);
+    if (authed)
+      queryClient.invalidateQueries({ queryKey: masterKeys.all(instructionsResource.key) });
     toast.success("Refreshed");
   };
 
@@ -287,9 +347,11 @@ function InstructionPage() {
               <IconButton label="Export" onClick={handleExport}>
                 <Download className="h-4 w-4" />
               </IconButton>
-              <IconButton label="Import" onClick={handleImport}>
-                <Upload className="h-4 w-4" />
-              </IconButton>
+              {canAdd ? (
+                <IconButton label="Import" onClick={handleImport}>
+                  <Upload className="h-4 w-4" />
+                </IconButton>
+              ) : null}
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>
@@ -309,10 +371,12 @@ function InstructionPage() {
                 className="h-9 w-56 pl-8"
               />
             </div>
-            <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add
-            </Button>
+            {canAdd ? (
+              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -339,24 +403,28 @@ function InstructionPage() {
                     <TableCell>{r.name}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          onClick={() => openEdit(r)}
-                          aria-label={`Edit ${r.code}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(r)}
-                          aria-label={`Delete ${r.code}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canModify ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(r)}
+                            aria-label={`Edit ${r.code}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        {canDelete ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(r)}
+                            aria-label={`Delete ${r.code}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -384,10 +452,7 @@ function InstructionPage() {
             >
               <ChevronRight className="h-4 w-4" />
             </PagerButton>
-            <PagerButton
-              disabled={currentPage === totalPages}
-              onClick={() => setPage(totalPages)}
-            >
+            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
               <ChevronsRight className="h-4 w-4" />
             </PagerButton>
           </div>
@@ -419,8 +484,12 @@ function InstructionPage() {
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
-              Save
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              {saving ? "Saving…" : "Save"}
             </Button>
             <Button variant="destructive" onClick={() => setOpen(false)}>
               Cancel
@@ -436,7 +505,8 @@ function InstructionPage() {
             <AlertDialogDescription>
               This will permanently remove{" "}
               <span className="font-medium text-foreground">{deleteTarget?.code}</span>
-              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the instruction master. This action cannot be undone.
+              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the instruction master.
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

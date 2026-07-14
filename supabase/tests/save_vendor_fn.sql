@@ -1,0 +1,199 @@
+-- ===========================================================================
+-- save_vendor — aggregate (addresses + contacts + bank accounts)
+-- ===========================================================================
+create or replace function public.save_vendor(
+  p_id              uuid,
+  p_row_version     integer,
+  p_fields          jsonb,
+  p_wizard_extras   jsonb default '{}'::jsonb,
+  p_addresses       jsonb default '[]'::jsonb,
+  p_contacts        jsonb default '[]'::jsonb,
+  p_bank_accounts   jsonb default '[]'::jsonb
+)
+returns public.vendors
+language plpgsql
+security definer
+set search_path = public, app
+as $$
+declare
+  v_tenant uuid;
+  v_v      public.vendors;
+  v_status text;
+  v_mode   text;
+  v_class  text;
+begin
+  select t into v_tenant from (select app.user_tenant_ids() as t) s limit 1;
+  if v_tenant is null then
+    raise exception 'No tenant context for the current user' using errcode = '42501';
+  end if;
+  if p_fields is null or jsonb_typeof(p_fields) <> 'object' then
+    raise exception 'p_fields must be a JSON object' using errcode = '22023';
+  end if;
+  if coalesce(btrim(p_fields->>'code'), '') = '' then
+    raise exception 'Code is required' using errcode = '22023';
+  end if;
+  if coalesce(btrim(p_fields->>'name'), '') = '' then
+    raise exception 'Name is required' using errcode = '22023';
+  end if;
+  if coalesce(btrim(p_fields->>'mobile'), '') = '' then
+    raise exception 'Mobile is required' using errcode = '22023';
+  end if;
+
+  v_status := app.norm_enum(p_fields->>'status', array['ACTIVE','INACTIVE'], 'Status', 'ACTIVE');
+  v_mode := upper(replace(coalesce(nullif(btrim(p_fields->>'mode'), ''), 'COURIER'), ' ', '_'));
+  if v_mode not in ('AIR','SURFACE','TRAIN','COURIER','EXPRESS') then v_mode := 'COURIER'; end if;
+  v_class := upper(replace(coalesce(nullif(btrim(p_fields->>'vendor_class'), ''), 'VENDOR'), ' ', '_'));
+  if v_class not in ('OBC','DELIVERY','VENDOR','AIRLINE') then v_class := 'VENDOR'; end if;
+
+  if p_id is null then
+    if not app.user_has_permission(v_tenant, 'mst.vendor-master', 'add') then
+      raise exception 'Permission denied: mst.vendor-master add' using errcode = '42501';
+    end if;
+    insert into public.vendors (
+      tenant_id, code, name, contact_person, address1, address2, pin_code, city, state_id,
+      phone1, phone2, fax, mobile, email, website, gst_no, mode, vendor_class, fuel_head,
+      currency, origin_destination_id, vendor_zip, is_global, gst_applies, vol_weight_round_off,
+      wizard_extras, status)
+    values (
+      v_tenant, btrim(p_fields->>'code'), btrim(p_fields->>'name'),
+      nullif(btrim(coalesce(p_fields->>'contact_person','')),''),
+      nullif(btrim(coalesce(p_fields->>'address1','')),''),
+      nullif(btrim(coalesce(p_fields->>'address2','')),''),
+      nullif(btrim(coalesce(p_fields->>'pin_code','')),''),
+      nullif(btrim(coalesce(p_fields->>'city','')),''),
+      nullif(btrim(p_fields->>'state_id'),'')::uuid,
+      nullif(btrim(coalesce(p_fields->>'phone1','')),''),
+      nullif(btrim(coalesce(p_fields->>'phone2','')),''),
+      nullif(btrim(coalesce(p_fields->>'fax','')),''),
+      btrim(p_fields->>'mobile'),
+      nullif(btrim(coalesce(p_fields->>'email','')),''),
+      nullif(btrim(coalesce(p_fields->>'website','')),''),
+      nullif(btrim(coalesce(p_fields->>'gst_no','')),''),
+      v_mode, v_class,
+      nullif(btrim(coalesce(p_fields->>'fuel_head','')),''),
+      coalesce(nullif(btrim(p_fields->>'currency'), ''), 'INR'),
+      nullif(btrim(p_fields->>'origin_destination_id'),'')::uuid,
+      nullif(btrim(coalesce(p_fields->>'vendor_zip','')),''),
+      coalesce((p_fields->>'is_global')::boolean, false),
+      coalesce((p_fields->>'gst_applies')::boolean, true),
+      coalesce((p_fields->>'vol_weight_round_off')::boolean, false),
+      coalesce(p_wizard_extras, '{}'::jsonb),
+      v_status)
+    returning * into v_v;
+  else
+    if not app.user_has_permission(v_tenant, 'mst.vendor-master', 'modify') then
+      raise exception 'Permission denied: mst.vendor-master modify' using errcode = '42501';
+    end if;
+    update public.vendors set
+      code = btrim(p_fields->>'code'),
+      name = btrim(p_fields->>'name'),
+      contact_person = nullif(btrim(coalesce(p_fields->>'contact_person','')),''),
+      address1 = nullif(btrim(coalesce(p_fields->>'address1','')),''),
+      address2 = nullif(btrim(coalesce(p_fields->>'address2','')),''),
+      pin_code = nullif(btrim(coalesce(p_fields->>'pin_code','')),''),
+      city = nullif(btrim(coalesce(p_fields->>'city','')),''),
+      state_id = nullif(btrim(p_fields->>'state_id'),'')::uuid,
+      phone1 = nullif(btrim(coalesce(p_fields->>'phone1','')),''),
+      phone2 = nullif(btrim(coalesce(p_fields->>'phone2','')),''),
+      fax = nullif(btrim(coalesce(p_fields->>'fax','')),''),
+      mobile = btrim(p_fields->>'mobile'),
+      email = nullif(btrim(coalesce(p_fields->>'email','')),''),
+      website = nullif(btrim(coalesce(p_fields->>'website','')),''),
+      gst_no = nullif(btrim(coalesce(p_fields->>'gst_no','')),''),
+      mode = v_mode,
+      vendor_class = v_class,
+      fuel_head = nullif(btrim(coalesce(p_fields->>'fuel_head','')),''),
+      currency = coalesce(nullif(btrim(p_fields->>'currency'), ''), 'INR'),
+      origin_destination_id = nullif(btrim(p_fields->>'origin_destination_id'),'')::uuid,
+      vendor_zip = nullif(btrim(coalesce(p_fields->>'vendor_zip','')),''),
+      is_global = coalesce((p_fields->>'is_global')::boolean, false),
+      gst_applies = coalesce((p_fields->>'gst_applies')::boolean, true),
+      vol_weight_round_off = coalesce((p_fields->>'vol_weight_round_off')::boolean, false),
+      wizard_extras = coalesce(p_wizard_extras, wizard_extras),
+      status = v_status
+    where id = p_id and tenant_id = v_tenant and deleted_at is null and row_version = p_row_version
+    returning * into v_v;
+    if not found then
+      raise exception 'This record was changed by someone else. Reload and try again.' using errcode = '40001';
+    end if;
+  end if;
+
+  -- addresses
+  delete from public.vendor_addresses where tenant_id = v_tenant and vendor_id = v_v.id;
+  if p_addresses is not null and jsonb_typeof(p_addresses) = 'array' then
+    insert into public.vendor_addresses (
+      tenant_id, vendor_id, seq, address_type, name, address1, address2, address3,
+      pin_code, city, state_id, country_id, phone, mobile, email, is_default, remark)
+    select v_tenant, v_v.id, t.ord,
+      nullif(btrim(coalesce(t.row->>'address_type', t.row->>'addressType','')),''),
+      nullif(btrim(coalesce(t.row->>'name','')),''),
+      nullif(btrim(coalesce(t.row->>'address1','')),''),
+      nullif(btrim(coalesce(t.row->>'address2','')),''),
+      nullif(btrim(coalesce(t.row->>'address3','')),''),
+      nullif(btrim(coalesce(t.row->>'pin_code', t.row->>'pinCode','')),''),
+      nullif(btrim(coalesce(t.row->>'city','')),''),
+      nullif(btrim(t.row->>'state_id'),'')::uuid,
+      nullif(btrim(t.row->>'country_id'),'')::uuid,
+      nullif(btrim(coalesce(t.row->>'phone','')),''),
+      nullif(btrim(coalesce(t.row->>'mobile','')),''),
+      nullif(btrim(coalesce(t.row->>'email','')),''),
+      coalesce((t.row->>'is_default')::boolean, coalesce((t.row->>'isDefault')::boolean, false)),
+      nullif(btrim(coalesce(t.row->>'remark','')),'')
+    from jsonb_array_elements(p_addresses) with ordinality as t(row, ord)
+    where coalesce(btrim(coalesce(t.row->>'name', t.row->>'address1','')), '') <> '';
+  end if;
+
+  -- contacts
+  delete from public.vendor_contacts where tenant_id = v_tenant and vendor_id = v_v.id;
+  if p_contacts is not null and jsonb_typeof(p_contacts) = 'array' then
+    insert into public.vendor_contacts (
+      tenant_id, vendor_id, seq, contact_type, name, designation,
+      email, mobile, landline, extension, is_primary, remark)
+    select v_tenant, v_v.id, t.ord,
+      nullif(btrim(coalesce(t.row->>'contact_type', t.row->>'contactType','')),''),
+      nullif(btrim(coalesce(t.row->>'name','')),''),
+      nullif(btrim(coalesce(t.row->>'designation','')),''),
+      nullif(btrim(coalesce(t.row->>'email','')),''),
+      nullif(btrim(coalesce(t.row->>'mobile','')),''),
+      nullif(btrim(coalesce(t.row->>'landline','')),''),
+      nullif(btrim(coalesce(t.row->>'extension','')),''),
+      coalesce((t.row->>'is_primary')::boolean, coalesce((t.row->>'isPrimary')::boolean, false)),
+      nullif(btrim(coalesce(t.row->>'remark','')),'')
+    from jsonb_array_elements(p_contacts) with ordinality as t(row, ord)
+    where coalesce(btrim(coalesce(t.row->>'name','')), '') <> '';
+  end if;
+
+  -- bank accounts
+  delete from public.vendor_bank_accounts where tenant_id = v_tenant and vendor_id = v_v.id;
+  if p_bank_accounts is not null and jsonb_typeof(p_bank_accounts) = 'array' then
+    insert into public.vendor_bank_accounts (
+      tenant_id, vendor_id, seq, bank_id, account_name, account_no, ifsc, branch, is_default, remark)
+    select v_tenant, v_v.id, t.ord,
+      nullif(btrim(t.row->>'bank_id'),'')::uuid,
+      nullif(btrim(coalesce(t.row->>'account_name', t.row->>'accountName','')),''),
+      nullif(btrim(coalesce(t.row->>'account_no', t.row->>'accountNo','')),''),
+      nullif(btrim(coalesce(t.row->>'ifsc','')),''),
+      nullif(btrim(coalesce(t.row->>'branch','')),''),
+      coalesce((t.row->>'is_default')::boolean, coalesce((t.row->>'isDefault')::boolean, false)),
+      nullif(btrim(coalesce(t.row->>'remark','')),'')
+    from jsonb_array_elements(p_bank_accounts) with ordinality as t(row, ord)
+    where coalesce(btrim(coalesce(t.row->>'account_no', t.row->>'accountNo','')), '') <> '';
+  end if;
+
+  perform app.write_audit_log(
+    v_tenant, 'vendors',
+    case when p_id is null then 'ADD' else 'MODIFY' end,
+    v_v.id, 'mst.vendor-master', null,
+    jsonb_build_object(
+      'addresses', coalesce(p_addresses, '[]'::jsonb),
+      'contacts', coalesce(p_contacts, '[]'::jsonb),
+      'bank_accounts', coalesce(p_bank_accounts, '[]'::jsonb)));
+
+  return v_v;
+end $$;
+
+comment on function public.save_vendor(uuid, integer, jsonb, jsonb, jsonb, jsonb, jsonb) is
+  'Aggregate Save: vendors root + addresses/contacts/bank child collections (replace semantics). wizard_extras holds rates metadata only.';
+
+grant execute on function public.save_vendor(uuid, integer, jsonb, jsonb, jsonb, jsonb, jsonb)
+  to authenticated, service_role;

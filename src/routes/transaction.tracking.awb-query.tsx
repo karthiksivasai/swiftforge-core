@@ -7,13 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -31,6 +25,10 @@ import {
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import { toErrorMessage } from "@/lib/masters/screen";
+import { getShipmentTracking } from "@/lib/transactions/resources/tracking";
+import { mapTrackingToAwbQuery } from "@/lib/transactions/trackingUiMap";
 
 type LookupPair = { code: string; name: string };
 type QueryTab = "shipping" | "additional" | "filter";
@@ -221,7 +219,16 @@ const QUERY_TABS: { value: QueryTab; label: string }[] = [
 const PAYMENT_TYPES = ["Cash", "Cheque", "Credit", "To Pay"] as const;
 const PRODUCT_OPTIONS = ["Domestic", "International", "Local", "Import"] as const;
 const PRODUCT_TYPES = ["DOX", "SPX", "NDOX"] as const;
-const CSB_TYPES = ["CSB 4", "CSB 5", "CSB 3", "COMMERCIAL", "ECM DOX", "ECM SPX", "CBE XII", "CBE XIII"] as const;
+const CSB_TYPES = [
+  "CSB 4",
+  "CSB 5",
+  "CSB 3",
+  "COMMERCIAL",
+  "ECM DOX",
+  "ECM SPX",
+  "CBE XII",
+  "CBE XIII",
+] as const;
 const STATUS_OPTIONS = ["All", "Delivered", "UnDelivered", "Pending"] as const;
 
 const SHIPMENT_DETAIL_FIELDS: { key: string; label: string }[] = [
@@ -388,9 +395,27 @@ const buildSeedRecord = (awbNo: string): AwbQueryRecord => ({
     fieldExecutive: "",
   },
   progress: [
-    { userId: "SURYAA", date: "04/07/2026", time: "1015", serviceCenter: "HYD", statusDetails: "AWB Booked" },
-    { userId: "SURYAA", date: "04/07/2026", time: "1130", serviceCenter: "HYD", statusDetails: "Shipment Picked Up" },
-    { userId: "OPS01", date: "04/07/2026", time: "1430", serviceCenter: "HYD", statusDetails: "Departed From Facility" },
+    {
+      userId: "SURYAA",
+      date: "04/07/2026",
+      time: "1015",
+      serviceCenter: "HYD",
+      statusDetails: "AWB Booked",
+    },
+    {
+      userId: "SURYAA",
+      date: "04/07/2026",
+      time: "1130",
+      serviceCenter: "HYD",
+      statusDetails: "Shipment Picked Up",
+    },
+    {
+      userId: "OPS01",
+      date: "04/07/2026",
+      time: "1430",
+      serviceCenter: "HYD",
+      statusDetails: "Departed From Facility",
+    },
   ],
   comments: [
     { userId: "SURYAA", date: "04/07/2026", time: "1016", comment: "Booking confirmed", file: "" },
@@ -426,7 +451,15 @@ const buildSeedRecord = (awbNo: string): AwbQueryRecord => ({
     },
   ],
   inscan: [
-    { awbNo, vendorNo: "DTAU", weight: "36.000", length: "40", breadth: "30", height: "20", volWeight: "36.000" },
+    {
+      awbNo,
+      vendorNo: "DTAU",
+      weight: "36.000",
+      length: "40",
+      breadth: "30",
+      height: "20",
+      volWeight: "36.000",
+    },
   ],
   manifest: [
     { awbNo, maniNo: "0044", maniDate: "04/07/2026", bag: "1", weight: "36.000", pcs: "1" },
@@ -444,13 +477,27 @@ const buildSeedRecord = (awbNo: string): AwbQueryRecord => ({
   ],
   statusDetails: [
     { user: "SURYAA", date: "04/07/2026", time: "1015", status: "Booked", remarks: "AWB created" },
-    { user: "OPS01", date: "04/07/2026", time: "1430", status: "In Transit", remarks: "Manifest assigned" },
+    {
+      user: "OPS01",
+      date: "04/07/2026",
+      time: "1430",
+      status: "In Transit",
+      remarks: "Manifest assigned",
+    },
   ],
 });
 
 const SEED_AWB_NUMBERS = [
-  "30403918", "30403919", "30403920", "30403921", "30403922",
-  "30403923", "30403924", "30403925", "30403926", "30403927",
+  "30403918",
+  "30403919",
+  "30403920",
+  "30403921",
+  "30403922",
+  "30403923",
+  "30403924",
+  "30403925",
+  "30403926",
+  "30403927",
 ];
 
 const seedFilterRows = (): FilterResultRow[] =>
@@ -485,6 +532,7 @@ export const Route = createFileRoute("/transaction/tracking/awb-query")({
 });
 
 function AwbQueryPage() {
+  const { isAuthenticated: authed } = useAuth();
   const [activeTab, setActiveTab] = useState<QueryTab>("shipping");
   const [awbInput, setAwbInput] = useState("");
   const [lastAwbNo, setLastAwbNo] = useState("");
@@ -496,23 +544,75 @@ function AwbQueryPage() {
 
   const patchFilter = (patch: Partial<FilterForm>) => setFilterForm((f) => ({ ...f, ...patch }));
 
-  const runAwbQuery = (awb?: string) => {
+  const runAwbQuery = async (awb?: string) => {
     const q = (awb ?? awbInput).trim();
     if (!q) return toast.error("AWB No. is required");
-    if (!SEED_AWB_NUMBERS.includes(q)) {
-      setQueryResult(null);
-      return toast.error(`No record found for AWB ${q}`);
+
+    if (!authed) {
+      if (!SEED_AWB_NUMBERS.includes(q)) {
+        setQueryResult(null);
+        return toast.error(`No record found for AWB ${q}`);
+      }
+      const record = buildSeedRecord(q);
+      setQueryResult(record);
+      setLastAwbNo(q);
+      setAwbInput(q);
+      return toast.success(`Loaded AWB ${q} (demo)`);
     }
-    const record = buildSeedRecord(q);
-    setQueryResult(record);
-    setLastAwbNo(q);
-    setAwbInput(q);
-    toast.success(`Loaded AWB ${q}`);
+
+    try {
+      const result = await getShipmentTracking(q);
+      const mapped = mapTrackingToAwbQuery(result);
+      if (!mapped) {
+        setQueryResult(null);
+        return toast.error(`No record found for AWB ${q}`);
+      }
+      setQueryResult({
+        awbNo: mapped.awbNo,
+        lastAwbNo: mapped.lastAwbNo,
+        podUser: mapped.podUser,
+        userId: mapped.userId,
+        customerDetails: mapped.customerDetails,
+        shipperDetails: mapped.shipperDetails,
+        consigneeDetails: mapped.consigneeDetails,
+        podStatus: mapped.podStatus,
+        podStatusDate: mapped.podStatusDate,
+        podStatusTime: mapped.podStatusTime,
+        podReceiverName: mapped.podReceiverName,
+        podRemark: mapped.podRemark,
+        podReceiveDate: mapped.podReceiveDate,
+        vendorName: mapped.vendorName,
+        deliveryVendor: mapped.deliveryVendor,
+        forwardingAwb: mapped.forwardingAwb,
+        deliveryAwb: mapped.deliveryAwb,
+        returnAwbNo: mapped.returnAwbNo,
+        flightNo: mapped.flightNo,
+        airlines: mapped.airlines,
+        mastAwbNo: mapped.mastAwbNo,
+        cdNo: mapped.cdNo,
+        obcName: mapped.obcName,
+        shipmentDetails: mapped.shipmentDetails,
+        progress: mapped.progress,
+        comments: mapped.comments,
+        shipmentLog: mapped.shipmentLog,
+        volumetric: [],
+        proforma: [],
+        inscan: [],
+        manifest: [],
+        manifestInscan: [],
+        statusDetails: mapped.statusDetails,
+      });
+      setLastAwbNo(q);
+      setAwbInput(q);
+      toast.success(`Loaded AWB ${q}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err));
+    }
   };
 
   const handleRepeat = () => {
     if (!lastAwbNo) return toast.info("No previous AWB to repeat");
-    runAwbQuery(lastAwbNo);
+    void runAwbQuery(lastAwbNo);
   };
 
   const handleFilterSearch = () => {
@@ -526,16 +626,21 @@ function AwbQueryPage() {
     }
     if (f.customer.name.trim()) {
       const q = f.customer.name.toLowerCase();
-      rows = rows.filter((r) => r.shipper.toLowerCase().includes(q) || r.consignee.toLowerCase().includes(q));
+      rows = rows.filter(
+        (r) => r.shipper.toLowerCase().includes(q) || r.consignee.toLowerCase().includes(q),
+      );
     }
     if (f.origin.code.trim()) rows = rows.filter((r) => r.destination.includes(f.origin.code));
-    if (f.destination.code.trim()) rows = rows.filter((r) => r.destination.includes(f.destination.code));
+    if (f.destination.code.trim())
+      rows = rows.filter((r) => r.destination.includes(f.destination.code));
     if (f.paymentType) rows = rows.filter((r) => r.paymentType === f.paymentType);
     if (f.status && f.status !== "All") {
       rows = rows.filter((r) => (f.status === "Delivered" ? r.deliveryDate : !r.deliveryDate));
     }
-    if (f.shipper.trim()) rows = rows.filter((r) => r.shipper.toLowerCase().includes(f.shipper.toLowerCase()));
-    if (f.consignee.trim()) rows = rows.filter((r) => r.consignee.toLowerCase().includes(f.consignee.toLowerCase()));
+    if (f.shipper.trim())
+      rows = rows.filter((r) => r.shipper.toLowerCase().includes(f.shipper.toLowerCase()));
+    if (f.consignee.trim())
+      rows = rows.filter((r) => r.consignee.toLowerCase().includes(f.consignee.toLowerCase()));
     setFilterResults(rows);
     setFilterSearched(true);
     setFilterPage(1);
@@ -556,9 +661,22 @@ function AwbQueryPage() {
       "awb-query-filter.csv",
       [...FILTER_RESULT_HEADERS],
       filterResults.map((r) => [
-        r.masterAwbNo, r.awbNo, r.bookingDate, r.runNo, r.airline, r.shipper, r.consignee,
-        r.city, r.destination, r.pieces, r.chargeWeight, r.totalAmount, r.forwarder,
-        r.deliveryDate, r.paymentType, r.manifestType,
+        r.masterAwbNo,
+        r.awbNo,
+        r.bookingDate,
+        r.runNo,
+        r.airline,
+        r.shipper,
+        r.consignee,
+        r.city,
+        r.destination,
+        r.pieces,
+        r.chargeWeight,
+        r.totalAmount,
+        r.forwarder,
+        r.deliveryDate,
+        r.paymentType,
+        r.manifestType,
       ]),
     );
     toast.success("Exported awb-query-filter.csv");
@@ -566,7 +684,10 @@ function AwbQueryPage() {
 
   const filterTotalPages = Math.max(1, Math.ceil(filterResults.length / PAGE_SIZE));
   const filterCurrentPage = Math.min(filterPage, filterTotalPages);
-  const filterPageRows = filterResults.slice((filterCurrentPage - 1) * PAGE_SIZE, filterCurrentPage * PAGE_SIZE);
+  const filterPageRows = filterResults.slice(
+    (filterCurrentPage - 1) * PAGE_SIZE,
+    filterCurrentPage * PAGE_SIZE,
+  );
   const filterStart = filterResults.length === 0 ? 0 : (filterCurrentPage - 1) * PAGE_SIZE + 1;
   const filterEnd = Math.min(filterCurrentPage * PAGE_SIZE, filterResults.length);
 
@@ -587,6 +708,7 @@ function AwbQueryPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">AWB Query</h1>
         <p className="text-sm text-muted-foreground">
           Search AWB records and view shipping, additional, and filter details.
+          {authed ? " Connected to live backend." : " Demo mode — sign in for live tracking."}
         </p>
       </div>
 
@@ -607,9 +729,17 @@ function AwbQueryPage() {
 
             <div className="flex min-w-0 flex-wrap items-end gap-3 lg:justify-end">
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                <span>Last AWB No. : <span className="font-medium text-foreground">{metaLabels.lastAwbNo}</span></span>
-                <span>POD User : <span className="font-medium text-foreground">{metaLabels.podUser}</span></span>
-                <span>User ID : <span className="font-medium text-foreground">{metaLabels.userId}</span></span>
+                <span>
+                  Last AWB No. :{" "}
+                  <span className="font-medium text-foreground">{metaLabels.lastAwbNo}</span>
+                </span>
+                <span>
+                  POD User :{" "}
+                  <span className="font-medium text-foreground">{metaLabels.podUser}</span>
+                </span>
+                <span>
+                  User ID : <span className="font-medium text-foreground">{metaLabels.userId}</span>
+                </span>
               </div>
               <FieldWrapper label="AWB No." className="min-w-[10rem]">
                 <div className="flex gap-1">
@@ -619,7 +749,7 @@ function AwbQueryPage() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        runAwbQuery();
+                        void runAwbQuery();
                       }
                     }}
                     className="border-destructive/60"
@@ -628,7 +758,7 @@ function AwbQueryPage() {
                     size="icon"
                     className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
                     aria-label="Search AWB"
-                    onClick={() => runAwbQuery()}
+                    onClick={() => void runAwbQuery()}
                   >
                     <Search className="h-4 w-4" />
                   </Button>
@@ -661,15 +791,28 @@ function AwbQueryPage() {
                   </div>
                 </FormSection>
                 <div className="flex flex-col gap-2 xl:min-w-[10rem]">
-                  <Button className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90" onClick={() => toast.info("Pickup location map will be enabled with backend wiring")}>
+                  <Button
+                    className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                    onClick={() =>
+                      toast.info("Pickup location map will be enabled with backend wiring")
+                    }
+                  >
                     <MapPin className="mr-2 h-4 w-4" />
                     Pickup Location
                   </Button>
-                  <Button className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90" onClick={() => toast.info("Delivery location map will be enabled with backend wiring")}>
+                  <Button
+                    className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                    onClick={() =>
+                      toast.info("Delivery location map will be enabled with backend wiring")
+                    }
+                  >
                     <MapPin className="mr-2 h-4 w-4" />
                     Delivery Location
                   </Button>
-                  <Button className="bg-emerald-600 text-white hover:bg-emerald-600/90" onClick={() => toast.success("AWB query confirmed")}>
+                  <Button
+                    className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+                    onClick={() => toast.success("AWB query confirmed")}
+                  >
                     <Check className="mr-2 h-4 w-4" />
                     Ok
                   </Button>
@@ -688,17 +831,30 @@ function AwbQueryPage() {
               <QueryTable
                 title="Progress"
                 headers={["User Id", "Date", "Time", "Service Center", "Status Details"]}
-                rows={queryResult?.progress.map((line) => [
-                  line.userId, line.date, line.time, line.serviceCenter, line.statusDetails,
-                ]) ?? []}
+                rows={
+                  queryResult?.progress.map((line) => [
+                    line.userId,
+                    line.date,
+                    line.time,
+                    line.serviceCenter,
+                    line.statusDetails,
+                  ]) ?? []
+                }
               />
 
               <QueryTable
                 title="Comment"
                 headers={["User Id", "Date", "Time", "Comment", "File", "Action"]}
-                rows={queryResult?.comments.map((line) => [
-                  line.userId, line.date, line.time, line.comment, line.file, "",
-                ]) ?? []}
+                rows={
+                  queryResult?.comments.map((line) => [
+                    line.userId,
+                    line.date,
+                    line.time,
+                    line.comment,
+                    line.file,
+                    "",
+                  ]) ?? []
+                }
                 actionCol
               />
 
@@ -715,9 +871,14 @@ function AwbQueryPage() {
                 <QueryTable
                   title="Shipment Log"
                   headers={["User Id", "Date", "Time", "Message"]}
-                  rows={queryResult?.shipmentLog.map((line) => [
-                    line.userId, line.date, line.time, line.message,
-                  ]) ?? []}
+                  rows={
+                    queryResult?.shipmentLog.map((line) => [
+                      line.userId,
+                      line.date,
+                      line.time,
+                      line.message,
+                    ]) ?? []
+                  }
                 />
               </div>
 
@@ -726,7 +887,9 @@ function AwbQueryPage() {
                   {SHIPMENT_DETAIL_FIELDS.map(({ key, label }) => (
                     <div key={key} className="flex gap-2 text-sm">
                       <span className="min-w-[7.5rem] font-medium text-foreground">{label} :</span>
-                      <span className="text-muted-foreground">{queryResult?.shipmentDetails[key] || "—"}</span>
+                      <span className="text-muted-foreground">
+                        {queryResult?.shipmentDetails[key] || "—"}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -738,50 +901,127 @@ function AwbQueryPage() {
             <div className="grid grid-cols-1 gap-4 p-4 md:p-6 xl:grid-cols-2">
               <QueryTable
                 title="Volumetric Details"
-                headers={["AWB No", "Agent AWB No", "Actual Weight", "Pieces", "Length", "Width", "Height", "Volumetric Weight", "Charge Weight"]}
-                rows={queryResult?.volumetric.map((l) => [
-                  l.awbNo, l.agentAwbNo, l.actualWeight, l.pieces, l.length, l.width, l.height, l.volumetricWeight, l.chargeWeight,
-                ]) ?? []}
+                headers={[
+                  "AWB No",
+                  "Agent AWB No",
+                  "Actual Weight",
+                  "Pieces",
+                  "Length",
+                  "Width",
+                  "Height",
+                  "Volumetric Weight",
+                  "Charge Weight",
+                ]}
+                rows={
+                  queryResult?.volumetric.map((l) => [
+                    l.awbNo,
+                    l.agentAwbNo,
+                    l.actualWeight,
+                    l.pieces,
+                    l.length,
+                    l.width,
+                    l.height,
+                    l.volumetricWeight,
+                    l.chargeWeight,
+                  ]) ?? []
+                }
                 compact
               />
               <QueryTable
                 title="Performa Details"
-                headers={["Box No.", "Package", "Description", "HSN Code", "Quantity", "Unit", "Rate", "Amount", "Weight"]}
-                rows={queryResult?.proforma.map((l) => [
-                  l.boxNo, l.packageNo, l.description, l.hsnCode, l.quantity, l.unit, l.rate, l.amount, l.weight,
-                ]) ?? []}
+                headers={[
+                  "Box No.",
+                  "Package",
+                  "Description",
+                  "HSN Code",
+                  "Quantity",
+                  "Unit",
+                  "Rate",
+                  "Amount",
+                  "Weight",
+                ]}
+                rows={
+                  queryResult?.proforma.map((l) => [
+                    l.boxNo,
+                    l.packageNo,
+                    l.description,
+                    l.hsnCode,
+                    l.quantity,
+                    l.unit,
+                    l.rate,
+                    l.amount,
+                    l.weight,
+                  ]) ?? []
+                }
                 compact
               />
               <QueryTable
                 title="Inscan"
                 headers={["AWB No", "Vendor No", "Weight", "L", "B", "H", "Vol Weight"]}
-                rows={queryResult?.inscan.map((l) => [
-                  l.awbNo, l.vendorNo, l.weight, l.length, l.breadth, l.height, l.volWeight,
-                ]) ?? []}
+                rows={
+                  queryResult?.inscan.map((l) => [
+                    l.awbNo,
+                    l.vendorNo,
+                    l.weight,
+                    l.length,
+                    l.breadth,
+                    l.height,
+                    l.volWeight,
+                  ]) ?? []
+                }
                 compact
               />
               <QueryTable
                 title="Manifest"
                 headers={["AWB No", "Mani No", "Mani Date", "Bag", "Weight", "Pcs"]}
-                rows={queryResult?.manifest.map((l) => [
-                  l.awbNo, l.maniNo, l.maniDate, l.bag, l.weight, l.pcs,
-                ]) ?? []}
+                rows={
+                  queryResult?.manifest.map((l) => [
+                    l.awbNo,
+                    l.maniNo,
+                    l.maniDate,
+                    l.bag,
+                    l.weight,
+                    l.pcs,
+                  ]) ?? []
+                }
                 compact
               />
               <QueryTable
                 title="Manifest Inscan"
-                headers={["AWB No", "Mani No", "Location", "Rec. Date", "Inscan location", "Remark", "Rec. weight"]}
-                rows={queryResult?.manifestInscan.map((l) => [
-                  l.awbNo, l.maniNo, l.location, l.recDate, l.inscanLocation, l.remark, l.recWeight,
-                ]) ?? []}
+                headers={[
+                  "AWB No",
+                  "Mani No",
+                  "Location",
+                  "Rec. Date",
+                  "Inscan location",
+                  "Remark",
+                  "Rec. weight",
+                ]}
+                rows={
+                  queryResult?.manifestInscan.map((l) => [
+                    l.awbNo,
+                    l.maniNo,
+                    l.location,
+                    l.recDate,
+                    l.inscanLocation,
+                    l.remark,
+                    l.recWeight,
+                  ]) ?? []
+                }
                 compact
               />
               <QueryTable
                 title="Status Details"
                 headers={["User", "Date", "Time", "Status", "Remarks"]}
-                rows={queryResult?.statusDetails.map((l) => [
-                  l.user, l.date, l.time, l.status, l.remarks,
-                ]) ?? []}
+                rows={
+                  queryResult?.statusDetails.map((l) => [
+                    l.user,
+                    l.date,
+                    l.time,
+                    l.status,
+                    l.remarks,
+                  ]) ?? []
+                }
                 compact
               />
             </div>
@@ -791,121 +1031,250 @@ function AwbQueryPage() {
             <div className="space-y-4 p-4 md:p-6">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <FieldWrapper label="Booking From Date">
-                  <Input type="date" value={filterForm.bookingFromDate} onChange={(e) => patchFilter({ bookingFromDate: e.target.value })} />
+                  <Input
+                    type="date"
+                    value={filterForm.bookingFromDate}
+                    onChange={(e) => patchFilter({ bookingFromDate: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Booking To Date">
-                  <Input type="date" value={filterForm.bookingToDate} onChange={(e) => patchFilter({ bookingToDate: e.target.value })} />
+                  <Input
+                    type="date"
+                    value={filterForm.bookingToDate}
+                    onChange={(e) => patchFilter({ bookingToDate: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Status From Date">
-                  <Input type="date" value={filterForm.statusFromDate} onChange={(e) => patchFilter({ statusFromDate: e.target.value })} />
+                  <Input
+                    type="date"
+                    value={filterForm.statusFromDate}
+                    onChange={(e) => patchFilter({ statusFromDate: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Status To Date">
-                  <Input type="date" value={filterForm.statusToDate} onChange={(e) => patchFilter({ statusToDate: e.target.value })} />
+                  <Input
+                    type="date"
+                    value={filterForm.statusToDate}
+                    onChange={(e) => patchFilter({ statusToDate: e.target.value })}
+                  />
                 </FieldWrapper>
 
                 <FieldWrapper label="Reference No">
-                  <Input value={filterForm.referenceNo} onChange={(e) => patchFilter({ referenceNo: e.target.value })} />
+                  <Input
+                    value={filterForm.referenceNo}
+                    onChange={(e) => patchFilter({ referenceNo: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Customer">
-                  <LookupPairInput lookup="customer" value={filterForm.customer} onChange={(customer) => patchFilter({ customer })} />
+                  <LookupPairInput
+                    lookup="customer"
+                    value={filterForm.customer}
+                    onChange={(customer) => patchFilter({ customer })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Vendor">
-                  <LookupPairInput lookup="vendor" value={filterForm.vendor} onChange={(vendor) => patchFilter({ vendor })} />
+                  <LookupPairInput
+                    lookup="vendor"
+                    value={filterForm.vendor}
+                    onChange={(vendor) => patchFilter({ vendor })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Service">
-                  <Input value={filterForm.service} onChange={(e) => patchFilter({ service: e.target.value })} />
+                  <Input
+                    value={filterForm.service}
+                    onChange={(e) => patchFilter({ service: e.target.value })}
+                  />
                 </FieldWrapper>
 
                 <FieldWrapper label="Origin">
-                  <LookupPairInput lookup="destination" value={filterForm.origin} onChange={(origin) => patchFilter({ origin })} />
+                  <LookupPairInput
+                    lookup="destination"
+                    value={filterForm.origin}
+                    onChange={(origin) => patchFilter({ origin })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Destination">
-                  <LookupPairInput lookup="destination" value={filterForm.destination} onChange={(destination) => patchFilter({ destination })} />
+                  <LookupPairInput
+                    lookup="destination"
+                    value={filterForm.destination}
+                    onChange={(destination) => patchFilter({ destination })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Payment Type">
-                  <Select value={filterForm.paymentType} onValueChange={(paymentType) => patchFilter({ paymentType })}>
-                    <SelectTrigger><SelectValue placeholder="Select Payment Type" /></SelectTrigger>
+                  <Select
+                    value={filterForm.paymentType}
+                    onValueChange={(paymentType) => patchFilter({ paymentType })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Payment Type" />
+                    </SelectTrigger>
                     <SelectContent>
-                      {PAYMENT_TYPES.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}
+                      {PAYMENT_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </FieldWrapper>
                 <FieldWrapper label="Airline">
-                  <Input value={filterForm.airline} onChange={(e) => patchFilter({ airline: e.target.value })} />
+                  <Input
+                    value={filterForm.airline}
+                    onChange={(e) => patchFilter({ airline: e.target.value })}
+                  />
                 </FieldWrapper>
 
                 <FieldWrapper label="Zip Code">
-                  <Input value={filterForm.zipCode} onChange={(e) => patchFilter({ zipCode: e.target.value })} />
+                  <Input
+                    value={filterForm.zipCode}
+                    onChange={(e) => patchFilter({ zipCode: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Forwarding No">
-                  <Input value={filterForm.forwardingNo} onChange={(e) => patchFilter({ forwardingNo: e.target.value })} />
+                  <Input
+                    value={filterForm.forwardingNo}
+                    onChange={(e) => patchFilter({ forwardingNo: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Bag No">
-                  <Input value={filterForm.bagNo} onChange={(e) => patchFilter({ bagNo: e.target.value })} />
+                  <Input
+                    value={filterForm.bagNo}
+                    onChange={(e) => patchFilter({ bagNo: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Status">
-                  <Select value={filterForm.status} onValueChange={(status) => patchFilter({ status })}>
-                    <SelectTrigger><SelectValue placeholder="Select Status" /></SelectTrigger>
+                  <Select
+                    value={filterForm.status}
+                    onValueChange={(status) => patchFilter({ status })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Status" />
+                    </SelectTrigger>
                     <SelectContent>
-                      {STATUS_OPTIONS.map((status) => <SelectItem key={status} value={status}>{status}</SelectItem>)}
+                      {STATUS_OPTIONS.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {status}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </FieldWrapper>
 
                 <FieldWrapper label="Product">
-                  <Select value={filterForm.product} onValueChange={(product) => patchFilter({ product })}>
-                    <SelectTrigger><SelectValue placeholder="Select Product" /></SelectTrigger>
+                  <Select
+                    value={filterForm.product}
+                    onValueChange={(product) => patchFilter({ product })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Product" />
+                    </SelectTrigger>
                     <SelectContent>
-                      {PRODUCT_OPTIONS.map((product) => <SelectItem key={product} value={product}>{product}</SelectItem>)}
+                      {PRODUCT_OPTIONS.map((product) => (
+                        <SelectItem key={product} value={product}>
+                          {product}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </FieldWrapper>
                 <FieldWrapper label="Delivery Vendor">
-                  <LookupPairInput lookup="vendor" value={filterForm.deliveryVendor} onChange={(deliveryVendor) => patchFilter({ deliveryVendor })} />
+                  <LookupPairInput
+                    lookup="vendor"
+                    value={filterForm.deliveryVendor}
+                    onChange={(deliveryVendor) => patchFilter({ deliveryVendor })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Delivery Service">
-                  <LookupPairInput lookup="vendor" value={filterForm.deliveryService} onChange={(deliveryService) => patchFilter({ deliveryService })} />
+                  <LookupPairInput
+                    lookup="vendor"
+                    value={filterForm.deliveryService}
+                    onChange={(deliveryService) => patchFilter({ deliveryService })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Shipper">
-                  <Input value={filterForm.shipper} onChange={(e) => patchFilter({ shipper: e.target.value })} />
+                  <Input
+                    value={filterForm.shipper}
+                    onChange={(e) => patchFilter({ shipper: e.target.value })}
+                  />
                 </FieldWrapper>
 
                 <FieldWrapper label="Consignee">
-                  <Input value={filterForm.consignee} onChange={(e) => patchFilter({ consignee: e.target.value })} />
+                  <Input
+                    value={filterForm.consignee}
+                    onChange={(e) => patchFilter({ consignee: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Consignee City">
-                  <Input value={filterForm.consigneeCity} onChange={(e) => patchFilter({ consigneeCity: e.target.value })} />
+                  <Input
+                    value={filterForm.consigneeCity}
+                    onChange={(e) => patchFilter({ consigneeCity: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Consignee Phone No.">
-                  <Input value={filterForm.consigneePhone} onChange={(e) => patchFilter({ consigneePhone: e.target.value })} />
+                  <Input
+                    value={filterForm.consigneePhone}
+                    onChange={(e) => patchFilter({ consigneePhone: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Run No From">
-                  <Input value={filterForm.runNoFrom} onChange={(e) => patchFilter({ runNoFrom: e.target.value })} />
+                  <Input
+                    value={filterForm.runNoFrom}
+                    onChange={(e) => patchFilter({ runNoFrom: e.target.value })}
+                  />
                 </FieldWrapper>
 
                 <FieldWrapper label="Run No To">
-                  <Input value={filterForm.runNoTo} onChange={(e) => patchFilter({ runNoTo: e.target.value })} />
+                  <Input
+                    value={filterForm.runNoTo}
+                    onChange={(e) => patchFilter({ runNoTo: e.target.value })}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="CSB Type">
-                  <Select value={filterForm.csbType} onValueChange={(csbType) => patchFilter({ csbType })}>
-                    <SelectTrigger><SelectValue placeholder="Select CSB Type" /></SelectTrigger>
+                  <Select
+                    value={filterForm.csbType}
+                    onValueChange={(csbType) => patchFilter({ csbType })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select CSB Type" />
+                    </SelectTrigger>
                     <SelectContent>
-                      {CSB_TYPES.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}
+                      {CSB_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </FieldWrapper>
                 <FieldWrapper label="Weight From">
-                  <Input value={filterForm.weightFrom} onChange={(e) => patchFilter({ weightFrom: e.target.value })} inputMode="decimal" />
+                  <Input
+                    value={filterForm.weightFrom}
+                    onChange={(e) => patchFilter({ weightFrom: e.target.value })}
+                    inputMode="decimal"
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Weight To">
-                  <Input value={filterForm.weightTo} onChange={(e) => patchFilter({ weightTo: e.target.value })} inputMode="decimal" />
+                  <Input
+                    value={filterForm.weightTo}
+                    onChange={(e) => patchFilter({ weightTo: e.target.value })}
+                    inputMode="decimal"
+                  />
                 </FieldWrapper>
 
                 <FieldWrapper label="Product Type">
-                  <Select value={filterForm.productType} onValueChange={(productType) => patchFilter({ productType })}>
-                    <SelectTrigger><SelectValue placeholder="Select Product Type" /></SelectTrigger>
+                  <Select
+                    value={filterForm.productType}
+                    onValueChange={(productType) => patchFilter({ productType })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Product Type" />
+                    </SelectTrigger>
                     <SelectContent>
-                      {PRODUCT_TYPES.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}
+                      {PRODUCT_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </FieldWrapper>
@@ -913,25 +1282,40 @@ function AwbQueryPage() {
 
               <div className="flex flex-wrap gap-4">
                 <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={filterForm.onlyPart} onCheckedChange={(v) => patchFilter({ onlyPart: v === true })} />
+                  <Checkbox
+                    checked={filterForm.onlyPart}
+                    onCheckedChange={(v) => patchFilter({ onlyPart: v === true })}
+                  />
                   Only Part
                 </label>
                 <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={filterForm.onlyMasterAndActual} onCheckedChange={(v) => patchFilter({ onlyMasterAndActual: v === true })} />
+                  <Checkbox
+                    checked={filterForm.onlyMasterAndActual}
+                    onCheckedChange={(v) => patchFilter({ onlyMasterAndActual: v === true })}
+                  />
                   Only Master And Actual
                 </label>
                 <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={filterForm.isHold} onCheckedChange={(v) => patchFilter({ isHold: v === true })} />
+                  <Checkbox
+                    checked={filterForm.isHold}
+                    onCheckedChange={(v) => patchFilter({ isHold: v === true })}
+                  />
                   Is Hold
                 </label>
                 <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={filterForm.rto} onCheckedChange={(v) => patchFilter({ rto: v === true })} />
+                  <Checkbox
+                    checked={filterForm.rto}
+                    onCheckedChange={(v) => patchFilter({ rto: v === true })}
+                  />
                   RTO
                 </label>
               </div>
 
               <div className="flex flex-wrap justify-end gap-2">
-                <Button onClick={handleFilterSearch} className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
+                <Button
+                  onClick={handleFilterSearch}
+                  className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                >
                   Search
                 </Button>
                 <Button onClick={handleFilterExport} variant="secondary">
@@ -951,14 +1335,22 @@ function AwbQueryPage() {
                     <TableHeader>
                       <TableRow className="bg-sidebar hover:bg-sidebar">
                         {FILTER_RESULT_HEADERS.map((head) => (
-                          <TableHead key={head} className="whitespace-nowrap text-sidebar-foreground">{head}</TableHead>
+                          <TableHead
+                            key={head}
+                            className="whitespace-nowrap text-sidebar-foreground"
+                          >
+                            {head}
+                          </TableHead>
                         ))}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {!filterSearched || filterPageRows.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={FILTER_RESULT_HEADERS.length} className="h-24 text-center text-muted-foreground">
+                          <TableCell
+                            colSpan={FILTER_RESULT_HEADERS.length}
+                            className="h-24 text-center text-muted-foreground"
+                          >
                             {filterSearched ? "No matching records" : "Run search to view results"}
                           </TableCell>
                         </TableRow>
@@ -1032,7 +1424,9 @@ function FormSection({ title, children }: { title: string; children: ReactNode }
 function DetailPanel({ title, text }: { title: string; text: string }) {
   return (
     <FormSection title={title}>
-      <pre className="min-h-[6rem] whitespace-pre-wrap font-sans text-sm text-muted-foreground">{text || "—"}</pre>
+      <pre className="min-h-[6rem] whitespace-pre-wrap font-sans text-sm text-muted-foreground">
+        {text || "—"}
+      </pre>
     </FormSection>
   );
 }
@@ -1066,14 +1460,19 @@ function QueryTable({
           <TableHeader>
             <TableRow className="bg-muted/40 hover:bg-muted/40">
               {headers.map((head) => (
-                <TableHead key={head} className="whitespace-nowrap">{head}</TableHead>
+                <TableHead key={head} className="whitespace-nowrap">
+                  {head}
+                </TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={headers.length} className="h-16 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={headers.length}
+                  className="h-16 text-center text-muted-foreground"
+                >
                   No data available
                 </TableCell>
               </TableRow>

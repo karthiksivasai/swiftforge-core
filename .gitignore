@@ -16,6 +16,16 @@ dist-ssr
 .nitro
 *.local
 
+# Environment / secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# Supabase CLI local artifacts
+supabase/.branches
+supabase/.temp
+supabase/.env
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars

@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -16,6 +17,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { AppHeader } from "@/components/app-header";
 import { TenantProvider } from "@/lib/tenant";
 import { ThemeProvider } from "@/lib/theme";
+import { AuthProvider } from "@/lib/auth";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -99,11 +101,31 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Courier ERP — Modern Courier Management SaaS" },
-      { name: "description", content: "Modern multi-tenant Courier ERP SaaS platform for pickup, manifest, tracking, delivery, and reporting operations." },
-      { property: "og:description", content: "Modern multi-tenant Courier ERP SaaS platform for pickup, manifest, tracking, delivery, and reporting operations." },
-      { name: "twitter:description", content: "Modern multi-tenant Courier ERP SaaS platform for pickup, manifest, tracking, delivery, and reporting operations." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c694cc75-50c7-4074-8f76-f2431c2307ab/id-preview-974c139d--891a3afb-7d24-4ef7-8706-c7a0ab8aac4b.lovable.app-1783350978670.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c694cc75-50c7-4074-8f76-f2431c2307ab/id-preview-974c139d--891a3afb-7d24-4ef7-8706-c7a0ab8aac4b.lovable.app-1783350978670.png" },
+      {
+        name: "description",
+        content:
+          "Modern multi-tenant Courier ERP SaaS platform for pickup, manifest, tracking, delivery, and reporting operations.",
+      },
+      {
+        property: "og:description",
+        content:
+          "Modern multi-tenant Courier ERP SaaS platform for pickup, manifest, tracking, delivery, and reporting operations.",
+      },
+      {
+        name: "twitter:description",
+        content:
+          "Modern multi-tenant Courier ERP SaaS platform for pickup, manifest, tracking, delivery, and reporting operations.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c694cc75-50c7-4074-8f76-f2431c2307ab/id-preview-974c139d--891a3afb-7d24-4ef7-8706-c7a0ab8aac4b.lovable.app-1783350978670.png",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c694cc75-50c7-4074-8f76-f2431c2307ab/id-preview-974c139d--891a3afb-7d24-4ef7-8706-c7a0ab8aac4b.lovable.app-1783350978670.png",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -132,24 +154,35 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isAuthRoute = pathname === "/login";
 
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <TenantProvider>
-          <TooltipProvider delayDuration={0}>
-            <SidebarProvider defaultOpen={false}>
-              <AppSidebar />
-              <SidebarInset className="min-w-0 overflow-x-hidden">
-                <AppHeader />
-                <main className="min-w-0 flex-1 overflow-x-hidden">
-                  {/* Required: nested routes render here. */}
+          <AuthProvider>
+            <TooltipProvider delayDuration={0}>
+              {isAuthRoute ? (
+                <>
                   <Outlet />
-                </main>
-                <Toaster />
-              </SidebarInset>
-            </SidebarProvider>
-          </TooltipProvider>
+                  <Toaster />
+                </>
+              ) : (
+                <SidebarProvider defaultOpen={false}>
+                  <AppSidebar />
+                  <SidebarInset className="min-w-0 overflow-x-hidden">
+                    <AppHeader />
+                    <main className="min-w-0 flex-1 overflow-x-hidden">
+                      {/* Required: nested routes render here. */}
+                      <Outlet />
+                    </main>
+                    <Toaster />
+                  </SidebarInset>
+                </SidebarProvider>
+              )}
+            </TooltipProvider>
+          </AuthProvider>
         </TenantProvider>
       </ThemeProvider>
     </QueryClientProvider>

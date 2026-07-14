@@ -1,14 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
-import {
-  Download,
-  Upload,
-  RefreshCw,
-  Plus,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { Download, Upload, RefreshCw, Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +38,20 @@ import {
 } from "@/components/master-table-kit";
 import { cn } from "@/lib/utils";
 
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import {
+  deliveryExceptionsResource,
+  type DeliveryExceptionRow as DeliveryExceptionDbRow,
+} from "@/lib/masters/resources/deliveryExceptions";
+import {
+  deliveryExceptionCreateSchema,
+  deliveryExceptionUpdateSchema,
+} from "@/lib/masters/schemas/deliveryExceptions";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+
 type ExceptionType = "Delivered" | "Un-Delivered";
 
 type ExceptionRow = {
@@ -53,6 +61,7 @@ type ExceptionRow = {
   type: ExceptionType;
   inscan: boolean;
   showOnMobile: boolean;
+  row_version?: number;
 };
 
 type ExceptionForm = {
@@ -64,72 +73,320 @@ type ExceptionForm = {
 };
 
 const SEED_ROWS: Omit<ExceptionRow, "id">[] = [
-  { code: "CD", name: "ARRIVED AT DESTINATION", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "AF", name: "ARRIVED AT FACILITY", type: "Un-Delivered", inscan: false, showOnMobile: true },
+  {
+    code: "CD",
+    name: "ARRIVED AT DESTINATION",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "AF",
+    name: "ARRIVED AT FACILITY",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
   { code: "AT", name: "ARRIVED HUB", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "AC", name: "AWAITING CUSTOM CLEARANCE", type: "Un-Delivered", inscan: false, showOnMobile: true },
+  {
+    code: "AC",
+    name: "AWAITING CUSTOM CLEARANCE",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
   { code: "CE", name: "CLEARANCE EVENT", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "CK", name: "CLEARANCE PROCESSING COMPLETED AT ORIGIN", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "CP", name: "CLEARANCE PROCESSING", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "CA", name: "CUSTOMS AUTHORIZED", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "CB", name: "CUSTOMS BROKER NOTIFIED", type: "Un-Delivered", inscan: false, showOnMobile: false },
+  {
+    code: "CK",
+    name: "CLEARANCE PROCESSING COMPLETED AT ORIGIN",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "CP",
+    name: "CLEARANCE PROCESSING",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "CA",
+    name: "CUSTOMS AUTHORIZED",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "CB",
+    name: "CUSTOMS BROKER NOTIFIED",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
   { code: "CL", name: "CUSTOMS HELD", type: "Un-Delivered", inscan: false, showOnMobile: true },
   { code: "OK", name: "Delivered", type: "Delivered", inscan: true, showOnMobile: true },
-  { code: "DD", name: "DEPARTED FROM FACILITY", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "DC", name: "DESTINATION CUSTOMER CLEARANCE IN PROGRESS", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "ES", name: "ESTIMATED ARRIVAL ON 29-03-2026", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "AR", name: "ESTIMATED CUSTOMER CLEARANCE SCHEDULED ON 3.12.2025", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "QW", name: "EXCEPTION IN TRANSIT", type: "Un-Delivered", inscan: false, showOnMobile: false },
+  {
+    code: "DD",
+    name: "DEPARTED FROM FACILITY",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "DC",
+    name: "DESTINATION CUSTOMER CLEARANCE IN PROGRESS",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "ES",
+    name: "ESTIMATED ARRIVAL ON 29-03-2026",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "AR",
+    name: "ESTIMATED CUSTOMER CLEARANCE SCHEDULED ON 3.12.2025",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "QW",
+    name: "EXCEPTION IN TRANSIT",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
   { code: "DE", name: "DELAY IN TRANSIT", type: "Un-Delivered", inscan: false, showOnMobile: true },
   { code: "GH", name: "HELD AT GATEWAY", type: "Un-Delivered", inscan: false, showOnMobile: false },
   { code: "FV", name: "FLIGHT ARRIVED", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "HJ", name: "HELD AT JUNCTION", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "KJ", name: "ESTIMATED FLIGHT ARRIVAL ON 29-06-2026", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "HU", name: "EXPECTED FLIGHT ARRIVAL", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "NJ", name: "NOT RECEIVED AT HUB", type: "Un-Delivered", inscan: false, showOnMobile: false },
+  {
+    code: "HJ",
+    name: "HELD AT JUNCTION",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "KJ",
+    name: "ESTIMATED FLIGHT ARRIVAL ON 29-06-2026",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "HU",
+    name: "EXPECTED FLIGHT ARRIVAL",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "NJ",
+    name: "NOT RECEIVED AT HUB",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
   { code: "IT", name: "IN TRANSIT", type: "Un-Delivered", inscan: false, showOnMobile: true },
   { code: "IC", name: "IN CUSTOMS", type: "Un-Delivered", inscan: false, showOnMobile: true },
   { code: "IP", name: "IN PROCESS", type: "Un-Delivered", inscan: false, showOnMobile: false },
   { code: "IR", name: "IN ROUTE", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "IS", name: "IN SORTING FACILITY", type: "Un-Delivered", inscan: true, showOnMobile: false },
+  {
+    code: "IS",
+    name: "IN SORTING FACILITY",
+    type: "Un-Delivered",
+    inscan: true,
+    showOnMobile: false,
+  },
   { code: "IV", name: "INVESTIGATION", type: "Un-Delivered", inscan: false, showOnMobile: false },
   { code: "IW", name: "IN WAREHOUSE", type: "Un-Delivered", inscan: true, showOnMobile: false },
   { code: "FD", name: "FLIGHT DELAYED", type: "Un-Delivered", inscan: false, showOnMobile: true },
   { code: "DF", name: "FLIGHT DEPARTED", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "FA", name: "FLIGHT ARRIVED AT DESTINATION", type: "Un-Delivered", inscan: false, showOnMobile: true },
+  {
+    code: "FA",
+    name: "FLIGHT ARRIVED AT DESTINATION",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
   { code: "FC", name: "FLIGHT CANCELLED", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "FM", name: "FLIGHT MISSED CONNECTION", type: "Un-Delivered", inscan: false, showOnMobile: false },
+  {
+    code: "FM",
+    name: "FLIGHT MISSED CONNECTION",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
   { code: "FP", name: "FLIGHT PREPARED", type: "Un-Delivered", inscan: false, showOnMobile: false },
   { code: "FR", name: "FREIGHT RECEIVED", type: "Un-Delivered", inscan: true, showOnMobile: false },
   { code: "FS", name: "FREIGHT SORTED", type: "Un-Delivered", inscan: true, showOnMobile: false },
-  { code: "FT", name: "FREIGHT TRANSFERRED", type: "Un-Delivered", inscan: false, showOnMobile: false },
+  {
+    code: "FT",
+    name: "FREIGHT TRANSFERRED",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
   { code: "FW", name: "FREIGHT WEIGHED", type: "Un-Delivered", inscan: true, showOnMobile: false },
   { code: "OD", name: "OUT FOR DELIVERY", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "PD", name: "PARCEL AT DELIVERY CENTER", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "PW", name: "PARCEL ON ITS WAY", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "PH", name: "PENDING FOR CLEARANCE", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "ED", name: "Prepared Export Documents", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "PF", name: "PROCESSED AT FACILITY", type: "Un-Delivered", inscan: true, showOnMobile: true },
-  { code: "RC", name: "RELEASED FROM CUSTOMS", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "RE", name: "RETURN TO SHIPPER", type: "Un-Delivered", inscan: false, showOnMobile: true },
+  {
+    code: "PD",
+    name: "PARCEL AT DELIVERY CENTER",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "PW",
+    name: "PARCEL ON ITS WAY",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "PH",
+    name: "PENDING FOR CLEARANCE",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "ED",
+    name: "Prepared Export Documents",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "PF",
+    name: "PROCESSED AT FACILITY",
+    type: "Un-Delivered",
+    inscan: true,
+    showOnMobile: true,
+  },
+  {
+    code: "RC",
+    name: "RELEASED FROM CUSTOMS",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "RE",
+    name: "RETURN TO SHIPPER",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
   { code: "SB", name: "SHIPMENT BAGGED", type: "Un-Delivered", inscan: true, showOnMobile: false },
-  { code: "PZ", name: "SHIPMENT DEPARTED ON THE WAY TO MEL", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "SE", name: "SHIPMENT EXPECTED DEPARTURE ON 29-03-2024", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "SO", name: "SHIPMENT FORWARDED TO PARTNER/CARRIER", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "AA", name: "SHIPMENT ACCEPTED AT ORIGIN", type: "Un-Delivered", inscan: true, showOnMobile: true },
-  { code: "SF", name: "SHIPMENT FORWARDED", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "SA", name: "SHIPMENT PICKED UP", type: "Un-Delivered", inscan: true, showOnMobile: true },
-  { code: "SC", name: "SHIPMENT CREATED", type: "Un-Delivered", inscan: false, showOnMobile: false },
+  {
+    code: "PZ",
+    name: "SHIPMENT DEPARTED ON THE WAY TO MEL",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "SE",
+    name: "SHIPMENT EXPECTED DEPARTURE ON 29-03-2024",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "SO",
+    name: "SHIPMENT FORWARDED TO PARTNER/CARRIER",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "AA",
+    name: "SHIPMENT ACCEPTED AT ORIGIN",
+    type: "Un-Delivered",
+    inscan: true,
+    showOnMobile: true,
+  },
+  {
+    code: "SF",
+    name: "SHIPMENT FORWARDED",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "SA",
+    name: "SHIPMENT PICKED UP",
+    type: "Un-Delivered",
+    inscan: true,
+    showOnMobile: true,
+  },
+  {
+    code: "SC",
+    name: "SHIPMENT CREATED",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
   { code: "SD", name: "SHIPMENT DELAYED", type: "Un-Delivered", inscan: false, showOnMobile: true },
   { code: "SH", name: "SHIPMENT HELD", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "SI", name: "SHIPMENT INSCANNED", type: "Un-Delivered", inscan: true, showOnMobile: false },
-  { code: "SP", name: "SHIPMENT PROCESSED", type: "Un-Delivered", inscan: true, showOnMobile: false },
-  { code: "SU", name: "SHIPMENT UNDER PROGRESS", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "SM", name: "SHORTLANDED AT MELBOURNE AIRPORT", type: "Un-Delivered", inscan: false, showOnMobile: false },
-  { code: "UN", name: "UNABLE TO DELIVER", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "CC", name: "UNDER CUSTOM CLEARANCE", type: "Un-Delivered", inscan: false, showOnMobile: true },
-  { code: "PE", name: "UNDER PHYSICAL EXAMINATION", type: "Un-Delivered", inscan: false, showOnMobile: false },
+  {
+    code: "SI",
+    name: "SHIPMENT INSCANNED",
+    type: "Un-Delivered",
+    inscan: true,
+    showOnMobile: false,
+  },
+  {
+    code: "SP",
+    name: "SHIPMENT PROCESSED",
+    type: "Un-Delivered",
+    inscan: true,
+    showOnMobile: false,
+  },
+  {
+    code: "SU",
+    name: "SHIPMENT UNDER PROGRESS",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "SM",
+    name: "SHORTLANDED AT MELBOURNE AIRPORT",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
+  {
+    code: "UN",
+    name: "UNABLE TO DELIVER",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "CC",
+    name: "UNDER CUSTOM CLEARANCE",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: true,
+  },
+  {
+    code: "PE",
+    name: "UNDER PHYSICAL EXAMINATION",
+    type: "Un-Delivered",
+    inscan: false,
+    showOnMobile: false,
+  },
 ];
+
+const SEED: ExceptionRow[] = SEED_ROWS.map((r) => ({ id: crypto.randomUUID(), ...r }));
 
 const emptyForm = (): ExceptionForm => ({
   code: "",
@@ -147,20 +404,38 @@ const rowToForm = (row: ExceptionRow): ExceptionForm => ({
   showOnMobile: row.showOnMobile,
 });
 
+function rowToView(r: DeliveryExceptionDbRow): ExceptionRow {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    type: r.exc_type === "DELIVERED" ? "Delivered" : "Un-Delivered",
+    inscan: r.inscan,
+    showOnMobile: r.show_on_mobile,
+    row_version: r.row_version,
+  };
+}
+
 export const Route = createFileRoute("/master/operation/exception")({
   head: () => ({
     meta: [
       { title: "Exception — Master — Courier ERP" },
-      { name: "description", content: "Manage shipment exception codes for tracking and mobile apps." },
+      {
+        name: "description",
+        content: "Manage shipment exception codes for tracking and mobile apps.",
+      },
     ],
   }),
   component: ExceptionPage,
 });
 
 function ExceptionPage() {
-  const [rows, setRows] = useState<ExceptionRow[]>(() =>
-    SEED_ROWS.map((r) => ({ id: crypto.randomUUID(), ...r })),
-  );
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(deliveryExceptionsResource);
+  const live = useMasterList(deliveryExceptionsResource, { enabled: authed });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<ExceptionRow[]>(SEED);
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState({ code: "", name: "" });
   const [page, setPage] = useState(1);
@@ -168,14 +443,25 @@ function ExceptionPage() {
   const [editing, setEditing] = useState<ExceptionRow | null>(null);
   const [form, setForm] = useState<ExceptionForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<ExceptionRow | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: ExceptionRow[] = authed
+    ? (live.rows as DeliveryExceptionDbRow[]).map(rowToView)
+    : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       if (q && ![r.code, r.name, r.type].some((v) => v.toLowerCase().includes(q))) return false;
-      if (colFilters.code && !r.code.toLowerCase().includes(colFilters.code.toLowerCase())) return false;
-      if (colFilters.name && !r.name.toLowerCase().includes(colFilters.name.toLowerCase())) return false;
+      if (colFilters.code && !r.code.toLowerCase().includes(colFilters.code.toLowerCase()))
+        return false;
+      if (colFilters.name && !r.name.toLowerCase().includes(colFilters.name.toLowerCase()))
+        return false;
       return true;
     });
   }, [rows, search, colFilters]);
@@ -204,33 +490,87 @@ function ExceptionPage() {
     setForm(emptyForm());
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.code.trim()) return toast.error("Exception Code is required");
     if (!form.name.trim()) return toast.error("Exception Name is required");
 
-    const payload: Omit<ExceptionRow, "id"> = {
+    const raw = {
       code: form.code.trim().toUpperCase(),
       name: form.name.trim(),
+      exc_type: form.delivered ? "DELIVERED" : "UNDELIVERED",
+      inscan: form.inscan,
+      show_on_mobile: form.showOnMobile,
+    };
+
+    if (authed) {
+      setSaving(true);
+      try {
+        if (editing) {
+          const patch = deliveryExceptionUpdateSchema.parse(raw);
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch,
+          });
+          toast.success("Exception updated");
+        } else {
+          const values = deliveryExceptionCreateSchema.parse(raw);
+          await rc.create.mutateAsync(values);
+          toast.success("Exception added");
+        }
+        closeForm();
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save exception"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    try {
+      if (editing) deliveryExceptionUpdateSchema.parse(raw);
+      else deliveryExceptionCreateSchema.parse(raw);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Please fix the form"));
+      return;
+    }
+
+    const payload: Omit<ExceptionRow, "id"> = {
+      code: raw.code,
+      name: raw.name,
       type: form.delivered ? "Delivered" : "Un-Delivered",
       inscan: form.inscan,
       showOnMobile: form.showOnMobile,
     };
 
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...payload } : r)));
+      setDemoRows((prev) =>
+        prev.map((r) => (r.id === editing.id ? { ...editing, ...payload } : r)),
+      );
       toast.success("Exception updated");
     } else {
-      if (rows.some((r) => r.code.toUpperCase() === payload.code)) return toast.error("Exception Code already exists");
-      setRows((prev) => [{ id: crypto.randomUUID(), ...payload }, ...prev]);
+      if (demoRows.some((r) => r.code.toUpperCase() === payload.code))
+        return toast.error("Exception Code already exists");
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), ...payload }, ...prev]);
       toast.success("Exception added");
     }
     closeForm();
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success(`Deleted ${deleteTarget.code}`);
+    const row = deleteTarget;
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.code}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete exception"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.code}`);
+    }
     setDeleteTarget(null);
   };
 
@@ -238,7 +578,13 @@ function ExceptionPage() {
     downloadCsv(
       "exceptions.csv",
       ["Exception Code", "Exception Name", "Type", "Inscan", "Show on Mobile Apps"],
-      rows.map((r) => [r.code, r.name, r.type, r.inscan ? "Yes" : "No", r.showOnMobile ? "Yes" : "No"]),
+      rows.map((r) => [
+        r.code,
+        r.name,
+        r.type,
+        r.inscan ? "Yes" : "No",
+        r.showOnMobile ? "Yes" : "No",
+      ]),
     );
     toast.success("Exported exceptions.csv");
   };
@@ -249,45 +595,35 @@ function ExceptionPage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) return toast.error("File is empty");
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "", inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) return toast.error("File is empty");
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          deliveryExceptionsResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
       const imported: ExceptionRow[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const c = parseRow(lines[i]);
-        if (!c[0]?.trim()) continue;
-        const typeRaw = (c[2] || "").trim().toLowerCase();
+      for (const rec of mapCsvToImportRows(parsed.rows, deliveryExceptionsResource.importColumns)) {
+        if (!rec.code?.trim()) continue;
+        const typeRaw = (rec.exc_type || "").trim().toLowerCase().replace(/-/g, "");
         imported.push({
           id: crypto.randomUUID(),
-          code: c[0].trim().toUpperCase(),
-          name: (c[1] || "").trim(),
+          code: rec.code.trim().toUpperCase(),
+          name: (rec.name || "").trim(),
           type: typeRaw === "delivered" ? "Delivered" : "Un-Delivered",
-          inscan: (c[3] || "").trim().toLowerCase() === "yes",
-          showOnMobile: (c[4] || "").trim().toLowerCase() === "yes",
+          inscan: /^(yes|true|1)$/i.test((rec.inscan || "").trim()),
+          showOnMobile: /^(yes|true|1)$/i.test((rec.show_on_mobile || "").trim()),
         });
       }
       if (imported.length === 0) return toast.error("No valid rows found");
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
@@ -296,6 +632,8 @@ function ExceptionPage() {
     setColFilters({ code: "", name: "" });
     setPage(1);
     closeForm();
+    if (authed)
+      queryClient.invalidateQueries({ queryKey: masterKeys.all(deliveryExceptionsResource.key) });
     toast.success("Refreshed");
   };
 
@@ -306,14 +644,22 @@ function ExceptionPage() {
       {showForm ? (
         <Card className="overflow-hidden border p-0">
           <div className="p-4 md:p-6">
-            <Badge className="mb-4 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">Exception</Badge>
+            <Badge className="mb-4 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
+              Exception
+            </Badge>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
               <FieldWrapper label="Exception Code" required>
-                <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} />
+                <Input
+                  value={form.code}
+                  onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+                />
               </FieldWrapper>
               <FieldWrapper label="Exception Name" required>
-                <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+                <Input
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                />
               </FieldWrapper>
               <TypeToggle
                 delivered={form.delivered}
@@ -326,7 +672,9 @@ function ExceptionPage() {
                     checked={form.inscan}
                     onCheckedChange={(c) => setForm((f) => ({ ...f, inscan: c === true }))}
                   />
-                  <label htmlFor="inscan" className="text-sm text-muted-foreground">Inscan</label>
+                  <label htmlFor="inscan" className="text-sm text-muted-foreground">
+                    Inscan
+                  </label>
                 </div>
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -334,14 +682,24 @@ function ExceptionPage() {
                     checked={form.showOnMobile}
                     onCheckedChange={(c) => setForm((f) => ({ ...f, showOnMobile: c === true }))}
                   />
-                  <label htmlFor="show-on-mobile" className="text-sm text-muted-foreground">Show on Mobile Apps</label>
+                  <label htmlFor="show-on-mobile" className="text-sm text-muted-foreground">
+                    Show on Mobile Apps
+                  </label>
                 </div>
               </div>
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
-              <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-              <Button variant="destructive" onClick={closeForm}>Cancel</Button>
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+              >
+                {saving ? "Saving…" : "Save"}
+              </Button>
+              <Button variant="destructive" onClick={closeForm}>
+                Cancel
+              </Button>
             </div>
           </div>
         </Card>
@@ -355,26 +713,45 @@ function ExceptionPage() {
           </div>
 
           <Card className="overflow-hidden p-0">
-            <input ref={importInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFile} />
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportFile}
+            />
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
               <TooltipProvider delayDuration={200}>
                 <div className="flex items-center gap-1.5">
-                  <IconButton label="Export" onClick={handleExport}><Download className="h-4 w-4" /></IconButton>
-                  <IconButton label="Import" onClick={() => importInputRef.current?.click()}><Upload className="h-4 w-4" /></IconButton>
-                  <IconButton label="Refresh" onClick={handleRefresh}><RefreshCw className="h-4 w-4" /></IconButton>
+                  <IconButton label="Export" onClick={handleExport}>
+                    <Download className="h-4 w-4" />
+                  </IconButton>
+                  {canAdd ? (
+                    <IconButton label="Import" onClick={() => importInputRef.current?.click()}>
+                      <Upload className="h-4 w-4" />
+                    </IconButton>
+                  ) : null}
+                  <IconButton label="Refresh" onClick={handleRefresh}>
+                    <RefreshCw className="h-4 w-4" />
+                  </IconButton>
                 </div>
               </TooltipProvider>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Search:</span>
                 <Input
                   value={search}
-                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
                   className="h-9 w-56"
                 />
-                <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-                  <Plus className="h-4 w-4" />
-                  Add
-                </Button>
+                {canAdd ? (
+                  <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                    <Plus className="h-4 w-4" />
+                    Add
+                  </Button>
+                ) : null}
               </div>
             </div>
 
@@ -384,13 +761,18 @@ function ExceptionPage() {
                   <TableRow className="bg-sidebar hover:bg-sidebar">
                     <TableHead className="text-sidebar-foreground">Exception Code</TableHead>
                     <TableHead className="text-sidebar-foreground">Exception Name</TableHead>
-                    <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
+                    <TableHead className="w-28 text-center text-sidebar-foreground">
+                      Action
+                    </TableHead>
                   </TableRow>
                   <TableRow className="bg-muted/20 hover:bg-muted/20">
                     <TableHead className="py-2">
                       <Input
                         value={colFilters.code}
-                        onChange={(e) => { setColFilters((f) => ({ ...f, code: e.target.value })); setPage(1); }}
+                        onChange={(e) => {
+                          setColFilters((f) => ({ ...f, code: e.target.value }));
+                          setPage(1);
+                        }}
                         placeholder="Exception Code"
                         className="h-8"
                       />
@@ -398,7 +780,10 @@ function ExceptionPage() {
                     <TableHead className="py-2">
                       <Input
                         value={colFilters.name}
-                        onChange={(e) => { setColFilters((f) => ({ ...f, name: e.target.value })); setPage(1); }}
+                        onChange={(e) => {
+                          setColFilters((f) => ({ ...f, name: e.target.value }));
+                          setPage(1);
+                        }}
                         placeholder="Exception Name"
                         className="h-8"
                       />
@@ -409,7 +794,10 @@ function ExceptionPage() {
                 <TableBody>
                   {pageRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={3} className="h-32 text-center text-sm text-muted-foreground">
+                      <TableCell
+                        colSpan={3}
+                        className="h-32 text-center text-sm text-muted-foreground"
+                      >
                         No data available in table
                       </TableCell>
                     </TableRow>
@@ -420,12 +808,28 @@ function ExceptionPage() {
                         <TableCell>{r.name}</TableCell>
                         <TableCell className="text-center">
                           <div className="flex justify-center gap-1">
-                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)} aria-label={`Edit ${r.code}`}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(r)} aria-label={`Delete ${r.code}`}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {canModify ? (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                onClick={() => openEdit(r)}
+                                aria-label={`Edit ${r.code}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            ) : null}
+                            {canDelete ? (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => setDeleteTarget(r)}
+                                aria-label={`Delete ${r.code}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -435,7 +839,14 @@ function ExceptionPage() {
               </Table>
             </div>
 
-            <TablePager totalPages={totalPages} currentPage={currentPage} setPage={setPage} startIdx={startIdx} endIdx={endIdx} total={filtered.length} />
+            <TablePager
+              totalPages={totalPages}
+              currentPage={currentPage}
+              setPage={setPage}
+              startIdx={startIdx}
+              endIdx={endIdx}
+              total={filtered.length}
+            />
           </Card>
         </>
       )}
@@ -445,13 +856,17 @@ function ExceptionPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete exception?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove exception <span className="font-medium text-foreground">{deleteTarget?.code}</span>
+              This will remove exception{" "}
+              <span className="font-medium text-foreground">{deleteTarget?.code}</span>
               {deleteTarget?.name ? ` (${deleteTarget.name})` : ""}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

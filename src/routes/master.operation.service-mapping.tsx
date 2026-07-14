@@ -10,6 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,16 +54,33 @@ import {
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import type { LookupKey, LookupOption } from "@/lib/master-lookups";
+import { LookupCombobox } from "@/components/masters/lookup-combobox";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import {
+  serviceMappingsResource,
+  type ServiceMappingRow as ServiceMappingDbRow,
+} from "@/lib/masters/resources/serviceMappings";
+import {
+  serviceMappingCreateSchema,
+  serviceMappingUpdateSchema,
+} from "@/lib/masters/schemas/serviceMappings";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
 
 type Status = "Active" | "In-Active";
 type LookupPair = { code: string; name: string };
 
 type ServiceMappingRow = {
   id: string;
+  vendorId: string;
   vendorCode: string;
   vendorName: string;
   service: string;
   serviceType: string;
+  billingVendorId: string;
   billingVendorCode: string;
   billingVendorName: string;
   minWeight: string;
@@ -70,18 +88,10 @@ type ServiceMappingRow = {
   status: Status;
   vendorLink: string;
   isSinglePiece: boolean;
+  row_version?: number;
 };
 
-type ServiceForm = {
-  vendor: LookupPair;
-  service: string;
-  billingVendor: LookupPair;
-  minWeight: string;
-  maxWeight: string;
-  status: Status;
-  vendorLink: string;
-  isSinglePiece: boolean;
-};
+type ServiceForm = Omit<ServiceMappingRow, "id" | "serviceType" | "row_version">;
 
 const VENDOR_LINK_OPTIONS = [
   "AFTERSHIP",
@@ -118,7 +128,7 @@ const VENDOR_LINK_OPTIONS = [
   "USPS",
 ] as const;
 
-const SEED_ROWS: Omit<ServiceMappingRow, "id">[] = [
+const SEED_ROWS: Omit<ServiceMappingRow, "id" | "vendorId" | "billingVendorId">[] = [
   { vendorCode: "COUR", vendorName: "COURIERWALA", service: "ECONOMY", serviceType: "COURIERWALA - ECONOMY", billingVendorCode: "COUR", billingVendorName: "COURIERWALA", minWeight: "0.00", maxWeight: "99999.00", status: "Active", vendorLink: "COURIERWALA", isSinglePiece: false },
   { vendorCode: "FEDE", vendorName: "FEDEX", service: "FEDEX PROMO", serviceType: "FEDEX - FEDEX PROMO", billingVendorCode: "FEDE", billingVendorName: "FEDEX", minWeight: "0.00", maxWeight: "99999.00", status: "Active", vendorLink: "FEDEX", isSinglePiece: false },
   { vendorCode: "GST", vendorName: "GST BILL", service: "ECONOMY", serviceType: "GST BILL - ECONOMY", billingVendorCode: "GST", billingVendorName: "GST BILL", minWeight: "0.00", maxWeight: "99999.00", status: "Active", vendorLink: "GST BILL", isSinglePiece: false },
@@ -133,12 +143,14 @@ const SEED_ROWS: Omit<ServiceMappingRow, "id">[] = [
   { vendorCode: "WWEC", vendorName: "WWEC", service: "ECONOMY", serviceType: "WWEC - ECONOMY", billingVendorCode: "GST", billingVendorName: "GST BILL", minWeight: "0.00", maxWeight: "99999.00", status: "Active", vendorLink: "GST BILL", isSinglePiece: true },
 ];
 
-const emptyPair = (): LookupPair => ({ code: "", name: "" });
-
 const emptyForm = (): ServiceForm => ({
-  vendor: emptyPair(),
+  vendorId: "",
+  vendorCode: "",
+  vendorName: "",
   service: "",
-  billingVendor: emptyPair(),
+  billingVendorId: "",
+  billingVendorCode: "",
+  billingVendorName: "",
   minWeight: "",
   maxWeight: "",
   status: "Active",
@@ -146,9 +158,9 @@ const emptyForm = (): ServiceForm => ({
   isSinglePiece: false,
 });
 
-const formatWeight = (value: string) => {
-  const n = parseFloat(value);
-  if (Number.isNaN(n)) return value;
+const formatWeight = (value: string | number) => {
+  const n = typeof value === "number" ? value : parseFloat(value);
+  if (Number.isNaN(n)) return String(value);
   return n.toFixed(2);
 };
 
@@ -160,10 +172,55 @@ const buildServiceType = (vendorName: string, service: string) => {
   return `${vendor} - ${svc}`;
 };
 
+function rowToView(r: ServiceMappingDbRow & Record<string, unknown>): ServiceMappingRow {
+  const vendorName = (r.vendor_name as string) ?? "";
+  const vendorCode = (r.vendor_code as string) ?? "";
+  const billingVendorName = (r.billing_vendor_name as string) ?? "";
+  const billingVendorCode = (r.billing_vendor_code as string) ?? "";
+  const service = r.service;
+  return {
+    id: r.id,
+    vendorId: r.vendor_id,
+    vendorCode,
+    vendorName,
+    service,
+    serviceType:
+      r.service_type ?? buildServiceType(vendorName || vendorCode, service),
+    billingVendorId: r.billing_vendor_id ?? "",
+    billingVendorCode,
+    billingVendorName,
+    minWeight: formatWeight(r.min_weight),
+    maxWeight: formatWeight(r.max_weight),
+    status: r.status === "INACTIVE" ? "In-Active" : "Active",
+    vendorLink: r.vendor_link ?? "",
+    isSinglePiece: r.is_single_piece,
+    row_version: r.row_version,
+  };
+}
+
+function toRaw(form: ServiceForm) {
+  const vendorName = form.vendorName.trim() || form.vendorCode.trim();
+  return {
+    vendor_id: form.vendorId,
+    service: form.service.trim(),
+    service_type: buildServiceType(vendorName, form.service.trim()) || null,
+    billing_vendor_id: form.billingVendorId || null,
+    min_weight: parseFloat(form.minWeight || "0"),
+    max_weight: parseFloat(form.maxWeight || "99999"),
+    vendor_link: form.vendorLink || null,
+    is_single_piece: form.isSinglePiece,
+    status: form.status === "In-Active" ? "INACTIVE" : "ACTIVE",
+  };
+}
+
 const rowToForm = (row: ServiceMappingRow): ServiceForm => ({
-  vendor: { code: row.vendorCode, name: row.vendorName },
+  vendorId: row.vendorId,
+  vendorCode: row.vendorCode,
+  vendorName: row.vendorName,
   service: row.service,
-  billingVendor: { code: row.billingVendorCode, name: row.billingVendorName },
+  billingVendorId: row.billingVendorId,
+  billingVendorCode: row.billingVendorCode,
+  billingVendorName: row.billingVendorName,
   minWeight: row.minWeight,
   maxWeight: row.maxWeight,
   status: row.status,
@@ -175,15 +232,29 @@ export const Route = createFileRoute("/master/operation/service-mapping")({
   head: () => ({
     meta: [
       { title: "Service Mapping — Master — Courier ERP" },
-      { name: "description", content: "Map vendor services to billing vendors with weight limits and status." },
+      {
+        name: "description",
+        content: "Map vendor services to billing vendors with weight limits and status.",
+      },
     ],
   }),
   component: ServiceMappingPage,
 });
 
 function ServiceMappingPage() {
-  const [rows, setRows] = useState<ServiceMappingRow[]>(() =>
-    SEED_ROWS.map((r) => ({ id: crypto.randomUUID(), ...r })),
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(serviceMappingsResource);
+  const live = useMasterList(serviceMappingsResource, {
+    enabled: authed,
+    labelRefs: [
+      { idField: "vendor_id", table: "vendors", as: "vendor" },
+      { idField: "billing_vendor_id", table: "vendors", as: "billing_vendor" },
+    ],
+  });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<ServiceMappingRow[]>(() =>
+    SEED_ROWS.map((r) => ({ id: crypto.randomUUID(), vendorId: "", billingVendorId: "", ...r })),
   );
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -191,7 +262,16 @@ function ServiceMappingPage() {
   const [editing, setEditing] = useState<ServiceMappingRow | null>(null);
   const [form, setForm] = useState<ServiceForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<ServiceMappingRow | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: ServiceMappingRow[] = authed
+    ? (live.rows as ServiceMappingDbRow[]).map(rowToView)
+    : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -236,8 +316,10 @@ function ServiceMappingPage() {
     setForm(emptyForm());
   };
 
-  const handleSave = () => {
-    if (!form.vendor.code.trim() && !form.vendor.name.trim()) return toast.error("Vendor is required");
+  const handleSave = async () => {
+    if (!form.vendorId && !form.vendorCode.trim() && !form.vendorName.trim()) {
+      return toast.error("Vendor is required");
+    }
     if (!form.service.trim()) return toast.error("Service is required");
     const min = parseFloat(form.minWeight || "0");
     const max = parseFloat(form.maxWeight || "0");
@@ -245,14 +327,40 @@ function ServiceMappingPage() {
     if (Number.isNaN(max) || max < 0) return toast.error("Max Weight must be a valid number");
     if (min > max) return toast.error("Min Weight cannot exceed Max Weight");
 
-    const vendorName = form.vendor.name.trim() || form.vendor.code.trim();
+    if (authed) {
+      setSaving(true);
+      try {
+        const raw = toRaw(form);
+        if (editing) {
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch: serviceMappingUpdateSchema.parse(raw),
+          });
+          toast.success("Service mapping updated");
+        } else {
+          await rc.create.mutateAsync(serviceMappingCreateSchema.parse(raw));
+          toast.success("Service mapping added");
+        }
+        closeForm();
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save service mapping"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    const vendorName = form.vendorName.trim() || form.vendorCode.trim();
     const payload: Omit<ServiceMappingRow, "id"> = {
-      vendorCode: form.vendor.code.trim(),
+      vendorId: "",
+      vendorCode: form.vendorCode.trim(),
       vendorName,
       service: form.service.trim(),
       serviceType: buildServiceType(vendorName, form.service.trim()),
-      billingVendorCode: form.billingVendor.code.trim(),
-      billingVendorName: form.billingVendor.name.trim(),
+      billingVendorId: "",
+      billingVendorCode: form.billingVendorCode.trim(),
+      billingVendorName: form.billingVendorName.trim(),
       minWeight: formatWeight(form.minWeight || "0"),
       maxWeight: formatWeight(form.maxWeight || "0"),
       status: form.status,
@@ -261,26 +369,48 @@ function ServiceMappingPage() {
     };
 
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...payload } : r)));
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...payload } : r)));
       toast.success("Service mapping updated");
     } else {
-      setRows((prev) => [{ id: crypto.randomUUID(), ...payload }, ...prev]);
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), ...payload }, ...prev]);
       toast.success("Service mapping added");
     }
     closeForm();
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success(`Deleted ${deleteTarget.serviceType}`);
+    const row = deleteTarget;
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.serviceType}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete service mapping"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.serviceType}`);
+    }
     setDeleteTarget(null);
   };
 
   const handleExport = () => {
     downloadCsv(
       "service-mapping.csv",
-      ["Vendor Code", "Vendor", "Service", "Service Type", "Billing Vendor Code", "Billing Vendor", "Min Weight", "Max Weight", "Status", "Vendor Link", "Is Single Piece"],
+      [
+        "Vendor Code",
+        "Vendor",
+        "Service",
+        "Service Type",
+        "Billing Vendor Code",
+        "Billing Vendor",
+        "Min Weight",
+        "Max Weight",
+        "Status",
+        "Vendor Link",
+        "Is Single Piece",
+      ],
       rows.map((r) => [
         r.vendorCode,
         r.vendorName,
@@ -304,53 +434,46 @@ function ServiceMappingPage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) return toast.error("File is empty");
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "", inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) return toast.error("File is empty");
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          serviceMappingsResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
       const imported: ServiceMappingRow[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const c = parseRow(lines[i]);
-        if (!c[0]?.trim() && !c[1]?.trim() && !c[2]?.trim()) continue;
-        const status = (c[8] || "").trim().toLowerCase() === "in-active" ? "In-Active" : "Active";
-        const vendorName = (c[1] || c[0] || "").trim();
-        const service = (c[2] || "").trim();
+      for (const rec of mapCsvToImportRows(parsed.rows, serviceMappingsResource.importColumns)) {
+        if (!rec.vendor_code?.trim() && !rec.service?.trim()) continue;
+        const status =
+          (rec.status || "").trim().toLowerCase() === "in-active" ? "In-Active" : "Active";
+        const vendorName = (rec.vendor_code || "").trim();
+        const service = (rec.service || "").trim();
         imported.push({
           id: crypto.randomUUID(),
-          vendorCode: (c[0] || "").trim(),
+          vendorId: "",
+          vendorCode: (rec.vendor_code || "").trim(),
           vendorName,
           service,
-          serviceType: (c[3] || buildServiceType(vendorName, service)).trim(),
-          billingVendorCode: (c[4] || "").trim(),
-          billingVendorName: (c[5] || "").trim(),
-          minWeight: formatWeight((c[6] || "0").trim()),
-          maxWeight: formatWeight((c[7] || "99999").trim()),
+          serviceType: (rec.service_type || buildServiceType(vendorName, service)).trim(),
+          billingVendorId: "",
+          billingVendorCode: (rec.billing_vendor_code || "").trim(),
+          billingVendorName: (rec.billing_vendor_code || "").trim(),
+          minWeight: formatWeight((rec.min_weight || "0").toString()),
+          maxWeight: formatWeight((rec.max_weight || "99999").toString()),
           status: status as Status,
-          vendorLink: (c[9] || "").trim(),
-          isSinglePiece: (c[10] || "").trim().toLowerCase() === "yes",
+          vendorLink: (rec.vendor_link || "").trim(),
+          isSinglePiece: String(rec.is_single_piece || "").trim().toLowerCase() === "yes",
         });
       }
       if (imported.length === 0) return toast.error("No valid rows found");
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
@@ -358,6 +481,9 @@ function ServiceMappingPage() {
     setSearch("");
     setPage(1);
     closeForm();
+    if (authed) {
+      void queryClient.invalidateQueries({ queryKey: masterKeys.all(serviceMappingsResource.key) });
+    }
     toast.success("Refreshed");
   };
 
@@ -372,11 +498,30 @@ function ServiceMappingPage() {
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
               <FieldWrapper label="Vendor" required>
-                <LookupPairInput
-                  lookup="vendor"
-                  value={form.vendor}
-                  onChange={(v) => setForm((f) => ({ ...f, vendor: v }))}
-                />
+                {authed ? (
+                  <LookupCombobox
+                    lookupKey="vendor"
+                    value={form.vendorId}
+                    valueLabel={form.vendorName || form.vendorCode}
+                    onChange={(id, item) =>
+                      setForm((f) => ({
+                        ...f,
+                        vendorId: id,
+                        vendorCode: item?.code ?? "",
+                        vendorName: item?.name ?? "",
+                      }))
+                    }
+                    placeholder="Search vendor..."
+                  />
+                ) : (
+                  <LookupPairInput
+                    lookup="vendor"
+                    value={{ code: form.vendorCode, name: form.vendorName }}
+                    onChange={(v) =>
+                      setForm((f) => ({ ...f, vendorCode: v.code, vendorName: v.name }))
+                    }
+                  />
+                )}
               </FieldWrapper>
               <FieldWrapper label="Service" required>
                 <Input
@@ -386,11 +531,34 @@ function ServiceMappingPage() {
                 />
               </FieldWrapper>
               <FieldWrapper label="Billing Vendor">
-                <LookupPairInput
-                  lookup="vendor"
-                  value={form.billingVendor}
-                  onChange={(v) => setForm((f) => ({ ...f, billingVendor: v }))}
-                />
+                {authed ? (
+                  <LookupCombobox
+                    lookupKey="vendor"
+                    value={form.billingVendorId}
+                    valueLabel={form.billingVendorName || form.billingVendorCode}
+                    onChange={(id, item) =>
+                      setForm((f) => ({
+                        ...f,
+                        billingVendorId: id,
+                        billingVendorCode: item?.code ?? "",
+                        billingVendorName: item?.name ?? "",
+                      }))
+                    }
+                    placeholder="Search billing vendor..."
+                  />
+                ) : (
+                  <LookupPairInput
+                    lookup="vendor"
+                    value={{ code: form.billingVendorCode, name: form.billingVendorName }}
+                    onChange={(v) =>
+                      setForm((f) => ({
+                        ...f,
+                        billingVendorCode: v.code,
+                        billingVendorName: v.name,
+                      }))
+                    }
+                  />
+                )}
               </FieldWrapper>
               <FieldWrapper label="Min Weight">
                 <Input
@@ -408,8 +576,13 @@ function ServiceMappingPage() {
                 />
               </FieldWrapper>
               <FieldWrapper label="Status">
-                <Select value={form.status} onValueChange={(v) => setForm((f) => ({ ...f, status: v as Status }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                <Select
+                  value={form.status}
+                  onValueChange={(v) => setForm((f) => ({ ...f, status: v as Status }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Active">Active</SelectItem>
                     <SelectItem value="In-Active">In-Active</SelectItem>
@@ -417,11 +590,18 @@ function ServiceMappingPage() {
                 </Select>
               </FieldWrapper>
               <FieldWrapper label="Vendor Link">
-                <Select value={form.vendorLink || undefined} onValueChange={(v) => setForm((f) => ({ ...f, vendorLink: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Select Vendor" /></SelectTrigger>
+                <Select
+                  value={form.vendorLink || undefined}
+                  onValueChange={(v) => setForm((f) => ({ ...f, vendorLink: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Vendor" />
+                  </SelectTrigger>
                   <SelectContent>
                     {VENDOR_LINK_OPTIONS.map((v) => (
-                      <SelectItem key={v} value={v}>{v}</SelectItem>
+                      <SelectItem key={v} value={v}>
+                        {v}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -431,16 +611,28 @@ function ServiceMappingPage() {
                   <Checkbox
                     id="is-single-piece"
                     checked={form.isSinglePiece}
-                    onCheckedChange={(c) => setForm((f) => ({ ...f, isSinglePiece: c === true }))}
+                    onCheckedChange={(c) =>
+                      setForm((f) => ({ ...f, isSinglePiece: c === true }))
+                    }
                   />
-                  <label htmlFor="is-single-piece" className="text-sm text-muted-foreground">Is Single Piece</label>
+                  <label htmlFor="is-single-piece" className="text-sm text-muted-foreground">
+                    Is Single Piece
+                  </label>
                 </div>
               </div>
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
-              <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-              <Button variant="destructive" onClick={closeForm}>Cancel</Button>
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+              >
+                Save
+              </Button>
+              <Button variant="destructive" onClick={closeForm}>
+                Cancel
+              </Button>
             </div>
           </div>
         </Card>
@@ -454,26 +646,43 @@ function ServiceMappingPage() {
           </div>
 
           <Card className="overflow-hidden p-0">
-            <input ref={importInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFile} />
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportFile}
+            />
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
               <TooltipProvider delayDuration={200}>
                 <div className="flex items-center gap-1.5">
-                  <IconButton label="Refresh" onClick={handleRefresh}><RefreshCw className="h-4 w-4" /></IconButton>
-                  <IconButton label="Export" onClick={handleExport}><Download className="h-4 w-4" /></IconButton>
-                  <IconButton label="Import" onClick={() => importInputRef.current?.click()}><Upload className="h-4 w-4" /></IconButton>
+                  <IconButton label="Refresh" onClick={handleRefresh}>
+                    <RefreshCw className="h-4 w-4" />
+                  </IconButton>
+                  <IconButton label="Export" onClick={handleExport}>
+                    <Download className="h-4 w-4" />
+                  </IconButton>
+                  <IconButton label="Import" onClick={() => importInputRef.current?.click()}>
+                    <Upload className="h-4 w-4" />
+                  </IconButton>
                 </div>
               </TooltipProvider>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Search:</span>
                 <Input
                   value={search}
-                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
                   className="h-9 w-56"
                 />
-                <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-                  <Plus className="h-4 w-4" />
-                  Add
-                </Button>
+                {canAdd && (
+                  <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                    <Plus className="h-4 w-4" />
+                    Add
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -503,17 +712,39 @@ function ServiceMappingPage() {
                         <TableCell className="font-medium">{r.vendorName || r.vendorCode}</TableCell>
                         <TableCell>{r.serviceType}</TableCell>
                         <TableCell>{r.billingVendorName || r.billingVendorCode || "—"}</TableCell>
-                        <TableCell className="text-right font-mono text-xs">{formatWeight(r.minWeight)}</TableCell>
-                        <TableCell className="text-right font-mono text-xs">{formatWeight(r.maxWeight)}</TableCell>
-                        <TableCell><StatusPill status={r.status} /></TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {formatWeight(r.minWeight)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {formatWeight(r.maxWeight)}
+                        </TableCell>
+                        <TableCell>
+                          <StatusPill status={r.status} />
+                        </TableCell>
                         <TableCell className="text-center">
                           <div className="flex justify-center gap-1">
-                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)} aria-label={`Edit ${r.serviceType}`}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(r)} aria-label={`Delete ${r.serviceType}`}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {canModify && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                onClick={() => openEdit(r)}
+                                aria-label={`Edit ${r.serviceType}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => setDeleteTarget(r)}
+                                aria-label={`Delete ${r.serviceType}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -523,7 +754,14 @@ function ServiceMappingPage() {
               </Table>
             </div>
 
-            <TablePager totalPages={totalPages} currentPage={currentPage} setPage={setPage} startIdx={startIdx} endIdx={endIdx} total={filtered.length} />
+            <TablePager
+              totalPages={totalPages}
+              currentPage={currentPage}
+              setPage={setPage}
+              startIdx={startIdx}
+              endIdx={endIdx}
+              total={filtered.length}
+            />
           </Card>
         </>
       )}
@@ -539,7 +777,10 @@ function ServiceMappingPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -562,8 +803,18 @@ function LookupPairInput({
 
   return (
     <div className="flex gap-1">
-      <Input value={value.code} onChange={(e) => onChange({ ...value, code: e.target.value })} className="w-28" placeholder="Code" />
-      <Input value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} className="flex-1" placeholder="Name" />
+      <Input
+        value={value.code}
+        onChange={(e) => onChange({ ...value, code: e.target.value })}
+        className="w-28"
+        placeholder="Code"
+      />
+      <Input
+        value={value.name}
+        onChange={(e) => onChange({ ...value, name: e.target.value })}
+        className="flex-1"
+        placeholder="Name"
+      />
       <Button
         size="icon"
         variant="outline"

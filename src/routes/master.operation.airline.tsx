@@ -1,15 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
-import {
-  Download,
-  Upload,
-  RefreshCw,
-  Plus,
-  Search,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { Download, Upload, RefreshCw, Plus, Search, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,21 +38,36 @@ import {
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import type { LookupOption } from "@/lib/master-lookups";
 
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import {
+  airlinesResource,
+  type AirlineRow as AirlineDbRow,
+} from "@/lib/masters/resources/airlines";
+import { airlineCreateSchema, airlineUpdateSchema } from "@/lib/masters/schemas/airlines";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { LookupCombobox } from "@/components/masters/lookup-combobox";
+
 type LookupPair = { code: string; name: string };
 
 type AirlineRow = {
   id: string;
   airlineName: string;
+  productId: string;
   productCode: string;
   productName: string;
+  row_version?: number;
 };
 
 type AirlineForm = {
   airlineName: string;
+  productId: string;
   product: LookupPair;
 };
 
-const SEED_ROWS: Omit<AirlineRow, "id">[] = [
+const SEED_ROWS: Omit<AirlineRow, "id" | "productId">[] = [
   { airlineName: "AIR ASIA", productCode: "SPX", productName: "OTHER PACKAGE" },
   { airlineName: "CUBE PECIFIC", productCode: "SPX", productName: "OTHER PACKAGE" },
   { airlineName: "SRILANKAN AIRLINES", productCode: "SPX", productName: "OTHER PACKAGE" },
@@ -68,13 +76,26 @@ const SEED_ROWS: Omit<AirlineRow, "id">[] = [
 
 const emptyForm = (): AirlineForm => ({
   airlineName: "",
+  productId: "",
   product: { code: "", name: "" },
 });
 
 const rowToForm = (row: AirlineRow): AirlineForm => ({
   airlineName: row.airlineName,
+  productId: row.productId,
   product: { code: row.productCode, name: row.productName },
 });
+
+function rowToView(r: AirlineDbRow & Record<string, unknown>): AirlineRow {
+  return {
+    id: r.id,
+    airlineName: r.name,
+    productId: r.product_id,
+    productCode: (r.product_code as string) ?? "",
+    productName: (r.product_name as string) ?? "",
+    row_version: r.row_version,
+  };
+}
 
 export const Route = createFileRoute("/master/operation/airline")({
   head: () => ({
@@ -87,8 +108,16 @@ export const Route = createFileRoute("/master/operation/airline")({
 });
 
 function AirlinePage() {
-  const [rows, setRows] = useState<AirlineRow[]>(() =>
-    SEED_ROWS.map((r) => ({ id: crypto.randomUUID(), ...r })),
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(airlinesResource);
+  const live = useMasterList(airlinesResource, {
+    enabled: authed,
+    labelRefs: [{ idField: "product_id", table: "products", as: "product" }],
+  });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<AirlineRow[]>(() =>
+    SEED_ROWS.map((r) => ({ id: crypto.randomUUID(), productId: "", ...r })),
   );
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState({ airlineName: "", product: "" });
@@ -97,15 +126,40 @@ function AirlinePage() {
   const [editing, setEditing] = useState<AirlineRow | null>(null);
   const [form, setForm] = useState<AirlineForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<AirlineRow | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: AirlineRow[] = authed
+    ? (live.rows as (AirlineDbRow & Record<string, unknown>)[]).map(rowToView)
+    : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       const productLabel = r.productCode || r.productName;
-      if (q && ![r.airlineName, productLabel, r.productName].some((v) => String(v).toLowerCase().includes(q))) return false;
-      if (colFilters.airlineName && !r.airlineName.toLowerCase().includes(colFilters.airlineName.toLowerCase())) return false;
-      if (colFilters.product && ![r.productCode, r.productName].some((v) => v.toLowerCase().includes(colFilters.product.toLowerCase()))) return false;
+      if (
+        q &&
+        ![r.airlineName, productLabel, r.productName].some((v) =>
+          String(v).toLowerCase().includes(q),
+        )
+      )
+        return false;
+      if (
+        colFilters.airlineName &&
+        !r.airlineName.toLowerCase().includes(colFilters.airlineName.toLowerCase())
+      )
+        return false;
+      if (
+        colFilters.product &&
+        ![r.productCode, r.productName].some((v) =>
+          v.toLowerCase().includes(colFilters.product.toLowerCase()),
+        )
+      )
+        return false;
       return true;
     });
   }, [rows, search, colFilters]);
@@ -134,30 +188,72 @@ function AirlinePage() {
     setForm(emptyForm());
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (authed) {
+      const raw = {
+        name: form.airlineName.trim().toUpperCase(),
+        product_id: form.productId || "",
+      };
+      setSaving(true);
+      try {
+        if (editing) {
+          const patch = airlineUpdateSchema.parse(raw);
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch,
+          });
+          toast.success("Airline updated");
+        } else {
+          const values = airlineCreateSchema.parse(raw);
+          await rc.create.mutateAsync(values);
+          toast.success("Airline added");
+        }
+        closeForm();
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save airline"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    // Demo mode: preserve the original lightweight validation + UX.
     if (!form.airlineName.trim()) return toast.error("Airline Name is required");
-    if (!form.product.code.trim() && !form.product.name.trim()) return toast.error("Product is required");
+    if (!form.product.code.trim() && !form.product.name.trim())
+      return toast.error("Product is required");
 
     const payload = {
       airlineName: form.airlineName.trim().toUpperCase(),
       productCode: form.product.code.trim(),
       productName: form.product.name.trim(),
     };
-
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...payload } : r)));
+      setDemoRows((prev) =>
+        prev.map((r) => (r.id === editing.id ? { ...editing, ...payload } : r)),
+      );
       toast.success("Airline updated");
     } else {
-      setRows((prev) => [{ id: crypto.randomUUID(), ...payload }, ...prev]);
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), productId: "", ...payload }, ...prev]);
       toast.success("Airline added");
     }
     closeForm();
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success(`Deleted ${deleteTarget.airlineName}`);
+    const row = deleteTarget;
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.airlineName}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete airline"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.airlineName}`);
+    }
     setDeleteTarget(null);
   };
 
@@ -176,42 +272,35 @@ function AirlinePage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) return toast.error("File is empty");
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "", inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) return toast.error("File is empty");
+
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          airlinesResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
+
       const imported: AirlineRow[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const c = parseRow(lines[i]);
-        if (!c[0]?.trim()) continue;
+      for (const rec of mapCsvToImportRows(parsed.rows, ["name", "product_code", "product_name"])) {
+        if (!rec.name?.trim()) continue;
         imported.push({
           id: crypto.randomUUID(),
-          airlineName: c[0].trim().toUpperCase(),
-          productCode: (c[1] || "").trim(),
-          productName: (c[2] || "").trim(),
+          airlineName: rec.name.trim().toUpperCase(),
+          productId: "",
+          productCode: (rec.product_code || "").trim(),
+          productName: (rec.product_name || "").trim(),
         });
       }
       if (imported.length === 0) return toast.error("No valid rows found");
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
@@ -220,6 +309,7 @@ function AirlinePage() {
     setColFilters({ airlineName: "", product: "" });
     setPage(1);
     closeForm();
+    if (authed) queryClient.invalidateQueries({ queryKey: masterKeys.all(airlinesResource.key) });
     toast.success("Refreshed");
   };
 
@@ -230,23 +320,52 @@ function AirlinePage() {
       {showForm ? (
         <Card className="overflow-hidden border p-0">
           <div className="p-4 md:p-6">
-            <Badge className="mb-4 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">Airline</Badge>
+            <Badge className="mb-4 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
+              Airline
+            </Badge>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
               <FieldWrapper label="Airline Name" required>
-                <Input value={form.airlineName} onChange={(e) => setForm((f) => ({ ...f, airlineName: e.target.value }))} />
+                <Input
+                  value={form.airlineName}
+                  onChange={(e) => setForm((f) => ({ ...f, airlineName: e.target.value }))}
+                />
               </FieldWrapper>
               <FieldWrapper label="Product" required>
-                <ProductLookupInput
-                  value={form.product}
-                  onChange={(v) => setForm((f) => ({ ...f, product: v }))}
-                />
+                {authed ? (
+                  <LookupCombobox
+                    lookupKey="product"
+                    value={form.productId}
+                    valueLabel={form.product.code || form.product.name}
+                    onChange={(id, item) =>
+                      setForm((f) => ({
+                        ...f,
+                        productId: id,
+                        product: { code: item?.code ?? "", name: item?.name ?? "" },
+                      }))
+                    }
+                    placeholder="Select Product"
+                  />
+                ) : (
+                  <ProductLookupInput
+                    value={form.product}
+                    onChange={(v) => setForm((f) => ({ ...f, product: v }))}
+                  />
+                )}
               </FieldWrapper>
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
-              <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-              <Button variant="destructive" onClick={closeForm}>Cancel</Button>
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+              >
+                {saving ? "Saving…" : "Save"}
+              </Button>
+              <Button variant="destructive" onClick={closeForm}>
+                Cancel
+              </Button>
             </div>
           </div>
         </Card>
@@ -260,25 +379,45 @@ function AirlinePage() {
           </div>
 
           <Card className="overflow-hidden p-0">
-            <input ref={importInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFile} />
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportFile}
+            />
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
               <TooltipProvider delayDuration={200}>
                 <div className="flex items-center gap-1.5">
-                  <IconButton label="Export" onClick={handleExport}><Download className="h-4 w-4" /></IconButton>
-                  <IconButton label="Import" onClick={() => importInputRef.current?.click()}><Upload className="h-4 w-4" /></IconButton>
+                  <IconButton label="Export" onClick={handleExport}>
+                    <Download className="h-4 w-4" />
+                  </IconButton>
+                  {canAdd ? (
+                    <IconButton label="Import" onClick={() => importInputRef.current?.click()}>
+                      <Upload className="h-4 w-4" />
+                    </IconButton>
+                  ) : null}
+                  <IconButton label="Refresh" onClick={handleRefresh}>
+                    <RefreshCw className="h-4 w-4" />
+                  </IconButton>
                 </div>
               </TooltipProvider>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Search:</span>
                 <Input
                   value={search}
-                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
                   className="h-9 w-56"
                 />
-                <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-                  <Plus className="h-4 w-4" />
-                  Add
-                </Button>
+                {canAdd ? (
+                  <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                    <Plus className="h-4 w-4" />
+                    Add
+                  </Button>
+                ) : null}
               </div>
             </div>
 
@@ -288,13 +427,18 @@ function AirlinePage() {
                   <TableRow className="bg-sidebar hover:bg-sidebar">
                     <TableHead className="text-sidebar-foreground">Airlines Name</TableHead>
                     <TableHead className="text-sidebar-foreground">Product</TableHead>
-                    <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
+                    <TableHead className="w-28 text-center text-sidebar-foreground">
+                      Action
+                    </TableHead>
                   </TableRow>
                   <TableRow className="bg-muted/20 hover:bg-muted/20">
                     <TableHead className="py-2">
                       <Input
                         value={colFilters.airlineName}
-                        onChange={(e) => { setColFilters((f) => ({ ...f, airlineName: e.target.value })); setPage(1); }}
+                        onChange={(e) => {
+                          setColFilters((f) => ({ ...f, airlineName: e.target.value }));
+                          setPage(1);
+                        }}
                         placeholder="Airlines Name"
                         className="h-8"
                       />
@@ -302,7 +446,10 @@ function AirlinePage() {
                     <TableHead className="py-2">
                       <Input
                         value={colFilters.product}
-                        onChange={(e) => { setColFilters((f) => ({ ...f, product: e.target.value })); setPage(1); }}
+                        onChange={(e) => {
+                          setColFilters((f) => ({ ...f, product: e.target.value }));
+                          setPage(1);
+                        }}
                         placeholder="Product"
                         className="h-8"
                       />
@@ -313,7 +460,10 @@ function AirlinePage() {
                 <TableBody>
                   {pageRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={3} className="h-32 text-center text-sm text-muted-foreground">
+                      <TableCell
+                        colSpan={3}
+                        className="h-32 text-center text-sm text-muted-foreground"
+                      >
                         No data available in table
                       </TableCell>
                     </TableRow>
@@ -324,12 +474,28 @@ function AirlinePage() {
                         <TableCell>{r.productCode || r.productName}</TableCell>
                         <TableCell className="text-center">
                           <div className="flex justify-center gap-1">
-                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)} aria-label={`Edit ${r.airlineName}`}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(r)} aria-label={`Delete ${r.airlineName}`}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {canModify ? (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                onClick={() => openEdit(r)}
+                                aria-label={`Edit ${r.airlineName}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            ) : null}
+                            {canDelete ? (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => setDeleteTarget(r)}
+                                aria-label={`Delete ${r.airlineName}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -339,7 +505,14 @@ function AirlinePage() {
               </Table>
             </div>
 
-            <TablePager totalPages={totalPages} currentPage={currentPage} setPage={setPage} startIdx={startIdx} endIdx={endIdx} total={filtered.length} />
+            <TablePager
+              totalPages={totalPages}
+              currentPage={currentPage}
+              setPage={setPage}
+              startIdx={startIdx}
+              endIdx={endIdx}
+              total={filtered.length}
+            />
           </Card>
         </>
       )}
@@ -349,12 +522,16 @@ function AirlinePage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete airline?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove <span className="font-medium text-foreground">{deleteTarget?.airlineName}</span>.
+              This will remove{" "}
+              <span className="font-medium text-foreground">{deleteTarget?.airlineName}</span>.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -376,8 +553,18 @@ function ProductLookupInput({
   return (
     <>
       <div className="flex gap-1">
-        <Input value={value.code} onChange={(e) => onChange({ ...value, code: e.target.value })} className="w-28" placeholder="Code" />
-        <Input value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} className="flex-1" placeholder="Name" />
+        <Input
+          value={value.code}
+          onChange={(e) => onChange({ ...value, code: e.target.value })}
+          className="w-28"
+          placeholder="Code"
+        />
+        <Input
+          value={value.name}
+          onChange={(e) => onChange({ ...value, name: e.target.value })}
+          className="flex-1"
+          placeholder="Name"
+        />
         <Button
           size="icon"
           variant="outline"

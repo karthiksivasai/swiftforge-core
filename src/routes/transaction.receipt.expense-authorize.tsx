@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Download, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -13,13 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   FieldWrapper,
   IconButton,
@@ -28,8 +23,16 @@ import {
   TablePager,
   downloadCsv,
 } from "@/components/master-table-kit";
+import { useAuth } from "@/lib/auth";
+import { toErrorMessage } from "@/lib/masters/screen";
+import {
+  authorizeExpense,
+  listExpenseEntries,
+  rejectExpense,
+} from "@/lib/transactions/resources/finance";
+import { dbExpenseToAuthorizeUi } from "@/lib/transactions/financeUiMap";
 
-type AuthStatus = "Authorized" | "Un-Authorized";
+type AuthStatus = "Authorized" | "Un-Authorized" | "Rejected";
 
 type ExpenseRow = {
   id: string;
@@ -41,25 +44,110 @@ type ExpenseRow = {
   amount: string;
   documentUrl: string;
   status: AuthStatus;
+  rowVersion: number;
 };
 
 type ColFilterKey = "srno" | "tranDate" | "name" | "bankCash" | "description" | "amount";
 
-const STATUS_OPTIONS: AuthStatus[] = ["Authorized", "Un-Authorized"];
+const STATUS_OPTIONS: AuthStatus[] = ["Authorized", "Un-Authorized", "Rejected"];
 
-const SEED_TEMPLATE: Omit<ExpenseRow, "id" | "srno" | "status">[] = [
-  { tranDate: "30/05/2026", name: "OFFICE EXPENSES", bankCash: "Cash", description: "WF SANDEEP", amount: "173400.00", documentUrl: "" },
-  { tranDate: "30/05/2026", name: "FOOD", bankCash: "Cash", description: "SNACKS", amount: "400.00", documentUrl: "" },
-  { tranDate: "30/05/2026", name: "FOOD", bankCash: "Cash", description: "TEA", amount: "120.00", documentUrl: "" },
-  { tranDate: "29/05/2026", name: "TRAVEL", bankCash: "Cash", description: "PETROL", amount: "2500.00", documentUrl: "" },
-  { tranDate: "29/05/2026", name: "OFFICE EXPENSES", bankCash: "Cash", description: "BAGS", amount: "850.00", documentUrl: "" },
-  { tranDate: "28/05/2026", name: "FOOD", bankCash: "Cash", description: "LUNCH", amount: "650.00", documentUrl: "" },
-  { tranDate: "28/05/2026", name: "MAINTENANCE", bankCash: "Bank", description: "PRINTER REPAIR", amount: "3200.00", documentUrl: "" },
-  { tranDate: "27/05/2026", name: "TRAVEL", bankCash: "Cash", description: "AUTO FARE", amount: "180.00", documentUrl: "" },
-  { tranDate: "27/05/2026", name: "OFFICE EXPENSES", bankCash: "Cash", description: "STATIONERY", amount: "920.00", documentUrl: "" },
-  { tranDate: "26/05/2026", name: "FOOD", bankCash: "Cash", description: "SNACKS", amount: "300.00", documentUrl: "" },
-  { tranDate: "26/05/2026", name: "TRAVEL", bankCash: "Cash", description: "PETROL", amount: "1800.00", documentUrl: "" },
-  { tranDate: "25/05/2026", name: "OFFICE EXPENSES", bankCash: "Bank", description: "COURIER CHARGES", amount: "5400.00", documentUrl: "" },
+const SEED_TEMPLATE: Omit<ExpenseRow, "id" | "srno" | "status" | "rowVersion">[] = [
+  {
+    tranDate: "30/05/2026",
+    name: "OFFICE EXPENSES",
+    bankCash: "Cash",
+    description: "WF SANDEEP",
+    amount: "173400.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "30/05/2026",
+    name: "FOOD",
+    bankCash: "Cash",
+    description: "SNACKS",
+    amount: "400.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "30/05/2026",
+    name: "FOOD",
+    bankCash: "Cash",
+    description: "TEA",
+    amount: "120.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "29/05/2026",
+    name: "TRAVEL",
+    bankCash: "Cash",
+    description: "PETROL",
+    amount: "2500.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "29/05/2026",
+    name: "OFFICE EXPENSES",
+    bankCash: "Cash",
+    description: "BAGS",
+    amount: "850.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "28/05/2026",
+    name: "FOOD",
+    bankCash: "Cash",
+    description: "LUNCH",
+    amount: "650.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "28/05/2026",
+    name: "MAINTENANCE",
+    bankCash: "Bank",
+    description: "PRINTER REPAIR",
+    amount: "3200.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "27/05/2026",
+    name: "TRAVEL",
+    bankCash: "Cash",
+    description: "AUTO FARE",
+    amount: "180.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "27/05/2026",
+    name: "OFFICE EXPENSES",
+    bankCash: "Cash",
+    description: "STATIONERY",
+    amount: "920.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "26/05/2026",
+    name: "FOOD",
+    bankCash: "Cash",
+    description: "SNACKS",
+    amount: "300.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "26/05/2026",
+    name: "TRAVEL",
+    bankCash: "Cash",
+    description: "PETROL",
+    amount: "1800.00",
+    documentUrl: "",
+  },
+  {
+    tranDate: "25/05/2026",
+    name: "OFFICE EXPENSES",
+    bankCash: "Bank",
+    description: "COURIER CHARGES",
+    amount: "5400.00",
+    documentUrl: "",
+  },
 ];
 
 const buildSeedRows = (): ExpenseRow[] => {
@@ -68,11 +156,14 @@ const buildSeedRows = (): ExpenseRow[] => {
   for (let batch = 0; batch < 12; batch += 1) {
     for (let i = 0; i < SEED_TEMPLATE.length; i += 1) {
       const template = SEED_TEMPLATE[i];
+      const status: AuthStatus =
+        batch === 0 && i < 3 ? "Un-Authorized" : batch === 1 && i === 0 ? "Rejected" : "Authorized";
       rows.push({
         id: crypto.randomUUID(),
         srno: srno--,
         ...template,
-        status: batch === 0 && i < 3 ? "Un-Authorized" : "Authorized",
+        status,
+        rowVersion: 1,
       });
     }
   }
@@ -99,11 +190,27 @@ export const Route = createFileRoute("/transaction/receipt/expense-authorize")({
 });
 
 function ExpenseAuthorizePage() {
-  const [rows, setRows] = useState<ExpenseRow[]>(buildSeedRows);
-  const [statusFilter, setStatusFilter] = useState<AuthStatus>("Authorized");
+  const { isAuthenticated: authed } = useAuth();
+  const queryClient = useQueryClient();
+  const [demoRows, setDemoRows] = useState<ExpenseRow[]>(buildSeedRows);
+  const [statusFilter, setStatusFilter] = useState<AuthStatus>("Un-Authorized");
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState(emptyColFilters);
   const [page, setPage] = useState(1);
+
+  const liveQuery = useQuery({
+    queryKey: ["expense_entries", "authorize"],
+    queryFn: () => listExpenseEntries({ pageSize: 500 }),
+    enabled: authed,
+  });
+
+  const rows: ExpenseRow[] = authed
+    ? (liveQuery.data?.rows ?? []).map(dbExpenseToAuthorizeUi)
+    : demoRows;
+
+  const refreshLive = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["expense_entries"] });
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -127,7 +234,8 @@ function ExpenseAuthorizePage() {
       if (cf.srno && !String(row.srno).includes(cf.srno)) return false;
       if (cf.tranDate && !row.tranDate.includes(cf.tranDate)) return false;
       if (cf.name && !row.name.toLowerCase().includes(cf.name.toLowerCase())) return false;
-      if (cf.bankCash && !row.bankCash.toLowerCase().includes(cf.bankCash.toLowerCase())) return false;
+      if (cf.bankCash && !row.bankCash.toLowerCase().includes(cf.bankCash.toLowerCase()))
+        return false;
       if (cf.description && !row.description.toLowerCase().includes(cf.description.toLowerCase())) {
         return false;
       }
@@ -159,18 +267,61 @@ function ExpenseAuthorizePage() {
     toast.success("Exported expense-authorize.csv");
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setSearch("");
     setColFilters(emptyColFilters());
     setPage(1);
+    if (authed) await refreshLive();
     toast.success("List refreshed");
   };
 
-  const authorizeRow = (row: ExpenseRow) => {
-    setRows((prev) =>
-      prev.map((r) => (r.id === row.id ? { ...r, status: "Authorized" as const } : r)),
+  const authorizeRow = async (row: ExpenseRow) => {
+    if (row.status !== "Un-Authorized") {
+      return toast.error("Only unauthorized expenses can be authorized");
+    }
+    if (authed) {
+      try {
+        await authorizeExpense({ id: row.id, row_version: row.rowVersion });
+        await refreshLive();
+        toast.success(`Expense ${row.srno} authorized`);
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      }
+      return;
+    }
+    setDemoRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id ? { ...r, status: "Authorized" as const, rowVersion: r.rowVersion + 1 } : r,
+      ),
     );
-    toast.success(`Expense ${row.srno} authorized`);
+    toast.success(`Expense ${row.srno} authorized (demo)`);
+  };
+
+  const rejectRow = async (row: ExpenseRow) => {
+    if (row.status !== "Un-Authorized") {
+      return toast.error("Only unauthorized expenses can be rejected");
+    }
+    const reason = window.prompt("Rejection reason (optional):") ?? "";
+    if (authed) {
+      try {
+        await rejectExpense({
+          id: row.id,
+          row_version: row.rowVersion,
+          reason: reason.trim() || null,
+        });
+        await refreshLive();
+        toast.success(`Expense ${row.srno} rejected`);
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      }
+      return;
+    }
+    setDemoRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id ? { ...r, status: "Rejected" as const, rowVersion: r.rowVersion + 1 } : r,
+      ),
+    );
+    toast.success(`Expense ${row.srno} rejected (demo)`);
   };
 
   return (
@@ -181,6 +332,9 @@ function ExpenseAuthorizePage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Expense Authorize</h1>
         <p className="text-sm text-muted-foreground">
           Review expense entries and authorize or track pending approvals.
+          {authed
+            ? " Connected to live backend."
+            : " Demo mode — sign in for live expense authorization."}
         </p>
       </div>
 
@@ -237,13 +391,23 @@ function ExpenseAuthorizePage() {
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Srno.</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Tran_Date</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Tran_Date
+                </TableHead>
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Name</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Bank_Cash</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Description</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Bank_Cash
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Description
+                </TableHead>
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Amount</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">View Document</TableHead>
-                <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">Action</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  View Document
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">
+                  Action
+                </TableHead>
               </TableRow>
               <TableRow className="bg-muted/20 hover:bg-muted/20">
                 {(
@@ -293,7 +457,9 @@ function ExpenseAuthorizePage() {
                         <button
                           type="button"
                           className="text-sky-600 hover:underline dark:text-sky-400"
-                          onClick={() => toast.info("Document viewer will be enabled with backend wiring")}
+                          onClick={() =>
+                            toast.info("Document viewer will be enabled with backend wiring")
+                          }
                         >
                           View
                         </button>
@@ -304,14 +470,26 @@ function ExpenseAuthorizePage() {
                     <TableCell className="text-center">
                       {row.status === "Authorized" ? (
                         <span className="text-sm text-muted-foreground">Authorized</span>
+                      ) : row.status === "Rejected" ? (
+                        <span className="text-sm text-muted-foreground">Rejected</span>
                       ) : (
-                        <Button
-                          size="sm"
-                          className="h-8 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-                          onClick={() => authorizeRow(row)}
-                        >
-                          Authorize
-                        </Button>
+                        <div className="flex flex-wrap items-center justify-center gap-1">
+                          <Button
+                            size="sm"
+                            className="h-8 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                            onClick={() => authorizeRow(row)}
+                          >
+                            Authorize
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-8"
+                            onClick={() => rejectRow(row)}
+                          >
+                            Reject
+                          </Button>
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>

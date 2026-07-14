@@ -60,6 +60,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { countriesResource, type CountryRow } from "@/lib/masters/resources/countries";
+import { countryCreateSchema, countryUpdateSchema } from "@/lib/masters/schemas/countries";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
 
 type WeightUnit = "Kgs" | "Lbs";
 
@@ -70,12 +79,171 @@ type Country = {
   weightUnit: WeightUnit | "";
   currency: string;
   isdCode: string;
+  row_version?: number;
 };
 
 const WEIGHT_UNITS: WeightUnit[] = ["Kgs", "Lbs"];
 
 const CURRENCIES: string[] = [
-  "AED","AFN","ALL","AMD","ANG","AOA","ARS","AUD","AWG","AZN","BAM","BBD","BDT","BGN","BHD","BIF","BMD","BND","BOB","BRL","BSD","BTN","BWP","BYN","BZD","CAD","CDF","CHF","CLP","CNY","COP","CRC","CUP","CVE","CZK","DJF","DKK","DOP","DZD","EGP","ERN","ERO","ETB","EUR","FJD","FKP","GBP","GEL","GGP","GHS","GIP","GMD","GNF","GTQ","GYD","HKD","HNL","HRK","HTG","HUF","IDR","ILS","IMP","INR","IQD","IRR","ISK","JEP","JMD","JOD","JPY","KES","KGS","KHR","KMF","KPW","KRW","KWD","KYD","KZT","LAK","LBP","LKR","LRD","LSL","LYD","MAD","MDL","MGA","MKD","MMK","MNT","MOP","MRU","MUR","MVR","MWK","MXN","MYR","MZN","NAD","NGN","NIO","NOK","NPR","NZD","OMR","PEN","PGK","PHP","PKR","PLN","PND","PYG","QAR","RON","RSD","RUB","RWF","SAR","SBD","SCR","SDG","SEK","SGD","SHP","SLL","SOS","SRD","SSP","STN","SYP","SZL","THB","TJS","TMT","TND","TOP","TRY","TTD","TWD","TZS","UAH","UGX","USD","UYU","UZS","VES","VND","VUV","WST","XAF","XCD","XDR","XOF","XPF","YER","ZAR","ZMW",
+  "AED",
+  "AFN",
+  "ALL",
+  "AMD",
+  "ANG",
+  "AOA",
+  "ARS",
+  "AUD",
+  "AWG",
+  "AZN",
+  "BAM",
+  "BBD",
+  "BDT",
+  "BGN",
+  "BHD",
+  "BIF",
+  "BMD",
+  "BND",
+  "BOB",
+  "BRL",
+  "BSD",
+  "BTN",
+  "BWP",
+  "BYN",
+  "BZD",
+  "CAD",
+  "CDF",
+  "CHF",
+  "CLP",
+  "CNY",
+  "COP",
+  "CRC",
+  "CUP",
+  "CVE",
+  "CZK",
+  "DJF",
+  "DKK",
+  "DOP",
+  "DZD",
+  "EGP",
+  "ERN",
+  "ERO",
+  "ETB",
+  "EUR",
+  "FJD",
+  "FKP",
+  "GBP",
+  "GEL",
+  "GGP",
+  "GHS",
+  "GIP",
+  "GMD",
+  "GNF",
+  "GTQ",
+  "GYD",
+  "HKD",
+  "HNL",
+  "HRK",
+  "HTG",
+  "HUF",
+  "IDR",
+  "ILS",
+  "IMP",
+  "INR",
+  "IQD",
+  "IRR",
+  "ISK",
+  "JEP",
+  "JMD",
+  "JOD",
+  "JPY",
+  "KES",
+  "KGS",
+  "KHR",
+  "KMF",
+  "KPW",
+  "KRW",
+  "KWD",
+  "KYD",
+  "KZT",
+  "LAK",
+  "LBP",
+  "LKR",
+  "LRD",
+  "LSL",
+  "LYD",
+  "MAD",
+  "MDL",
+  "MGA",
+  "MKD",
+  "MMK",
+  "MNT",
+  "MOP",
+  "MRU",
+  "MUR",
+  "MVR",
+  "MWK",
+  "MXN",
+  "MYR",
+  "MZN",
+  "NAD",
+  "NGN",
+  "NIO",
+  "NOK",
+  "NPR",
+  "NZD",
+  "OMR",
+  "PEN",
+  "PGK",
+  "PHP",
+  "PKR",
+  "PLN",
+  "PND",
+  "PYG",
+  "QAR",
+  "RON",
+  "RSD",
+  "RUB",
+  "RWF",
+  "SAR",
+  "SBD",
+  "SCR",
+  "SDG",
+  "SEK",
+  "SGD",
+  "SHP",
+  "SLL",
+  "SOS",
+  "SRD",
+  "SSP",
+  "STN",
+  "SYP",
+  "SZL",
+  "THB",
+  "TJS",
+  "TMT",
+  "TND",
+  "TOP",
+  "TRY",
+  "TTD",
+  "TWD",
+  "TZS",
+  "UAH",
+  "UGX",
+  "USD",
+  "UYU",
+  "UZS",
+  "VES",
+  "VND",
+  "VUV",
+  "WST",
+  "XAF",
+  "XCD",
+  "XDR",
+  "XOF",
+  "XPF",
+  "YER",
+  "ZAR",
+  "ZMW",
 ];
 
 type SeedRow = { code: string; name: string; weightUnit?: WeightUnit; currency?: string };
@@ -357,7 +525,10 @@ export const Route = createFileRoute("/master/sales/country")({
   head: () => ({
     meta: [
       { title: "Country — Master — Courier ERP" },
-      { name: "description", content: "Manage the country master with weight units and currencies." },
+      {
+        name: "description",
+        content: "Manage the country master with weight units and currencies.",
+      },
     ],
   }),
   component: CountryPage,
@@ -367,15 +538,52 @@ function emptyCountry(): Omit<Country, "id"> {
   return { code: "", name: "", weightUnit: "Kgs", currency: "", isdCode: "" };
 }
 
+/** Map a live DB row to the screen's view shape (uppercase enum -> title-case UI). */
+function rowToView(r: CountryRow): Country {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    weightUnit: r.weight_unit === "KGS" ? "Kgs" : r.weight_unit === "LBS" ? "Lbs" : "",
+    currency: r.currency ?? "",
+    isdCode: r.isd_code ?? "",
+    row_version: r.row_version,
+  };
+}
+
+/** Map the form to the DB column shape that the Zod create/update schema validates. */
+function toRaw(form: Omit<Country, "id">) {
+  return {
+    code: form.code,
+    name: form.name,
+    weight_unit: form.weightUnit ? form.weightUnit.toUpperCase() : null,
+    currency: form.currency,
+    isd_code: form.isdCode,
+  };
+}
+
 function CountryPage() {
-  const [rows, setRows] = useState<Country[]>(SEED);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(countriesResource);
+  const live = useMasterList(countriesResource, { enabled: authed });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<Country[]>(SEED);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Country | null>(null);
   const [form, setForm] = useState<Omit<Country, "id">>(emptyCountry());
   const [deleteTarget, setDeleteTarget] = useState<Country | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: Country[] = authed ? (live.rows as CountryRow[]).map(rowToView) : demoRows;
+
+  // Demo mode is a fully interactive preview; live mode respects RBAC.
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -399,36 +607,69 @@ function CountryPage() {
 
   const openEdit = (row: Country) => {
     setEditing(row);
-    const { id: _id, ...rest } = row;
+    const { id: _id, row_version: _rv, ...rest } = row;
     setForm(rest);
     setOpen(true);
   };
 
-  const handleSave = () => {
-    if (!form.code.trim()) {
-      toast.error("Country Code is required");
+  const handleSave = async () => {
+    const raw = toRaw(form);
+    if (authed) {
+      setSaving(true);
+      try {
+        if (editing) {
+          const patch = countryUpdateSchema.parse(raw);
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch,
+          });
+          toast.success("Country updated");
+        } else {
+          const values = countryCreateSchema.parse(raw);
+          await rc.create.mutateAsync(values);
+          toast.success("Country added");
+        }
+        setOpen(false);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save country"));
+      } finally {
+        setSaving(false);
+      }
       return;
     }
-    if (!form.name.trim()) {
-      toast.error("Country Name is required");
+    // Demo mode: validate with the same schema, then mutate local state.
+    try {
+      if (editing) countryUpdateSchema.parse(raw);
+      else countryCreateSchema.parse(raw);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Please fix the form"));
       return;
     }
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
       toast.success("Country updated");
     } else {
-      const id = crypto.randomUUID();
-      setRows((prev) => [{ id, ...form }, ...prev]);
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), ...form }, ...prev]);
       toast.success("Country added");
     }
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
     const row = deleteTarget;
-    setRows((prev) => prev.filter((r) => r.id !== row.id));
-    toast.success(`Deleted ${row.code}`);
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.code}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete country"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.code}`);
+    }
     setDeleteTarget(null);
   };
 
@@ -462,57 +703,48 @@ function CountryPage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) {
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) {
         toast.error("File is empty");
         return;
       }
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "";
-        let inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          countriesResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
       const imported: Country[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const [code, name, weightUnit, currency, isdCode] = parseRow(lines[i]);
-        if (!code?.trim()) continue;
+      for (const rec of mapCsvToImportRows(parsed.rows, countriesResource.importColumns)) {
+        if (!rec.code?.trim()) continue;
+        const wu = rec.weight_unit?.trim().toUpperCase();
         imported.push({
           id: crypto.randomUUID(),
-          code: code.trim(),
-          name: (name || "").trim(),
-          weightUnit: (WEIGHT_UNITS.includes(weightUnit as WeightUnit) ? (weightUnit as WeightUnit) : "") as WeightUnit | "",
-          currency: (currency || "").trim(),
-          isdCode: (isdCode || "").trim(),
+          code: rec.code.trim(),
+          name: (rec.name || "").trim(),
+          weightUnit: wu === "KGS" ? "Kgs" : wu === "LBS" ? "Lbs" : "",
+          currency: (rec.currency || "").trim(),
+          isdCode: (rec.isd_code || "").trim(),
         });
       }
       if (imported.length === 0) {
         toast.error("No valid rows found");
         return;
       }
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} countr${imported.length === 1 ? "y" : "ies"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
   const handleRefresh = () => {
     setSearch("");
     setPage(1);
+    if (authed) queryClient.invalidateQueries({ queryKey: masterKeys.all(countriesResource.key) });
     toast.success("Refreshed");
   };
 
@@ -561,9 +793,11 @@ function CountryPage() {
               <IconButton label="Export" onClick={handleExport}>
                 <Download className="h-4 w-4" />
               </IconButton>
-              <IconButton label="Import" onClick={handleImport}>
-                <Upload className="h-4 w-4" />
-              </IconButton>
+              {canAdd ? (
+                <IconButton label="Import" onClick={handleImport}>
+                  <Upload className="h-4 w-4" />
+                </IconButton>
+              ) : null}
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>
@@ -583,10 +817,12 @@ function CountryPage() {
                 className="h-9 w-56 pl-8"
               />
             </div>
-            <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add
-            </Button>
+            {canAdd ? (
+              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -621,24 +857,28 @@ function CountryPage() {
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          onClick={() => openEdit(r)}
-                          aria-label={`Edit ${r.code}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(r)}
-                          aria-label={`Delete ${r.code}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canModify ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(r)}
+                            aria-label={`Edit ${r.code}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        {canDelete ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(r)}
+                            aria-label={`Delete ${r.code}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -666,10 +906,7 @@ function CountryPage() {
             >
               <ChevronRight className="h-4 w-4" />
             </PagerButton>
-            <PagerButton
-              disabled={currentPage === totalPages}
-              onClick={() => setPage(totalPages)}
-            >
+            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
               <ChevronsRight className="h-4 w-4" />
             </PagerButton>
           </div>
@@ -745,8 +982,12 @@ function CountryPage() {
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
-              Save
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              {saving ? "Saving…" : "Save"}
             </Button>
             <Button variant="destructive" onClick={() => setOpen(false)}>
               Close
@@ -762,7 +1003,8 @@ function CountryPage() {
             <AlertDialogDescription>
               This will permanently remove{" "}
               <span className="font-medium text-foreground">{deleteTarget?.code}</span>
-              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the country master. This action cannot be undone.
+              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the country master. This
+              action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

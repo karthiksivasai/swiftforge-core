@@ -1,7 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Printer } from "lucide-react";
 import { toast } from "sonner";
+
+import { useAuth } from "@/lib/auth";
+import {
+  getGroupPermissions,
+  listGroups,
+  listPermissionModules,
+  saveGroupPermissions,
+  type SaveGrant,
+} from "@/lib/rbac-data";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -23,7 +32,8 @@ import {
 } from "@/components/ui/table";
 import { MasterBreadcrumb } from "@/components/master-table-kit";
 
-type SectionKey = "Masters" | "Transaction" | "Documents" | "Reports" | "Utilities" | "Mobile Application";
+type SectionKey =
+  "Masters" | "Transaction" | "Documents" | "Reports" | "Utilities" | "Mobile Application";
 type PermissionKey = "allAccess" | "add" | "modify" | "delete" | "list" | "search";
 
 type AccessItem = {
@@ -44,7 +54,7 @@ const accessSections: Record<SectionKey, AccessItem[]> = {
     "Customer Master Edit Contract Amount|Masters",
     "Unit Master|Masters",
     "Destination Master|Masters",
-    "Location Master|Masters",
+    "Service Center Master|Masters",
     "State Master|Masters",
     "Sales Executive Master|Masters",
     "Industry Master|Masters",
@@ -63,7 +73,7 @@ const accessSections: Record<SectionKey, AccessItem[]> = {
     "Vendor Master|Masters",
     "Vendor Contract Master|Masters",
     "Service Mapping|Masters",
-    "Pickup/delivery Boy Master|Masters",
+    "Field Executive Master|Masters",
     "Delivery Routes Master|Masters",
     "Area Master|Masters",
     "Delivery Exception Master|Masters",
@@ -227,6 +237,37 @@ function toItem(value: string): AccessItem {
   return { description, underMenu };
 }
 
+// Deterministic slug mapping — MUST match supabase/tests/gen_permission_modules.mjs
+// so each screen row maps to its seeded permission_modules.slug.
+const SECTION_CODE: Record<SectionKey, string> = {
+  Masters: "mst",
+  Transaction: "txn",
+  Documents: "doc",
+  Reports: "rpt",
+  Utilities: "utl",
+  "Mobile Application": "mob",
+};
+
+function kebab(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function slugFor(section: SectionKey, description: string): string {
+  return `${SECTION_CODE[section]}.${kebab(description)}`;
+}
+
+const PERMISSION_COLUMN: Record<PermissionKey, keyof SaveGrant> = {
+  allAccess: "all_access",
+  add: "can_add",
+  modify: "can_modify",
+  delete: "can_delete",
+  list: "can_list",
+  search: "can_search",
+};
+
 function permissionId(section: SectionKey, rowIndex: number, key: PermissionKey) {
   return `${section}-${rowIndex}-${key}`;
 }
@@ -264,17 +305,100 @@ export const Route = createFileRoute("/utility/users/access-rights")({
 });
 
 function AccessRightsPage() {
-  const [group, setGroup] = useState<GroupName | "">("");
+  const { isAuthenticated, profile } = useAuth();
+  const [group, setGroup] = useState<string>("");
   const [searched, setSearched] = useState(false);
   const [openSections, setOpenSections] = useState<SectionKey[]>(["Masters"]);
-  const [groupPermissions, setGroupPermissions] = useState<Record<GroupName, Record<string, boolean>>>(buildGroupPermissions);
+  const [groupPermissions, setGroupPermissions] =
+    useState<Record<GroupName, Record<string, boolean>>>(buildGroupPermissions);
 
+  // Live (Supabase) state — used only when authenticated.
+  const [liveGroups, setLiveGroups] = useState<{ id: string; name: string }[]>([]);
+  const [moduleIdBySlug, setModuleIdBySlug] = useState<Record<string, string>>({});
+  const [livePermissions, setLivePermissions] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    Promise.all([listGroups(), listPermissionModules()])
+      .then(([groupsData, modules]) => {
+        setLiveGroups(groupsData.map((g) => ({ id: g.id, name: g.name })));
+        setModuleIdBySlug(Object.fromEntries(modules.map((m) => [m.slug, m.id])));
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "Could not load groups";
+        toast.error(message);
+      });
+  }, [isAuthenticated]);
+
+  const groupOptions =
+    isAuthenticated && liveGroups.length
+      ? liveGroups.map((g) => g.name)
+      : (groups as readonly string[]);
   const selectedGroup = useMemo(() => group || "Select User", [group]);
-  const permissions = group ? groupPermissions[group] : groupPermissions.BS;
+  const permissions = isAuthenticated
+    ? livePermissions
+    : group
+      ? (groupPermissions[group as GroupName] ?? groupPermissions.BS)
+      : groupPermissions.BS;
 
-  const runSearch = () => {
+  const runSearch = async () => {
     if (!group) return toast.error("Please select group");
-    setSearched(true);
+    if (!isAuthenticated) {
+      setSearched(true);
+      return;
+    }
+    const groupId = liveGroups.find((g) => g.name === group)?.id;
+    if (!groupId) return toast.error("Group not found");
+    try {
+      const rows = await getGroupPermissions(groupId);
+      const byModule = new Map(rows.map((r) => [r.module_id, r]));
+      const next: Record<string, boolean> = {};
+      sectionOrder.forEach((section) => {
+        accessSections[section].forEach((item, rowIndex) => {
+          const moduleId = moduleIdBySlug[slugFor(section, item.description)];
+          const grant = moduleId ? byModule.get(moduleId) : undefined;
+          permissionKeys.forEach((key) => {
+            const col = PERMISSION_COLUMN[key];
+            next[permissionId(section, rowIndex, key)] = grant ? Boolean(grant[col]) : false;
+          });
+        });
+      });
+      setLivePermissions(next);
+      setSearched(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not load permissions";
+      toast.error(message);
+    }
+  };
+
+  const saveSection = async (section: SectionKey) => {
+    if (!isAuthenticated) {
+      toast.success(`${section} access updated`);
+      return;
+    }
+    const groupId = liveGroups.find((g) => g.name === group)?.id;
+    if (!groupId || !profile) return toast.error("Sign in as a tenant user to save");
+    const grants: SaveGrant[] = [];
+    accessSections[section].forEach((item, rowIndex) => {
+      const moduleId = moduleIdBySlug[slugFor(section, item.description)];
+      if (!moduleId) return;
+      grants.push({
+        module_id: moduleId,
+        all_access: permissions[permissionId(section, rowIndex, "allAccess")] ?? false,
+        can_add: permissions[permissionId(section, rowIndex, "add")] ?? false,
+        can_modify: permissions[permissionId(section, rowIndex, "modify")] ?? false,
+        can_delete: permissions[permissionId(section, rowIndex, "delete")] ?? false,
+        can_list: permissions[permissionId(section, rowIndex, "list")] ?? false,
+        can_search: permissions[permissionId(section, rowIndex, "search")] ?? false,
+      });
+    });
+    try {
+      await saveGroupPermissions(profile.tenant_id, groupId, grants);
+      toast.success(`${section} access saved`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Save failed (permission denied?)";
+      toast.error(message);
+    }
   };
 
   const toggleSection = (section: SectionKey) => {
@@ -285,37 +409,55 @@ function AccessRightsPage() {
     );
   };
 
+  const applyPermissions = (
+    updater: (prev: Record<string, boolean>) => Record<string, boolean>,
+  ) => {
+    if (isAuthenticated) {
+      setLivePermissions((prev) => updater(prev));
+      return;
+    }
+    if (!group) return;
+    setGroupPermissions((current) => ({
+      ...current,
+      [group as GroupName]: updater(current[group as GroupName] ?? current.BS),
+    }));
+  };
+
   const setSectionAccess = (section: SectionKey, checked: boolean) => {
     if (!group) return;
-    setGroupPermissions((current) => {
-      const nextGroupPermissions = { ...current[group] };
+    applyPermissions((prev) => {
+      const next = { ...prev };
       accessSections[section].forEach((_, rowIndex) => {
         permissionKeys.forEach((key) => {
-          nextGroupPermissions[permissionId(section, rowIndex, key)] = checked;
+          next[permissionId(section, rowIndex, key)] = checked;
         });
       });
-      return { ...current, [group]: nextGroupPermissions };
+      return next;
     });
   };
 
-  const updateCell = (section: SectionKey, rowIndex: number, key: PermissionKey, checked: boolean) => {
+  const updateCell = (
+    section: SectionKey,
+    rowIndex: number,
+    key: PermissionKey,
+    checked: boolean,
+  ) => {
     if (!group) return;
-    setGroupPermissions((current) => {
-      const currentGroupPermissions = current[group];
-      const nextGroupPermissions = { ...currentGroupPermissions, [permissionId(section, rowIndex, key)]: checked };
+    applyPermissions((prev) => {
+      const next = { ...prev, [permissionId(section, rowIndex, key)]: checked };
       if (key === "allAccess") {
         permissionKeys.forEach((permissionKey) => {
-          nextGroupPermissions[permissionId(section, rowIndex, permissionKey)] = checked;
+          next[permissionId(section, rowIndex, permissionKey)] = checked;
         });
       } else if (!checked) {
-        nextGroupPermissions[permissionId(section, rowIndex, "allAccess")] = false;
+        next[permissionId(section, rowIndex, "allAccess")] = false;
       } else {
         const childKeys = permissionKeys.filter((permissionKey) => permissionKey !== "allAccess");
-        nextGroupPermissions[permissionId(section, rowIndex, "allAccess")] = childKeys.every((permissionKey) =>
-          permissionKey === key ? checked : currentGroupPermissions[permissionId(section, rowIndex, permissionKey)],
+        next[permissionId(section, rowIndex, "allAccess")] = childKeys.every((permissionKey) =>
+          permissionKey === key ? checked : prev[permissionId(section, rowIndex, permissionKey)],
         );
       }
-      return { ...current, [group]: nextGroupPermissions };
+      return next;
     });
   };
 
@@ -331,12 +473,12 @@ function AccessRightsPage() {
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex w-44 flex-col gap-1 text-xs font-medium text-foreground">
             Group
-            <Select value={group} onValueChange={(value) => setGroup(value as GroupName)}>
+            <Select value={group} onValueChange={(value) => setGroup(value)}>
               <SelectTrigger className="h-9">
                 <SelectValue placeholder={selectedGroup} />
               </SelectTrigger>
               <SelectContent>
-                {groups.map((item) => (
+                {groupOptions.map((item) => (
                   <SelectItem key={item} value={item}>
                     {item}
                   </SelectItem>
@@ -344,11 +486,17 @@ function AccessRightsPage() {
               </SelectContent>
             </Select>
           </label>
-          <Button onClick={runSearch} className="h-9 rounded-full bg-slate-600 px-8 text-white hover:bg-slate-700">
+          <Button
+            onClick={() => void runSearch()}
+            className="h-9 rounded-full bg-slate-600 px-8 text-white hover:bg-slate-700"
+          >
             Search
           </Button>
           {searched ? (
-            <Button onClick={() => toast.success("Print queued")} className="h-9 rounded-full bg-sky-500 px-8 text-white hover:bg-sky-600">
+            <Button
+              onClick={() => toast.success("Print queued")}
+              className="h-9 rounded-full bg-sky-500 px-8 text-white hover:bg-sky-600"
+            >
               <Printer className="mr-2 h-4 w-4" />
               Print
             </Button>
@@ -368,6 +516,7 @@ function AccessRightsPage() {
               onToggle={() => toggleSection(section)}
               onSetSectionAccess={(checked) => setSectionAccess(section, checked)}
               onUpdateCell={(rowIndex, key, checked) => updateCell(section, rowIndex, key, checked)}
+              onSave={() => saveSection(section)}
             />
           ))}
         </div>
@@ -384,6 +533,7 @@ function AccessSection({
   onToggle,
   onSetSectionAccess,
   onUpdateCell,
+  onSave,
 }: {
   section: SectionKey;
   items: AccessItem[];
@@ -392,6 +542,7 @@ function AccessSection({
   onToggle: () => void;
   onSetSectionAccess: (checked: boolean) => void;
   onUpdateCell: (rowIndex: number, key: PermissionKey, checked: boolean) => void;
+  onSave: () => void;
 }) {
   const allChecked = items.every((_, rowIndex) =>
     permissionKeys.every((key) => permissions[permissionId(section, rowIndex, key)]),
@@ -408,9 +559,15 @@ function AccessSection({
           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           {section}
         </span>
-        <label className="flex items-center gap-2 text-xs font-normal" onClick={(event) => event.stopPropagation()}>
+        <label
+          className="flex items-center gap-2 text-xs font-normal"
+          onClick={(event) => event.stopPropagation()}
+        >
           <span>Un Check All</span>
-          <Checkbox checked={allChecked} onCheckedChange={(value) => onSetSectionAccess(Boolean(value))} />
+          <Checkbox
+            checked={allChecked}
+            onCheckedChange={(value) => onSetSectionAccess(Boolean(value))}
+          />
         </label>
       </button>
 
@@ -450,7 +607,7 @@ function AccessSection({
           </div>
           <div className="flex justify-end border-t px-3 py-2">
             <Button
-              onClick={() => toast.success(`${section} access updated`)}
+              onClick={onSave}
               className="h-8 rounded-full bg-green-500 px-6 text-white hover:bg-green-600"
             >
               Update

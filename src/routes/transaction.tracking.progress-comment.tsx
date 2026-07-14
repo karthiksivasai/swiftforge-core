@@ -11,6 +11,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { FieldWrapper, MasterBreadcrumb } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import { toErrorMessage } from "@/lib/masters/screen";
+import { addTrackingComment, addTrackingProgress } from "@/lib/transactions/resources/tracking";
+import { trackingCommentSchema, trackingProgressSchema } from "@/lib/transactions/schemas/tracking";
 
 type LookupPair = { code: string; name: string };
 type TabMode = "progress" | "comment";
@@ -68,30 +72,34 @@ export const Route = createFileRoute("/transaction/tracking/progress-comment")({
   head: () => ({
     meta: [
       { title: "Progress / Comment — Transaction — Courier ERP" },
-      { name: "description", content: "Add shipment progress updates and comments for AWB tracking." },
+      {
+        name: "description",
+        content: "Add shipment progress updates and comments for AWB tracking.",
+      },
     ],
   }),
   component: ProgressCommentPage,
 });
 
 function ProgressCommentPage() {
+  const { isAuthenticated: authed } = useAuth();
   const [mode, setMode] = useState<TabMode>("progress");
   const [progressForm, setProgressForm] = useState<ProgressForm>(emptyProgressForm());
   const [commentForm, setCommentForm] = useState<CommentForm>(emptyCommentForm());
   const [progressRecords, setProgressRecords] = useState<ProgressRecord[]>([]);
   const [commentRecords, setCommentRecords] = useState<CommentRecord[]>([]);
+  const [saving, setSaving] = useState(false);
 
   const patchProgress = (patch: Partial<ProgressForm>) =>
     setProgressForm((f) => ({ ...f, ...patch }));
 
-  const patchComment = (patch: Partial<CommentForm>) =>
-    setCommentForm((f) => ({ ...f, ...patch }));
+  const patchComment = (patch: Partial<CommentForm>) => setCommentForm((f) => ({ ...f, ...patch }));
 
   const switchMode = (next: TabMode) => {
     setMode(next);
   };
 
-  const handleProgressSave = () => {
+  const handleProgressSave = async () => {
     if (!progressForm.progressDate.trim()) return toast.error("Progress Date is required");
     if (!progressForm.progressTime.trim()) return toast.error("Progress Time is required");
     if (!progressForm.status.code.trim() && !progressForm.status.name.trim()) {
@@ -103,17 +111,52 @@ function ProgressCommentPage() {
     const awb = progressForm.awbNo.trim();
     if (!awb) return toast.error("AWB No. is required");
 
-    setProgressRecords((prev) => [
-      {
-        ...progressForm,
-        awbNo: awb,
-        id: crypto.randomUUID(),
-        savedAt: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-    patchProgress({ awbNo: "", deliveryRemark: "" });
-    toast.success(`Progress saved for AWB ${awb}`);
+    if (!authed) {
+      setProgressRecords((prev) => [
+        {
+          ...progressForm,
+          awbNo: awb,
+          id: crypto.randomUUID(),
+          savedAt: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      patchProgress({ awbNo: "", deliveryRemark: "" });
+      return toast.success(`Progress saved for AWB ${awb} (demo)`);
+    }
+
+    const parsed = trackingProgressSchema.safeParse({
+      event_date: progressForm.progressDate,
+      event_time: progressForm.progressTime,
+      exception_code: progressForm.status.code || undefined,
+      status_text: progressForm.status.name || progressForm.status.code || undefined,
+      service_center_code: progressForm.serviceCentre.code || undefined,
+      remark: progressForm.deliveryRemark || undefined,
+      allow_if_delivered: progressForm.allowAddOnceDelivered,
+    });
+    if (!parsed.success) {
+      return toast.error(parsed.error.issues[0]?.message ?? "Invalid progress fields");
+    }
+
+    setSaving(true);
+    try {
+      await addTrackingProgress({ awb_no: awb, fields: parsed.data });
+      setProgressRecords((prev) => [
+        {
+          ...progressForm,
+          awbNo: awb,
+          id: crypto.randomUUID(),
+          savedAt: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      patchProgress({ awbNo: "", deliveryRemark: "" });
+      toast.success(`Progress saved for AWB ${awb}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleProgressReset = () => {
@@ -121,24 +164,58 @@ function ProgressCommentPage() {
     toast.success("Progress form reset");
   };
 
-  const handleCommentSave = () => {
+  const handleCommentSave = async () => {
     if (!commentForm.commentDate.trim()) return toast.error("Comment Date is required");
     if (!commentForm.commentTime.trim()) return toast.error("Comment Time is required");
     const awb = commentForm.awbNo.trim();
     if (!awb) return toast.error("AWB No. is required");
     if (!commentForm.comment.trim()) return toast.error("Comment is required");
 
-    setCommentRecords((prev) => [
-      {
-        ...commentForm,
-        awbNo: awb,
-        id: crypto.randomUUID(),
-        savedAt: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-    patchComment({ awbNo: "", comment: "" });
-    toast.success(`Comment saved for AWB ${awb}`);
+    if (!authed) {
+      setCommentRecords((prev) => [
+        {
+          ...commentForm,
+          awbNo: awb,
+          id: crypto.randomUUID(),
+          savedAt: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      patchComment({ awbNo: "", comment: "" });
+      return toast.success(`Comment saved for AWB ${awb} (demo)`);
+    }
+
+    const parsed = trackingCommentSchema.safeParse({
+      comment: commentForm.comment,
+      commented_at: `${commentForm.commentDate}T${
+        commentForm.commentTime.length === 4
+          ? `${commentForm.commentTime.slice(0, 2)}:${commentForm.commentTime.slice(2)}:00`
+          : "00:00:00"
+      }`,
+    });
+    if (!parsed.success) {
+      return toast.error(parsed.error.issues[0]?.message ?? "Invalid comment");
+    }
+
+    setSaving(true);
+    try {
+      await addTrackingComment({ awb_no: awb, fields: parsed.data });
+      setCommentRecords((prev) => [
+        {
+          ...commentForm,
+          awbNo: awb,
+          id: crypto.randomUUID(),
+          savedAt: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      patchComment({ awbNo: "", comment: "" });
+      toast.success(`Comment saved for AWB ${awb}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCommentReset = () => {
@@ -151,9 +228,12 @@ function ProgressCommentPage() {
       <MasterBreadcrumb trail={["Transaction", "Tracking / Delivery", "Progress / Comment"]} />
 
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Progress / Comment</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          Progress / Comment
+        </h1>
         <p className="text-sm text-muted-foreground">
           Record shipment progress events or add comments against an AWB number.
+          {authed ? " Connected to live backend." : " Demo mode — sign in for live tracking."}
         </p>
       </div>
 
@@ -236,12 +316,15 @@ function ProgressCommentPage() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
-                      handleProgressSave();
+                      void handleProgressSave();
                     }
                   }}
                 />
               </FieldWrapper>
-              <FieldWrapper label="Allow Add Progress Once Delivered" className="md:col-span-2 xl:col-span-2">
+              <FieldWrapper
+                label="Allow Add Progress Once Delivered"
+                className="md:col-span-2 xl:col-span-2"
+              >
                 <label className="flex h-9 items-center gap-2">
                   <Checkbox
                     checked={progressForm.allowAddOnceDelivered}
@@ -249,14 +332,17 @@ function ProgressCommentPage() {
                       patchProgress({ allowAddOnceDelivered: checked === true })
                     }
                   />
-                  <span className="text-sm text-muted-foreground">Allow Add Progress Once Delivered</span>
+                  <span className="text-sm text-muted-foreground">
+                    Allow Add Progress Once Delivered
+                  </span>
                 </label>
               </FieldWrapper>
             </div>
 
             <div className="flex flex-wrap justify-end gap-2">
               <Button
-                onClick={handleProgressSave}
+                onClick={() => void handleProgressSave()}
+                disabled={saving}
                 className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90"
               >
                 Save
@@ -298,7 +384,7 @@ function ProgressCommentPage() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
-                      handleCommentSave();
+                      void handleCommentSave();
                     }
                   }}
                 />
@@ -313,7 +399,8 @@ function ProgressCommentPage() {
 
             <div className="flex flex-wrap justify-end gap-2">
               <Button
-                onClick={handleCommentSave}
+                onClick={() => void handleCommentSave()}
+                disabled={saving}
                 className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90"
               >
                 Save

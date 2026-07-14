@@ -53,12 +53,28 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import {
+  salesExecutivesResource,
+  type SalesExecutiveRow as SalesExecDbRow,
+} from "@/lib/masters/resources/salesExecutives";
+import {
+  salesExecutiveCreateSchema,
+  salesExecutiveUpdateSchema,
+} from "@/lib/masters/schemas/salesExecutives";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
 
 type SalesExecRow = {
   id: string;
   code: string;
   name: string;
   commission: string;
+  row_version?: number;
 };
 
 const SEED_DATA: Omit<SalesExecRow, "id">[] = [
@@ -79,7 +95,10 @@ export const Route = createFileRoute("/master/sales/sales-executive")({
   head: () => ({
     meta: [
       { title: "Sales Executive — Master — Courier ERP" },
-      { name: "description", content: "Manage the sales executive master with commission rates." },
+      {
+        name: "description",
+        content: "Manage the sales executive master with commission rates.",
+      },
     ],
   }),
   component: SalesExecutivePage,
@@ -89,15 +108,46 @@ function emptyRow(): Omit<SalesExecRow, "id"> {
   return { code: "", name: "", commission: "0" };
 }
 
+function rowToView(r: SalesExecDbRow): SalesExecRow {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    commission: r.commission == null ? "0" : String(r.commission),
+    row_version: r.row_version,
+  };
+}
+
+function toRaw(form: Omit<SalesExecRow, "id">) {
+  const c = form.commission.trim();
+  return {
+    code: form.code,
+    name: form.name,
+    commission: c === "" ? null : Number(c),
+  };
+}
+
 function SalesExecutivePage() {
-  const [rows, setRows] = useState<SalesExecRow[]>(SEED);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(salesExecutivesResource);
+  const live = useMasterList(salesExecutivesResource, { enabled: authed });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<SalesExecRow[]>(SEED);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SalesExecRow | null>(null);
   const [form, setForm] = useState<Omit<SalesExecRow, "id">>(emptyRow());
   const [deleteTarget, setDeleteTarget] = useState<SalesExecRow | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: SalesExecRow[] = authed ? (live.rows as SalesExecDbRow[]).map(rowToView) : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -121,36 +171,68 @@ function SalesExecutivePage() {
 
   const openEdit = (row: SalesExecRow) => {
     setEditing(row);
-    const { id: _id, ...rest } = row;
+    const { id: _id, row_version: _rv, ...rest } = row;
     setForm(rest);
     setOpen(true);
   };
 
-  const handleSave = () => {
-    if (!form.code.trim()) {
-      toast.error("Code is required");
+  const handleSave = async () => {
+    const raw = toRaw(form);
+    if (authed) {
+      setSaving(true);
+      try {
+        if (editing) {
+          const patch = salesExecutiveUpdateSchema.parse(raw);
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch,
+          });
+          toast.success("Sales executive updated");
+        } else {
+          const values = salesExecutiveCreateSchema.parse(raw);
+          await rc.create.mutateAsync(values);
+          toast.success("Sales executive added");
+        }
+        setOpen(false);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save sales executive"));
+      } finally {
+        setSaving(false);
+      }
       return;
     }
-    if (!form.name.trim()) {
-      toast.error("Name is required");
+    try {
+      if (editing) salesExecutiveUpdateSchema.parse(raw);
+      else salesExecutiveCreateSchema.parse(raw);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Please fix the form"));
       return;
     }
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
       toast.success("Sales executive updated");
     } else {
-      const id = crypto.randomUUID();
-      setRows((prev) => [{ id, ...form }, ...prev]);
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), ...form }, ...prev]);
       toast.success("Sales executive added");
     }
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
     const row = deleteTarget;
-    setRows((prev) => prev.filter((r) => r.id !== row.id));
-    toast.success(`Deleted ${row.code}`);
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.code}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete sales executive"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.code}`);
+    }
     setDeleteTarget(null);
   };
 
@@ -159,9 +241,7 @@ function SalesExecutivePage() {
     const csv = [
       header.join(","),
       ...rows.map((r) =>
-        [r.code, r.name, r.commission]
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-          .join(","),
+        [r.code, r.name, r.commission].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
       ),
     ].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -184,55 +264,46 @@ function SalesExecutivePage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) {
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) {
         toast.error("File is empty");
         return;
       }
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "";
-        let inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          salesExecutivesResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
       const imported: SalesExecRow[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const [code, name, commission] = parseRow(lines[i]);
-        if (!code?.trim()) continue;
+      for (const rec of mapCsvToImportRows(parsed.rows, salesExecutivesResource.importColumns)) {
+        if (!rec.code?.trim()) continue;
         imported.push({
           id: crypto.randomUUID(),
-          code: code.trim(),
-          name: (name || "").trim(),
-          commission: (commission || "0").trim(),
+          code: rec.code.trim(),
+          name: (rec.name || "").trim(),
+          commission: (rec.commission || "0").trim(),
         });
       }
       if (imported.length === 0) {
         toast.error("No valid rows found");
         return;
       }
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
   const handleRefresh = () => {
     setSearch("");
     setPage(1);
+    if (authed)
+      queryClient.invalidateQueries({ queryKey: masterKeys.all(salesExecutivesResource.key) });
     toast.success("Refreshed");
   };
 
@@ -281,9 +352,11 @@ function SalesExecutivePage() {
               <IconButton label="Export" onClick={handleExport}>
                 <Download className="h-4 w-4" />
               </IconButton>
-              <IconButton label="Import" onClick={handleImport}>
-                <Upload className="h-4 w-4" />
-              </IconButton>
+              {canAdd ? (
+                <IconButton label="Import" onClick={handleImport}>
+                  <Upload className="h-4 w-4" />
+                </IconButton>
+              ) : null}
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>
@@ -303,10 +376,12 @@ function SalesExecutivePage() {
                 className="h-9 w-56 pl-8"
               />
             </div>
-            <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add
-            </Button>
+            {canAdd ? (
+              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -335,24 +410,28 @@ function SalesExecutivePage() {
                     <TableCell>{r.commission}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          onClick={() => openEdit(r)}
-                          aria-label={`Edit ${r.code}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(r)}
-                          aria-label={`Delete ${r.code}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canModify ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(r)}
+                            aria-label={`Edit ${r.code}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        {canDelete ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(r)}
+                            aria-label={`Delete ${r.code}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -380,10 +459,7 @@ function SalesExecutivePage() {
             >
               <ChevronRight className="h-4 w-4" />
             </PagerButton>
-            <PagerButton
-              disabled={currentPage === totalPages}
-              onClick={() => setPage(totalPages)}
-            >
+            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
               <ChevronsRight className="h-4 w-4" />
             </PagerButton>
           </div>
@@ -426,8 +502,12 @@ function SalesExecutivePage() {
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
-              Save
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              {saving ? "Saving…" : "Save"}
             </Button>
             <Button variant="destructive" onClick={() => setOpen(false)}>
               Cancel
@@ -443,7 +523,8 @@ function SalesExecutivePage() {
             <AlertDialogDescription>
               This will permanently remove{" "}
               <span className="font-medium text-foreground">{deleteTarget?.code}</span>
-              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the sales executive master. This action cannot be undone.
+              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the sales executive master.
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

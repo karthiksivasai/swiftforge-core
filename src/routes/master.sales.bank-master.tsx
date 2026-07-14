@@ -60,6 +60,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { banksResource, type BankRow as BankDbRow } from "@/lib/masters/resources/banks";
+import { bankCreateSchema, bankUpdateSchema } from "@/lib/masters/schemas/banks";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
 
 type BankStatus = "Active" | "In-Active";
 type BankRow = {
@@ -67,6 +76,7 @@ type BankRow = {
   code: string;
   name: string;
   status: BankStatus;
+  row_version?: number;
 };
 
 const SEED_DATA: Omit<BankRow, "id">[] = [
@@ -88,7 +98,10 @@ export const Route = createFileRoute("/master/sales/bank-master")({
   head: () => ({
     meta: [
       { title: "Bank Master — Courier ERP" },
-      { name: "description", content: "Manage banks and payment providers used across billing and settlements." },
+      {
+        name: "description",
+        content: "Manage banks and payment providers used across billing and settlements.",
+      },
     ],
   }),
   component: BankMasterPage,
@@ -98,8 +111,31 @@ function emptyRow(): Omit<BankRow, "id"> {
   return { code: "", name: "", status: "Active" };
 }
 
+function rowToView(r: BankDbRow): BankRow {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    status: r.status === "INACTIVE" ? "In-Active" : "Active",
+    row_version: r.row_version,
+  };
+}
+
+function toRaw(form: Omit<BankRow, "id">) {
+  return {
+    code: form.code,
+    name: form.name,
+    status: form.status === "In-Active" ? "INACTIVE" : "ACTIVE",
+  };
+}
+
 function BankMasterPage() {
-  const [rows, setRows] = useState<BankRow[]>(SEED);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(banksResource);
+  const live = useMasterList(banksResource, { enabled: authed });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<BankRow[]>(SEED);
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState({ code: "", name: "", status: "" });
   const [page, setPage] = useState(1);
@@ -107,15 +143,26 @@ function BankMasterPage() {
   const [editing, setEditing] = useState<BankRow | null>(null);
   const [form, setForm] = useState<Omit<BankRow, "id">>(emptyRow());
   const [deleteTarget, setDeleteTarget] = useState<BankRow | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: BankRow[] = authed ? (live.rows as BankDbRow[]).map(rowToView) : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
-      if (q && ![r.code, r.name, r.status].some((v) => String(v).toLowerCase().includes(q))) return false;
-      if (colFilters.code && !r.code.toLowerCase().includes(colFilters.code.toLowerCase())) return false;
-      if (colFilters.name && !r.name.toLowerCase().includes(colFilters.name.toLowerCase())) return false;
-      if (colFilters.status && !r.status.toLowerCase().includes(colFilters.status.toLowerCase())) return false;
+      if (q && ![r.code, r.name, r.status].some((v) => String(v).toLowerCase().includes(q)))
+        return false;
+      if (colFilters.code && !r.code.toLowerCase().includes(colFilters.code.toLowerCase()))
+        return false;
+      if (colFilters.name && !r.name.toLowerCase().includes(colFilters.name.toLowerCase()))
+        return false;
+      if (colFilters.status && !r.status.toLowerCase().includes(colFilters.status.toLowerCase()))
+        return false;
       return true;
     });
   }, [rows, search, colFilters]);
@@ -134,36 +181,68 @@ function BankMasterPage() {
 
   const openEdit = (row: BankRow) => {
     setEditing(row);
-    const { id: _id, ...rest } = row;
+    const { id: _id, row_version: _rv, ...rest } = row;
     setForm(rest);
     setOpen(true);
   };
 
-  const handleSave = () => {
-    if (!form.code.trim()) {
-      toast.error("Bank Code is required");
+  const handleSave = async () => {
+    const raw = toRaw(form);
+    if (authed) {
+      setSaving(true);
+      try {
+        if (editing) {
+          const patch = bankUpdateSchema.parse(raw);
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch,
+          });
+          toast.success("Bank updated");
+        } else {
+          const values = bankCreateSchema.parse(raw);
+          await rc.create.mutateAsync(values);
+          toast.success("Bank added");
+        }
+        setOpen(false);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save bank"));
+      } finally {
+        setSaving(false);
+      }
       return;
     }
-    if (!form.name.trim()) {
-      toast.error("Bank Name is required");
+    try {
+      if (editing) bankUpdateSchema.parse(raw);
+      else bankCreateSchema.parse(raw);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Please fix the form"));
       return;
     }
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
       toast.success("Bank updated");
     } else {
-      const id = crypto.randomUUID();
-      setRows((prev) => [{ id, ...form }, ...prev]);
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), ...form }, ...prev]);
       toast.success("Bank added");
     }
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
     const row = deleteTarget;
-    setRows((prev) => prev.filter((r) => r.id !== row.id));
-    toast.success(`Deleted ${row.code}`);
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.code}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete bank"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.code}`);
+    }
     setDeleteTarget(null);
   };
 
@@ -172,9 +251,7 @@ function BankMasterPage() {
     const csv = [
       header.join(","),
       ...rows.map((r) =>
-        [r.code, r.name, r.status]
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-          .join(","),
+        [r.code, r.name, r.status].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
       ),
     ].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -197,50 +274,39 @@ function BankMasterPage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) {
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) {
         toast.error("File is empty");
         return;
       }
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "";
-        let inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          banksResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
       const imported: BankRow[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const [code, name, status] = parseRow(lines[i]);
-        if (!code?.trim()) continue;
-        const st = (status || "").trim().toLowerCase() === "in-active" ? "In-Active" : "Active";
+      for (const rec of mapCsvToImportRows(parsed.rows, banksResource.importColumns)) {
+        if (!rec.code?.trim()) continue;
+        const st = (rec.status || "").trim().toUpperCase();
         imported.push({
           id: crypto.randomUUID(),
-          code: code.trim(),
-          name: (name || "").trim(),
-          status: st as BankStatus,
+          code: rec.code.trim(),
+          name: (rec.name || "").trim(),
+          status: st === "INACTIVE" || st === "IN-ACTIVE" ? "In-Active" : "Active",
         });
       }
       if (imported.length === 0) {
         toast.error("No valid rows found");
         return;
       }
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
@@ -248,6 +314,7 @@ function BankMasterPage() {
     setSearch("");
     setColFilters({ code: "", name: "", status: "" });
     setPage(1);
+    if (authed) queryClient.invalidateQueries({ queryKey: masterKeys.all(banksResource.key) });
     toast.success("Refreshed");
   };
 
@@ -296,9 +363,11 @@ function BankMasterPage() {
               <IconButton label="Export" onClick={handleExport}>
                 <Download className="h-4 w-4" />
               </IconButton>
-              <IconButton label="Import" onClick={handleImport}>
-                <Upload className="h-4 w-4" />
-              </IconButton>
+              {canAdd ? (
+                <IconButton label="Import" onClick={handleImport}>
+                  <Upload className="h-4 w-4" />
+                </IconButton>
+              ) : null}
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>
@@ -318,10 +387,12 @@ function BankMasterPage() {
                 className="h-9 w-56 pl-8"
               />
             </div>
-            <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add
-            </Button>
+            {canAdd ? (
+              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -338,7 +409,10 @@ function BankMasterPage() {
                 <TableHead className="py-2">
                   <Input
                     value={colFilters.code}
-                    onChange={(e) => { setColFilters((f) => ({ ...f, code: e.target.value })); setPage(1); }}
+                    onChange={(e) => {
+                      setColFilters((f) => ({ ...f, code: e.target.value }));
+                      setPage(1);
+                    }}
                     placeholder="Bank Code"
                     className="h-8"
                   />
@@ -346,7 +420,10 @@ function BankMasterPage() {
                 <TableHead className="py-2">
                   <Input
                     value={colFilters.name}
-                    onChange={(e) => { setColFilters((f) => ({ ...f, name: e.target.value })); setPage(1); }}
+                    onChange={(e) => {
+                      setColFilters((f) => ({ ...f, name: e.target.value }));
+                      setPage(1);
+                    }}
                     placeholder="Bank Name"
                     className="h-8"
                   />
@@ -354,7 +431,10 @@ function BankMasterPage() {
                 <TableHead className="py-2">
                   <Input
                     value={colFilters.status}
-                    onChange={(e) => { setColFilters((f) => ({ ...f, status: e.target.value })); setPage(1); }}
+                    onChange={(e) => {
+                      setColFilters((f) => ({ ...f, status: e.target.value }));
+                      setPage(1);
+                    }}
                     placeholder="Status"
                     className="h-8"
                   />
@@ -387,24 +467,28 @@ function BankMasterPage() {
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          onClick={() => openEdit(r)}
-                          aria-label={`Edit ${r.code}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(r)}
-                          aria-label={`Delete ${r.code}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canModify ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(r)}
+                            aria-label={`Edit ${r.code}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        {canDelete ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(r)}
+                            aria-label={`Delete ${r.code}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -432,10 +516,7 @@ function BankMasterPage() {
             >
               <ChevronRight className="h-4 w-4" />
             </PagerButton>
-            <PagerButton
-              disabled={currentPage === totalPages}
-              onClick={() => setPage(totalPages)}
-            >
+            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
               <ChevronsRight className="h-4 w-4" />
             </PagerButton>
           </div>
@@ -482,8 +563,12 @@ function BankMasterPage() {
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
-              Save
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              {saving ? "Saving…" : "Save"}
             </Button>
             <Button variant="destructive" onClick={() => setOpen(false)}>
               Cancel
@@ -499,7 +584,8 @@ function BankMasterPage() {
             <AlertDialogDescription>
               This will permanently remove{" "}
               <span className="font-medium text-foreground">{deleteTarget?.code}</span>
-              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the bank master. This action cannot be undone.
+              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the bank master. This
+              action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

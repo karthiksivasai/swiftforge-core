@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Search, Trash2, Plus, Upload, Trash } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -24,6 +25,20 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { useLookup, type LookupItem, type LookupKey } from "@/lib/masters/core/lookup";
+import {
+  localBranchesResource,
+  type LocalBranchRow,
+} from "@/lib/masters/resources/localBranches";
+import {
+  localBranchFormToPayload,
+  rowToLocalBranchForm,
+} from "@/lib/masters/localBranchUiMap";
+import { useMasterList, toErrorMessage } from "@/lib/masters/screen";
 
 type PincodeRow = { name: string; code: string };
 type BillingStateRow = { name: string; code: string };
@@ -55,6 +70,106 @@ const BILLING_STATE_DATA: BillingStateRow[] = [
   { name: "Rajasthan", code: "RJ" },
   { name: "Madhya Pradesh", code: "MP" },
 ];
+
+function LiveLookupDialog({
+  open,
+  onOpenChange,
+  lookupKey,
+  title,
+  nameHeader,
+  codeHeader,
+  onSelect,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  lookupKey: LookupKey;
+  title: string;
+  nameHeader: string;
+  codeHeader: string;
+  onSelect: (row: LookupItem) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const { data, isFetching } = useLookup(lookupKey, query, { enabled: open });
+  const filtered = data ?? [];
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        onOpenChange(v);
+        if (!v) setQuery("");
+      }}
+    >
+      <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
+        <DialogHeader className="flex-row items-center justify-between bg-sidebar px-4 py-3 space-y-0">
+          <DialogTitle className="text-sidebar-foreground text-sm font-medium">{title}</DialogTitle>
+        </DialogHeader>
+        <div className="p-4 space-y-3">
+          <div className="flex justify-end">
+            <div className="flex items-center gap-2">
+              <Label className="text-sm">Search:</Label>
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="h-8 w-56"
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="overflow-hidden rounded-md border border-border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-sidebar hover:bg-sidebar">
+                  <TableHead className="text-sidebar-foreground">{nameHeader}</TableHead>
+                  <TableHead className="text-sidebar-foreground">{codeHeader}</TableHead>
+                  <TableHead className="text-sidebar-foreground text-center w-32">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isFetching && filtered.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-6">
+                      Loading…
+                    </TableCell>
+                  </TableRow>
+                ) : filtered.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-6">
+                      No data available in table
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filtered.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell>{row.name}</TableCell>
+                      <TableCell>{row.code}</TableCell>
+                      <TableCell className="text-center">
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 text-white hover:bg-emerald-600/90 h-7"
+                          onClick={() => {
+                            onSelect(row);
+                            onOpenChange(false);
+                            setQuery("");
+                          }}
+                        >
+                          Select
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {filtered.length === 0 ? "No Record Found" : `${filtered.length} record${filtered.length === 1 ? "" : "s"} found`}
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function LookupDialog<T extends { name: string; code: string }>({
   open,
@@ -339,6 +454,18 @@ function formatDate(iso: string) {
 }
 
 function LocalBranchPage() {
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(localBranchesResource);
+  const live = useMasterList(localBranchesResource, {
+    enabled: authed,
+    labelRefs: [
+      { idField: "branch_id", table: "branches", as: "branch" },
+      { idField: "state_id", table: "states", as: "state" },
+      { idField: "billing_state_id", table: "states", as: "billing_state" },
+    ],
+  });
+  const queryClient = useQueryClient();
+
   const [company, setCompany] = useState<CompanyDetails>(DEFAULT_COMPANY);
   const [terms, setTerms] = useState<Terms>(DEFAULT_TERMS);
   const [bank, setBank] = useState<BankDetails>(DEFAULT_BANK);
@@ -349,16 +476,91 @@ function LocalBranchPage() {
   const [fyForm, setFyForm] = useState({ fromDate: "", toDate: "", finYear: "" });
   const [pinLookupOpen, setPinLookupOpen] = useState(false);
   const [stateLookupOpen, setStateLookupOpen] = useState(false);
+  const [branchLookupOpen, setBranchLookupOpen] = useState(false);
+  const [recordId, setRecordId] = useState<string | null>(null);
+  const [rowVersion, setRowVersion] = useState<number | undefined>();
+  const [stateId, setStateId] = useState("");
+  const [billingStateId, setBillingStateId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [serviceablePincodes, setServiceablePincodes] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
+  const canSave = !authed || (recordId ? rc.perms.canModify : rc.perms.canAdd);
+
+  useEffect(() => {
+    if (!authed) {
+      setHydrated(false);
+      return;
+    }
+    if (live.isLoading || hydrated) return;
+    const row = live.rows[0] as (LocalBranchRow & Record<string, unknown>) | undefined;
+    if (!row) {
+      setHydrated(true);
+      return;
+    }
+    const form = rowToLocalBranchForm(row);
+    setRecordId(row.id);
+    setRowVersion(row.row_version);
+    setCompany(form.company);
+    setTerms(form.terms);
+    setBank(form.bank);
+    setVoucher(form.voucher);
+    setFinYears(form.finYears.length ? form.finYears : DEFAULT_FIN_YEARS);
+    setCompanyLogo(form.companyLogo);
+    setSignatoryLogo(form.signatoryLogo);
+    setStateId(form.stateId);
+    setBillingStateId(form.billingStateId);
+    setBranchId(form.branchId);
+    setServiceablePincodes(form.serviceablePincodes);
+    setHydrated(true);
+  }, [authed, live.isLoading, live.rows, hydrated]);
 
   const setC = (k: keyof CompanyDetails) => (v: string) => setCompany((c) => ({ ...c, [k]: v }));
   const setB = (k: keyof BankDetails) => (v: string) => setBank((b) => ({ ...b, [k]: v }));
   const setV = (k: keyof Voucher) => (v: string) => setVoucher((s) => ({ ...s, [k]: v }));
   const setT = (k: string) => (v: string) => setTerms((t) => ({ ...t, [k]: v }));
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!company.branchCode.trim()) return toast.error("Branch Code is required");
     if (!company.name.trim()) return toast.error("Name is required");
-    toast.success("Local branch saved");
+    if (!authed) {
+      toast.success("Local branch saved");
+      return;
+    }
+    if (!canSave) return toast.error("You do not have permission to save this record");
+
+    setSaving(true);
+    try {
+      const payload = localBranchFormToPayload({
+        company,
+        terms,
+        bank,
+        voucher,
+        finYears,
+        companyLogo,
+        signatoryLogo,
+        stateId,
+        billingStateId,
+        branchId,
+        serviceablePincodes,
+      });
+      if (recordId) {
+        const updated = await rc.update(recordId, payload, rowVersion ?? 0);
+        setRowVersion(updated.row_version);
+      } else {
+        const created = await rc.create(payload);
+        setRecordId(created.id);
+        setRowVersion(created.row_version);
+      }
+      setHydrated(false);
+      await queryClient.invalidateQueries({ queryKey: masterKeys.list(localBranchesResource.key) });
+      toast.success("Local branch saved");
+    } catch (err) {
+      toast.error(toErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleReset = () => {
@@ -366,8 +568,16 @@ function LocalBranchPage() {
     setTerms(DEFAULT_TERMS);
     setBank(DEFAULT_BANK);
     setVoucher(DEFAULT_VOUCHER);
+    setFinYears(DEFAULT_FIN_YEARS);
     setCompanyLogo("");
     setSignatoryLogo("");
+    setRecordId(null);
+    setRowVersion(undefined);
+    setStateId("");
+    setBillingStateId("");
+    setBranchId("");
+    setServiceablePincodes([]);
+    setHydrated(false);
     toast.success("Form reset");
   };
 
@@ -445,7 +655,25 @@ function LocalBranchPage() {
           </div>
           <Field label="City" value={company.city} onChange={setC("city")} />
           <Field label="State" value={company.state} onChange={setC("state")} />
-          <Field label="Service Center" value={company.serviceCenter} onChange={setC("serviceCenter")} />
+          <div className="flex items-end gap-2">
+            <Field
+              label="Service Center"
+              value={company.serviceCenter}
+              onChange={setC("serviceCenter")}
+              className="flex-1"
+            />
+            {authed && (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                onClick={() => setBranchLookupOpen(true)}
+              >
+                <Search className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
           <Field label="Telephone 1" value={company.telephone1} onChange={setC("telephone1")} />
           <Field label="Telephone 2" value={company.telephone2} onChange={setC("telephone2")} />
           <Field label="Fax" value={company.fax} onChange={setC("fax")} />
@@ -552,9 +780,10 @@ function LocalBranchPage() {
       <div className="flex justify-end gap-3">
         <Button
           onClick={handleSave}
+          disabled={saving || (authed && !canSave)}
           className="bg-emerald-600 text-white hover:bg-emerald-600/90 min-w-[100px]"
         >
-          Save
+          {saving ? "Saving…" : "Save"}
         </Button>
         <Button
           onClick={handleReset}
@@ -616,31 +845,82 @@ function LocalBranchPage() {
         </div>
       </Section>
 
-      <LookupDialog
-        open={pinLookupOpen}
-        onOpenChange={setPinLookupOpen}
-        title="Pincode"
-        nameHeader="Pincode Name"
-        codeHeader="PinCode Code"
-        data={PINCODE_DATA}
-        onSelect={(row) => {
-          setCompany((c) => ({ ...c, pinCode: row.code, city: row.name }));
-          toast.success(`Selected ${row.name}`);
-        }}
-      />
-
-      <LookupDialog
-        open={stateLookupOpen}
-        onOpenChange={setStateLookupOpen}
-        title="Billing State"
-        nameHeader="State Name"
-        codeHeader="State Code"
-        data={BILLING_STATE_DATA}
-        onSelect={(row) => {
-          setCompany((c) => ({ ...c, billingState: row.name, billingStateCode: row.code }));
-          toast.success(`Selected ${row.name}`);
-        }}
-      />
+      {authed ? (
+        <>
+          <LiveLookupDialog
+            open={pinLookupOpen}
+            onOpenChange={setPinLookupOpen}
+            lookupKey="pin-code"
+            title="Pincode"
+            nameHeader="Pincode Name"
+            codeHeader="PinCode Code"
+            onSelect={(row) => {
+              setCompany((c) => ({ ...c, pinCode: row.code ?? "", city: row.name }));
+              setServiceablePincodes((pins) =>
+                row.code && !pins.includes(row.code) ? [...pins, row.code] : pins,
+              );
+              toast.success(`Selected ${row.name}`);
+            }}
+          />
+          <LiveLookupDialog
+            open={stateLookupOpen}
+            onOpenChange={setStateLookupOpen}
+            lookupKey="state"
+            title="Billing State"
+            nameHeader="State Name"
+            codeHeader="State Code"
+            onSelect={(row) => {
+              setCompany((c) => ({
+                ...c,
+                billingState: row.name,
+                billingStateCode: row.code ?? "",
+              }));
+              setBillingStateId(row.id);
+              toast.success(`Selected ${row.name}`);
+            }}
+          />
+          <LiveLookupDialog
+            open={branchLookupOpen}
+            onOpenChange={setBranchLookupOpen}
+            lookupKey="branch"
+            title="Service Centre (Branch)"
+            nameHeader="Branch Name"
+            codeHeader="Branch Code"
+            onSelect={(row) => {
+              setCompany((c) => ({ ...c, serviceCenter: row.name }));
+              setBranchId(row.id);
+              toast.success(`Selected ${row.name}`);
+            }}
+          />
+        </>
+      ) : (
+        <>
+          <LookupDialog
+            open={pinLookupOpen}
+            onOpenChange={setPinLookupOpen}
+            title="Pincode"
+            nameHeader="Pincode Name"
+            codeHeader="PinCode Code"
+            data={PINCODE_DATA}
+            onSelect={(row) => {
+              setCompany((c) => ({ ...c, pinCode: row.code, city: row.name }));
+              toast.success(`Selected ${row.name}`);
+            }}
+          />
+          <LookupDialog
+            open={stateLookupOpen}
+            onOpenChange={setStateLookupOpen}
+            title="Billing State"
+            nameHeader="State Name"
+            codeHeader="State Code"
+            data={BILLING_STATE_DATA}
+            onSelect={(row) => {
+              setCompany((c) => ({ ...c, billingState: row.name, billingStateCode: row.code }));
+              toast.success(`Selected ${row.name}`);
+            }}
+          />
+        </>
+      )}
     </div>
   );
 }

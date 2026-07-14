@@ -1,4 +1,6 @@
-import { Bell, Building2, ChevronDown, Moon, Plus, Search, Sun } from "lucide-react";
+import { Bell, Building2, ChevronDown, LogIn, Moon, Plus, Search, Sun } from "lucide-react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { toast } from "sonner";
 
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -16,10 +18,28 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useTenant } from "@/lib/tenant";
 import { useTheme } from "@/lib/theme";
+import { useAuth } from "@/lib/auth";
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 export function AppHeader() {
   const tenant = useTenant();
   const { theme, toggle } = useTheme();
+  const { isAuthenticated, profile, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const displayName = profile?.full_name || profile?.username || "Guest";
+
+  const handleSignOut = async () => {
+    await signOut();
+    toast.success("Signed out");
+    void navigate({ to: "/login" });
+  };
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/80 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-4">
@@ -75,26 +95,42 @@ export function AppHeader() {
 
         <Separator orientation="vertical" className="mx-1 h-5" />
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="gap-2 px-1.5">
-              <Avatar className="h-7 w-7">
-                <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                  SA
-                </AvatarFallback>
-              </Avatar>
-              <span className="hidden text-sm font-medium sm:inline">Suryaa</span>
-              <ChevronDown className="hidden h-3.5 w-3.5 text-muted-foreground sm:block" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>My account</DropdownMenuLabel>
-            <DropdownMenuItem disabled>Profile</DropdownMenuItem>
-            <DropdownMenuItem disabled>Preferences</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem disabled>Sign out</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {isAuthenticated ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="gap-2 px-1.5">
+                <Avatar className="h-7 w-7">
+                  <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                    {initials(displayName)}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="hidden text-sm font-medium sm:inline">{displayName}</span>
+                <ChevronDown className="hidden h-3.5 w-3.5 text-muted-foreground sm:block" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>
+                {displayName}
+                {profile?.user_type ? (
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    {profile.user_type}
+                  </span>
+                ) : null}
+              </DropdownMenuLabel>
+              <DropdownMenuItem disabled>Profile</DropdownMenuItem>
+              <DropdownMenuItem disabled>Preferences</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => void handleSignOut()}>Sign out</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Button asChild variant="ghost" size="sm" className="gap-1.5">
+            <Link to="/login">
+              <LogIn className="h-4 w-4" />
+              <span className="hidden sm:inline">Sign in</span>
+            </Link>
+          </Button>
+        )}
       </div>
     </header>
   );

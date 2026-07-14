@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Fragment, useMemo, useRef, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMemo, useRef, useState } from "react";
 import {
   Download,
   Upload,
@@ -13,7 +13,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
-import { Link } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,6 +61,19 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import {
+  productsResource,
+  type ProductRow as ProductDbRow,
+} from "@/lib/masters/resources/products";
+import { productCreateSchema, productUpdateSchema } from "@/lib/masters/schemas/products";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { LookupCombobox } from "@/components/masters/lookup-combobox";
 
 type ProductType = "Domestic" | "International" | "Local" | "Import";
 type GroupType = "Air" | "Surface" | "Train" | "All";
@@ -72,30 +84,186 @@ type Product = {
   id: string;
   code: string;
   name: string;
-  type: ProductType | "";
+  type: string;
+  productTypeId?: string;
   service: string;
   fuelCharge: boolean;
   gstReverse: boolean;
   shipmentType: ShipmentType;
   status: Status;
   groupType: GroupType | "";
+  row_version?: number;
 };
 
 const SEED: Product[] = [
-  { id: "1", code: "ADOX", name: "ADOX", type: "International", service: "", fuelCharge: false, gstReverse: true, shipmentType: "DOX", status: "Active", groupType: "Air" },
-  { id: "2", code: "ASPX", name: "ASPX", type: "International", service: "", fuelCharge: false, gstReverse: true, shipmentType: "DOX", status: "Active", groupType: "Air" },
-  { id: "3", code: "COM", name: "COMMERCIAL", type: "International", service: "", fuelCharge: false, gstReverse: true, shipmentType: "NDOX", status: "Active", groupType: "Air" },
-  { id: "4", code: "DOCS", name: "DOCUMENTS", type: "International", service: "", fuelCharge: false, gstReverse: true, shipmentType: "DOX", status: "Active", groupType: "Air" },
-  { id: "5", code: "DOX", name: "INTL DOX", type: "International", service: "", fuelCharge: false, gstReverse: true, shipmentType: "DOX", status: "Active", groupType: "Air" },
-  { id: "6", code: "ENV", name: "ENVELOPE", type: "International", service: "", fuelCharge: false, gstReverse: true, shipmentType: "DOX", status: "Active", groupType: "Air" },
-  { id: "7", code: "FOOD", name: "FOOD", type: "International", service: "", fuelCharge: false, gstReverse: true, shipmentType: "NDOX", status: "Active", groupType: "Surface" },
-  { id: "8", code: "LAP", name: "LAPTOP", type: "International", service: "", fuelCharge: false, gstReverse: true, shipmentType: "NDOX", status: "Active", groupType: "Air" },
-  { id: "9", code: "MED", name: "MEDICINE", type: "International", service: "", fuelCharge: false, gstReverse: true, shipmentType: "NDOX", status: "Active", groupType: "Air" },
-  { id: "10", code: "MOB", name: "MOBILE", type: "International", service: "", fuelCharge: false, gstReverse: true, shipmentType: "NDOX", status: "Active", groupType: "Air" },
-  { id: "11", code: "GRMT", name: "GARMENTS", type: "Domestic", service: "", fuelCharge: true, gstReverse: false, shipmentType: "NDOX", status: "Active", groupType: "Surface" },
-  { id: "12", code: "SPAR", name: "SPARE PARTS", type: "Domestic", service: "", fuelCharge: true, gstReverse: false, shipmentType: "NDOX", status: "Active", groupType: "Surface" },
-  { id: "13", code: "BOOK", name: "BOOKS", type: "Local", service: "", fuelCharge: false, gstReverse: false, shipmentType: "NDOX", status: "In-Active", groupType: "Surface" },
-  { id: "14", code: "GIFT", name: "GIFT ITEMS", type: "Import", service: "", fuelCharge: false, gstReverse: true, shipmentType: "NDOX", status: "Active", groupType: "Air" },
+  {
+    id: "1",
+    code: "ADOX",
+    name: "ADOX",
+    type: "International",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "DOX",
+    status: "Active",
+    groupType: "Air",
+  },
+  {
+    id: "2",
+    code: "ASPX",
+    name: "ASPX",
+    type: "International",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "DOX",
+    status: "Active",
+    groupType: "Air",
+  },
+  {
+    id: "3",
+    code: "COM",
+    name: "COMMERCIAL",
+    type: "International",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "NDOX",
+    status: "Active",
+    groupType: "Air",
+  },
+  {
+    id: "4",
+    code: "DOCS",
+    name: "DOCUMENTS",
+    type: "International",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "DOX",
+    status: "Active",
+    groupType: "Air",
+  },
+  {
+    id: "5",
+    code: "DOX",
+    name: "INTL DOX",
+    type: "International",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "DOX",
+    status: "Active",
+    groupType: "Air",
+  },
+  {
+    id: "6",
+    code: "ENV",
+    name: "ENVELOPE",
+    type: "International",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "DOX",
+    status: "Active",
+    groupType: "Air",
+  },
+  {
+    id: "7",
+    code: "FOOD",
+    name: "FOOD",
+    type: "International",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "NDOX",
+    status: "Active",
+    groupType: "Surface",
+  },
+  {
+    id: "8",
+    code: "LAP",
+    name: "LAPTOP",
+    type: "International",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "NDOX",
+    status: "Active",
+    groupType: "Air",
+  },
+  {
+    id: "9",
+    code: "MED",
+    name: "MEDICINE",
+    type: "International",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "NDOX",
+    status: "Active",
+    groupType: "Air",
+  },
+  {
+    id: "10",
+    code: "MOB",
+    name: "MOBILE",
+    type: "International",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "NDOX",
+    status: "Active",
+    groupType: "Air",
+  },
+  {
+    id: "11",
+    code: "GRMT",
+    name: "GARMENTS",
+    type: "Domestic",
+    service: "",
+    fuelCharge: true,
+    gstReverse: false,
+    shipmentType: "NDOX",
+    status: "Active",
+    groupType: "Surface",
+  },
+  {
+    id: "12",
+    code: "SPAR",
+    name: "SPARE PARTS",
+    type: "Domestic",
+    service: "",
+    fuelCharge: true,
+    gstReverse: false,
+    shipmentType: "NDOX",
+    status: "Active",
+    groupType: "Surface",
+  },
+  {
+    id: "13",
+    code: "BOOK",
+    name: "BOOKS",
+    type: "Local",
+    service: "",
+    fuelCharge: false,
+    gstReverse: false,
+    shipmentType: "NDOX",
+    status: "In-Active",
+    groupType: "Surface",
+  },
+  {
+    id: "14",
+    code: "GIFT",
+    name: "GIFT ITEMS",
+    type: "Import",
+    service: "",
+    fuelCharge: false,
+    gstReverse: true,
+    shipmentType: "NDOX",
+    status: "Active",
+    groupType: "Air",
+  },
 ];
 
 const PRODUCT_TYPES: ProductType[] = ["Domestic", "International", "Local", "Import"];
@@ -108,7 +276,10 @@ export const Route = createFileRoute("/master/sales/product")({
   head: () => ({
     meta: [
       { title: "Product — Master — Courier ERP" },
-      { name: "description", content: "Manage product master records for the courier ERP platform." },
+      {
+        name: "description",
+        content: "Manage product master records for the courier ERP platform.",
+      },
     ],
   }),
   component: ProductPage,
@@ -119,6 +290,7 @@ function emptyProduct(): Omit<Product, "id"> {
     code: "",
     name: "",
     type: "",
+    productTypeId: "",
     service: "",
     fuelCharge: false,
     gstReverse: false,
@@ -128,15 +300,78 @@ function emptyProduct(): Omit<Product, "id"> {
   };
 }
 
+function groupFromDb(g: ProductDbRow["group_type"]): GroupType | "" {
+  switch (g) {
+    case "AIR":
+      return "Air";
+    case "SURFACE":
+      return "Surface";
+    case "TRAIN":
+      return "Train";
+    case "ALL":
+      return "All";
+    default:
+      return "";
+  }
+}
+
+function rowToView(r: ProductDbRow & Record<string, unknown>): Product {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name ?? "",
+    type: (r.product_type_name as string) ?? "",
+    productTypeId: r.product_type_id ?? "",
+    service: r.service ?? "",
+    fuelCharge: r.fuel_charge,
+    gstReverse: r.gst_reverse,
+    shipmentType: r.shipment_type,
+    status: r.status === "INACTIVE" ? "In-Active" : "Active",
+    groupType: groupFromDb(r.group_type),
+    row_version: r.row_version,
+  };
+}
+
+function toRaw(form: Omit<Product, "id">) {
+  return {
+    code: form.code,
+    name: form.name,
+    product_type_id: form.productTypeId || null,
+    service: form.service,
+    fuel_charge: form.fuelCharge,
+    gst_reverse: form.gstReverse,
+    shipment_type: form.shipmentType,
+    status: form.status === "In-Active" ? "INACTIVE" : "ACTIVE",
+    group_type: form.groupType ? form.groupType.toUpperCase() : null,
+  };
+}
+
 function ProductPage() {
-  const [rows, setRows] = useState<Product[]>(SEED);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(productsResource);
+  const live = useMasterList(productsResource, {
+    enabled: authed,
+    labelRefs: [{ idField: "product_type_id", table: "product_types", as: "product_type" }],
+  });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<Product[]>(SEED);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState<Omit<Product, "id">>(emptyProduct());
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: Product[] = authed
+    ? (live.rows as (ProductDbRow & Record<string, unknown>)[]).map(rowToView)
+    : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -160,41 +395,97 @@ function ProductPage() {
 
   const openEdit = (row: Product) => {
     setEditing(row);
-    const { id: _id, ...rest } = row;
+    const { id: _id, row_version: _rv, ...rest } = row;
     setForm(rest);
     setOpen(true);
   };
 
-  const handleSave = () => {
-    if (!form.code.trim()) {
-      toast.error("Product Code is required");
+  const handleSave = async () => {
+    const raw = toRaw(form);
+    if (authed) {
+      setSaving(true);
+      try {
+        if (editing) {
+          const patch = productUpdateSchema.parse(raw);
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch,
+          });
+          toast.success("Product updated");
+        } else {
+          const values = productCreateSchema.parse(raw);
+          await rc.create.mutateAsync(values);
+          toast.success("Product added");
+        }
+        setOpen(false);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save product"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    try {
+      if (editing) productUpdateSchema.parse(raw);
+      else productCreateSchema.parse(raw);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Please fix the form"));
       return;
     }
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
       toast.success("Product updated");
     } else {
-      const id = crypto.randomUUID();
-      setRows((prev) => [{ id, ...form }, ...prev]);
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), ...form }, ...prev]);
       toast.success("Product added");
     }
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
     const row = deleteTarget;
-    setRows((prev) => prev.filter((r) => r.id !== row.id));
-    toast.success(`Deleted ${row.code}`);
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.code}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete product"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.code}`);
+    }
     setDeleteTarget(null);
   };
 
   const handleExport = () => {
-    const header = ["Product Code", "Product Name", "Product Type", "Product Service", "Fuel Charge", "GST Reverse", "Shipment Type", "Status", "Group Type"];
+    const header = [
+      "Product Code",
+      "Product Name",
+      "Product Type",
+      "Product Service",
+      "Fuel Charge",
+      "GST Reverse",
+      "Shipment Type",
+      "Status",
+      "Group Type",
+    ];
     const csv = [
       header.join(","),
       ...rows.map((r) =>
-        [r.code, r.name, r.type, r.service, r.fuelCharge ? "Yes" : "No", r.gstReverse ? "Yes" : "No", r.shipmentType, r.status, r.groupType]
+        [
+          r.code,
+          r.name,
+          r.type,
+          r.service,
+          r.fuelCharge ? "Yes" : "No",
+          r.gstReverse ? "Yes" : "No",
+          r.shipmentType,
+          r.status,
+          r.groupType,
+        ]
           .map((v) => `"${String(v).replace(/"/g, '""')}"`)
           .join(","),
       ),
@@ -219,62 +510,57 @@ function ProductPage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) {
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) {
         toast.error("File is empty");
         return;
       }
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "";
-        let inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          productsResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
       const imported: Product[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cols = parseRow(lines[i]);
-        const [code, name, type, service, fuelCharge, gstReverse, shipmentType, status, groupType] = cols;
-        if (!code?.trim()) continue;
+      for (const rec of mapCsvToImportRows(parsed.rows, productsResource.importColumns)) {
+        if (!rec.code?.trim()) continue;
+        const typeVal = (rec.product_type_code || "").trim();
+        const groupVal = (rec.group_type || "").trim();
         imported.push({
           id: crypto.randomUUID(),
-          code: code.trim(),
-          name: (name || "").trim(),
-          type: (PRODUCT_TYPES.includes(type as ProductType) ? (type as ProductType) : "") as ProductType | "",
-          service: (service || "").trim(),
-          fuelCharge: /^(yes|true|1)$/i.test((fuelCharge || "").trim()),
-          gstReverse: /^(yes|true|1)$/i.test((gstReverse || "").trim()),
-          shipmentType: (shipmentType === "NDOX" ? "NDOX" : "DOX") as ShipmentType,
-          status: (status === "In-Active" ? "In-Active" : "Active") as Status,
-          groupType: (GROUP_TYPES.includes(groupType as GroupType) ? (groupType as GroupType) : "") as GroupType | "",
+          code: rec.code.trim(),
+          name: (rec.name || "").trim(),
+          type: PRODUCT_TYPES.includes(typeVal as ProductType) ? typeVal : "",
+          productTypeId: "",
+          service: (rec.service || "").trim(),
+          fuelCharge: /^(yes|true|1)$/i.test((rec.fuel_charge || "").trim()),
+          gstReverse: /^(yes|true|1)$/i.test((rec.gst_reverse || "").trim()),
+          shipmentType: (rec.shipment_type || "").trim().toUpperCase() === "NDOX" ? "NDOX" : "DOX",
+          status:
+            (rec.status || "").trim().toUpperCase().replace(/-/g, "") === "INACTIVE"
+              ? "In-Active"
+              : "Active",
+          groupType: GROUP_TYPES.includes(groupVal as GroupType) ? (groupVal as GroupType) : "",
         });
       }
       if (imported.length === 0) {
         toast.error("No valid rows found");
         return;
       }
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} product${imported.length === 1 ? "" : "s"}`);
     } catch (err) {
-      toast.error("Failed to import file");
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
   const handleRefresh = () => {
     setSearch("");
     setPage(1);
+    if (authed) queryClient.invalidateQueries({ queryKey: masterKeys.all(productsResource.key) });
     toast.success("Refreshed");
   };
 
@@ -323,9 +609,11 @@ function ProductPage() {
               <IconButton label="Export" onClick={handleExport}>
                 <Download className="h-4 w-4" />
               </IconButton>
-              <IconButton label="Import" onClick={handleImport}>
-                <Upload className="h-4 w-4" />
-              </IconButton>
+              {canAdd ? (
+                <IconButton label="Import" onClick={handleImport}>
+                  <Upload className="h-4 w-4" />
+                </IconButton>
+              ) : null}
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>
@@ -345,10 +633,12 @@ function ProductPage() {
                 className="h-9 w-56 pl-8"
               />
             </div>
-            <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add
-            </Button>
+            {canAdd ? (
+              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -377,7 +667,9 @@ function ProductPage() {
                     <TableCell className="font-medium">{r.code}</TableCell>
                     <TableCell>{r.name}</TableCell>
                     <TableCell>{r.type}</TableCell>
-                    <TableCell>{r.service || <span className="text-muted-foreground">—</span>}</TableCell>
+                    <TableCell>
+                      {r.service || <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell>
                       <span
                         className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -391,25 +683,28 @@ function ProductPage() {
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
-
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          onClick={() => openEdit(r)}
-                          aria-label={`Edit ${r.code}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(r)}
-                          aria-label={`Delete ${r.code}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canModify ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(r)}
+                            aria-label={`Edit ${r.code}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        {canDelete ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(r)}
+                            aria-label={`Delete ${r.code}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -453,10 +748,7 @@ function ProductPage() {
             >
               <ChevronRight className="h-4 w-4" />
             </PagerButton>
-            <PagerButton
-              disabled={currentPage === totalPages}
-              onClick={() => setPage(totalPages)}
-            >
+            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
               <ChevronsRight className="h-4 w-4" />
             </PagerButton>
           </div>
@@ -487,21 +779,33 @@ function ProductPage() {
             </FieldWrapper>
 
             <FieldWrapper label="Product Type">
-              <Select
-                value={form.type || undefined}
-                onValueChange={(v) => setForm((f) => ({ ...f, type: v as ProductType }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select Product Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRODUCT_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {authed ? (
+                <LookupCombobox
+                  lookupKey="product-type"
+                  value={form.productTypeId ?? ""}
+                  valueLabel={form.type}
+                  onChange={(id, item) =>
+                    setForm((f) => ({ ...f, productTypeId: id, type: item?.name ?? "" }))
+                  }
+                  placeholder="Select Product Type"
+                />
+              ) : (
+                <Select
+                  value={form.type || undefined}
+                  onValueChange={(v) => setForm((f) => ({ ...f, type: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Product Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRODUCT_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </FieldWrapper>
 
             <FieldWrapper label="Product Service">
@@ -592,8 +896,12 @@ function ProductPage() {
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
-              Save
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              {saving ? "Saving…" : "Save"}
             </Button>
             <Button variant="destructive" onClick={() => setOpen(false)}>
               Close
@@ -609,7 +917,8 @@ function ProductPage() {
             <AlertDialogDescription>
               This will permanently remove{" "}
               <span className="font-medium text-foreground">{deleteTarget?.code}</span>
-              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the product master. This action cannot be undone.
+              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the product master. This
+              action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -693,6 +1002,3 @@ function PagerButton({
     </button>
   );
 }
-
-// suppress unused import warning
-export const _f = Fragment;

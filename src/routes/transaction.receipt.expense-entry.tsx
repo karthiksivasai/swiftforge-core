@@ -1,15 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  Upload,
-  Download,
-  RefreshCw,
-  Filter,
-  Printer,
-  Plus,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { Upload, Download, RefreshCw, Filter, Printer, Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -22,13 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,6 +33,11 @@ import {
   TablePager,
   downloadCsv,
 } from "@/components/master-table-kit";
+import { useAuth } from "@/lib/auth";
+import { toErrorMessage } from "@/lib/masters/screen";
+import { listExpenseEntries, saveExpense } from "@/lib/transactions/resources/finance";
+import { dbExpenseToUi, expenseFormToFields } from "@/lib/transactions/financeUiMap";
+import { canUpdateExpense } from "@/lib/transactions/schemas/finance";
 
 type PageView = "list" | "entry";
 type EntryKind = "Expense" | "Income";
@@ -74,9 +65,11 @@ type ExpenseRow = {
   awbNo: string;
   description: string;
   debitCredit: DebitCredit;
-  authorized: "Y" | "N";
+  authorized: "Y" | "N" | "R";
   amount: string;
   documentName: string;
+  status: string;
+  rowVersion: number;
   form: ExpenseForm;
 };
 
@@ -105,16 +98,11 @@ const EXPENSE_HEADS = [
   "MAINTENANCE",
 ] as const;
 
-const INCOME_HEADS = [
-  "FREIGHT INCOME",
-  "SERVICE CHARGE",
-  "MISC INCOME",
-  "REFUND",
-] as const;
+const INCOME_HEADS = ["FREIGHT INCOME", "SERVICE CHARGE", "MISC INCOME", "REFUND"] as const;
 
 const CASH_BANK_OPTIONS = ["Cash", "Bank"] as const;
 
-const SEED_TEMPLATE: Omit<ExpenseRow, "id" | "entryNo" | "form">[] = [
+const SEED_TEMPLATE: Omit<ExpenseRow, "id" | "entryNo" | "form" | "status" | "rowVersion">[] = [
   {
     branchName: "HYD",
     expenseDate: "30/05/2026",
@@ -270,7 +258,7 @@ const emptyForm = (kind: EntryKind = "Expense"): ExpenseForm => ({
 });
 
 const templateToForm = (
-  row: Omit<ExpenseRow, "id" | "entryNo" | "form">,
+  row: Omit<ExpenseRow, "id" | "entryNo" | "form" | "status" | "rowVersion">,
   entryNo: string,
 ): ExpenseForm => ({
   entryNo,
@@ -284,7 +272,15 @@ const templateToForm = (
   documentName: row.documentName,
 });
 
-const formToRow = (form: ExpenseForm, id: string): ExpenseRow => ({
+const authFromStatus = (status: string): "Y" | "N" | "R" =>
+  status === "AUTHORIZED" ? "Y" : status === "REJECTED" ? "R" : "N";
+
+const formToRow = (
+  form: ExpenseForm,
+  id: string,
+  status = "UNAUTHORIZED",
+  rowVersion = 1,
+): ExpenseRow => ({
   id,
   entryNo: form.entryNo,
   branchName: "HYD",
@@ -294,9 +290,11 @@ const formToRow = (form: ExpenseForm, id: string): ExpenseRow => ({
   awbNo: form.awbNo,
   description: form.description,
   debitCredit: form.kind === "Income" ? "I" : "E",
-  authorized: "N",
+  authorized: authFromStatus(status),
   amount: form.amount,
   documentName: form.documentName,
+  status,
+  rowVersion,
   form: { ...form },
 });
 
@@ -306,10 +304,18 @@ const buildSeedRows = (): ExpenseRow[] => {
   for (let batch = 0; batch < 50; batch += 1) {
     for (const template of SEED_TEMPLATE) {
       const no = String(entryNo--);
+      const status =
+        template.authorized === "Y"
+          ? "AUTHORIZED"
+          : template.authorized === "R"
+            ? "REJECTED"
+            : "UNAUTHORIZED";
       rows.push({
         id: crypto.randomUUID(),
         entryNo: no,
         ...template,
+        status,
+        rowVersion: 1,
         form: templateToForm(template, no),
       });
     }
@@ -346,16 +352,31 @@ export const Route = createFileRoute("/transaction/receipt/expense-entry")({
 });
 
 function ExpenseEntryPage() {
+  const { isAuthenticated: authed } = useAuth();
+  const queryClient = useQueryClient();
   const importInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<PageView>("list");
-  const [rows, setRows] = useState<ExpenseRow[]>(buildSeedRows);
+  const [demoRows, setDemoRows] = useState<ExpenseRow[]>(buildSeedRows);
   const [editing, setEditing] = useState<ExpenseRow | null>(null);
   const [form, setForm] = useState<ExpenseForm>(emptyForm());
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState(emptyColFilters);
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<ExpenseRow | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const liveQuery = useQuery({
+    queryKey: ["expense_entries", "list"],
+    queryFn: () => listExpenseEntries({ pageSize: 500 }),
+    enabled: authed,
+  });
+
+  const rows: ExpenseRow[] = authed ? (liveQuery.data?.rows ?? []).map(dbExpenseToUi) : demoRows;
+
+  const refreshLive = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["expense_entries"] });
+  };
 
   const patchForm = (patch: Partial<ExpenseForm>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -421,6 +442,9 @@ function ExpenseEntryPage() {
   };
 
   const openEntry = (row: ExpenseRow) => {
+    if (authed && !canUpdateExpense(row.status)) {
+      return toast.error("Only unauthorized entries can be edited");
+    }
     setEditing(row);
     setForm({ ...row.form });
     setView("entry");
@@ -432,7 +456,7 @@ function ExpenseEntryPage() {
     setForm(emptyForm());
   };
 
-  const persistEntry = () => {
+  const persistEntry = async () => {
     if (!form.expenseHead.trim()) {
       return toast.error(`${form.kind === "Income" ? "Income" : "Expense"} Head is required`);
     }
@@ -441,34 +465,60 @@ function ExpenseEntryPage() {
     if (!form.amount.trim()) return toast.error("Amount is required");
     if (!form.documentName.trim()) return toast.error("Upload Document is required");
 
+    if (authed) {
+      setSaving(true);
+      try {
+        await saveExpense({
+          id: editing?.id ?? null,
+          row_version: editing?.rowVersion ?? null,
+          fields: expenseFormToFields(form),
+        });
+        await refreshLive();
+        toast.success(editing ? `Entry ${editing.entryNo} saved` : "Entry created");
+        closeEntry();
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     const entryNo = editing?.entryNo ?? nextEntryNo(rows);
-    const payload = formToRow({ ...form, entryNo }, editing?.id ?? crypto.randomUUID());
+    const payload = formToRow(
+      { ...form, entryNo },
+      editing?.id ?? crypto.randomUUID(),
+      editing?.status ?? "UNAUTHORIZED",
+      editing?.rowVersion ?? 1,
+    );
 
     if (editing) {
-      setRows((prev) =>
-        prev.map((r) =>
-          r.id === editing.id ? { ...payload, authorized: editing.authorized } : r,
-        ),
-      );
-      toast.success(`Entry ${entryNo} saved`);
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? payload : r)));
+      toast.success(`Entry ${entryNo} saved (demo)`);
     } else {
-      setRows((prev) => [payload, ...prev]);
-      toast.success(`Entry ${entryNo} created`);
+      setDemoRows((prev) => [payload, ...prev]);
+      toast.success(`Entry ${entryNo} created (demo)`);
     }
     closeEntry();
   };
 
   const confirmDelete = () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+    if (authed) {
+      toast.info("Delete is not available for finance history");
+      setDeleteTarget(null);
+      return;
+    }
+    setDemoRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
     toast.success(`Deleted entry ${deleteTarget.entryNo}`);
     setDeleteTarget(null);
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setSearch("");
     setColFilters(emptyColFilters());
     setPage(1);
+    if (authed) await refreshLive();
     toast.success("List refreshed");
   };
 
@@ -520,7 +570,9 @@ function ExpenseEntryPage() {
     const options = kind === "Income" ? INCOME_HEADS : EXPENSE_HEADS;
     patchForm({
       kind,
-      expenseHead: (options as readonly string[]).includes(form.expenseHead) ? form.expenseHead : "",
+      expenseHead: (options as readonly string[]).includes(form.expenseHead)
+        ? form.expenseHead
+        : "",
     });
   };
 
@@ -539,9 +591,7 @@ function ExpenseEntryPage() {
                   size="sm"
                   variant={form.kind === kind ? "default" : "outline"}
                   className={
-                    form.kind === kind
-                      ? "bg-emerald-600 text-white hover:bg-emerald-600/90"
-                      : ""
+                    form.kind === kind ? "bg-emerald-600 text-white hover:bg-emerald-600/90" : ""
                   }
                   onClick={() => setKind(kind)}
                 >
@@ -567,7 +617,9 @@ function ExpenseEntryPage() {
                   onValueChange={(value) => patchForm({ expenseHead: value })}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder={`Select ${form.kind === "Income" ? "Income" : "Expense"}`} />
+                    <SelectValue
+                      placeholder={`Select ${form.kind === "Income" ? "Income" : "Expense"}`}
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {headOptions.map((head) => (
@@ -611,7 +663,11 @@ function ExpenseEntryPage() {
                   inputMode="decimal"
                 />
               </FieldWrapper>
-              <FieldWrapper label="Upload Document" required className="md:col-span-2 xl:col-span-2">
+              <FieldWrapper
+                label="Upload Document"
+                required
+                className="md:col-span-2 xl:col-span-2"
+              >
                 <div className="flex items-center gap-2">
                   <input
                     ref={fileInputRef}
@@ -641,7 +697,11 @@ function ExpenseEntryPage() {
           </FormSection>
 
           <div className="mt-6 flex flex-wrap justify-end gap-2">
-            <Button onClick={persistEntry} className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90">
+            <Button
+              onClick={persistEntry}
+              disabled={saving}
+              className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
               Save
             </Button>
             <Button variant="destructive" onClick={closeEntry} className="min-w-24">
@@ -661,6 +721,9 @@ function ExpenseEntryPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Expense Entry</h1>
         <p className="text-sm text-muted-foreground">
           Record branch expenses and income with supporting documents.
+          {authed
+            ? " Connected to live backend."
+            : " Demo mode — sign in for live expense entries."}
         </p>
       </div>
 
@@ -701,17 +764,35 @@ function ExpenseEntryPage() {
           <table className="w-full min-w-[1100px] caption-bottom text-sm">
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Entry No</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Branch Name</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Expense Date</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Expense Name</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Bank / Cash</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Entry No
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Branch Name
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Expense Date
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Expense Name
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Bank / Cash
+                </TableHead>
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">AWB No.</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Description</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Debit/Credit</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Authorized</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Description
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Debit/Credit
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Authorized
+                </TableHead>
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Amount</TableHead>
-                <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">Action</TableHead>
+                <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">
+                  Action
+                </TableHead>
               </TableRow>
               <TableRow className="bg-muted/20 hover:bg-muted/20">
                 {(
@@ -746,7 +827,10 @@ function ExpenseEntryPage() {
             <TableBody>
               {pageRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={11} className="h-32 text-center text-sm text-muted-foreground">
+                  <TableCell
+                    colSpan={11}
+                    className="h-32 text-center text-sm text-muted-foreground"
+                  >
                     No data available in table
                   </TableCell>
                 </TableRow>
@@ -840,9 +924,7 @@ function ExpenseEntryPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete expense entry?</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTarget
-                ? `This will permanently remove entry ${deleteTarget.entryNo}.`
-                : ""}
+              {deleteTarget ? `This will permanently remove entry ${deleteTarget.entryNo}.` : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

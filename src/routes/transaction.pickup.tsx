@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Download,
   RefreshCw,
@@ -58,43 +59,33 @@ import {
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import { useLookup, type LookupKey as LiveLookupKey } from "@/lib/masters/core/lookup";
+import { toErrorMessage } from "@/lib/masters/screen";
+import {
+  cancelPickup,
+  listPickups,
+  savePickup,
+  softDeletePickup,
+  transferPickups,
+} from "@/lib/transactions/resources/pickups";
+import {
+  dbPickupToUi,
+  uiFormToPickupFields,
+  uiRowToForm,
+  type LookupPair,
+  type UiPickupForm as PickupForm,
+  type UiPickupRow as PickupRow,
+} from "@/lib/transactions/pickupUiMap";
 
-type LookupPair = { code: string; name: string };
-
-type PickupForm = {
-  customer: LookupPair;
-  pickupDate: string;
-  origin: LookupPair;
-  mobileNo: string;
-  shipper: LookupPair;
-  contact: string;
-  address1: string;
-  address2: string;
-  zipCode: string;
-  city: string;
-  state: string;
-  payOption: string;
-  consigneeDetails: boolean;
-  serviceCenter: string;
-  vehicleReq: string;
-  area: LookupPair;
-  fieldExecutive: LookupPair;
-  salesExecutive: LookupPair;
-  specialInstructions: string;
-  reason: string;
-  pickupReady: boolean;
-  pickupTime: string;
-  bookedBy: string;
-  editedBy: string;
-};
-
-type PickupRow = PickupForm & {
-  id: string;
-  pickupNo: number;
-  passed: string;
-  awbNo: string;
-  confirm: string;
-  cancel: string;
+const DEMO_TO_LIVE_LOOKUP: Partial<Record<LookupKey, LiveLookupKey>> = {
+  customer: "customer",
+  destination: "destination",
+  shipper: "shipper",
+  area: "area",
+  fieldExecutive: "field-executive",
+  salesExecutive: "sales-executive",
+  serviceCentre: "branch",
 };
 
 const SERVICE_CENTRES = MASTER_LOOKUPS.serviceCentre.options;
@@ -190,6 +181,7 @@ const emptyForm = (): PickupForm => ({
   payOption: "",
   consigneeDetails: false,
   serviceCenter: "HYD",
+  serviceCenterId: "",
   vehicleReq: "",
   area: emptyPair(),
   fieldExecutive: emptyPair(),
@@ -247,6 +239,8 @@ const matchesRegisterFilters = (row: PickupRow, f: RegisterFilters) => {
 const formToRow = (form: PickupForm, pickupNo: number, id?: string): PickupRow => ({
   id: id ?? crypto.randomUUID(),
   pickupNo,
+  status: form.fieldExecutive.code || form.fieldExecutive.name ? "ASSIGNED" : "OPEN",
+  rowVersion: 1,
   passed: "",
   awbNo: "",
   confirm: "",
@@ -318,7 +312,9 @@ export const Route = createFileRoute("/transaction/pickup")({
 });
 
 function PickupPage() {
-  const [rows, setRows] = useState<PickupRow[]>([]);
+  const { isAuthenticated: authed } = useAuth();
+  const queryClient = useQueryClient();
+  const [demoRows, setDemoRows] = useState<PickupRow[]>([]);
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState(emptyColFilters());
   const [page, setPage] = useState(1);
@@ -334,6 +330,21 @@ function PickupPage() {
   const [generateForm, setGenerateForm] = useState<GenerateSheetForm>(emptyGenerateForm);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferForm, setTransferForm] = useState<TransferForm>(emptyTransferForm);
+  const [saving, setSaving] = useState(false);
+
+  const liveQuery = useQuery({
+    queryKey: ["pickups", "list"],
+    queryFn: () => listPickups({ pageSize: 500 }),
+    enabled: authed,
+  });
+
+  const rows: PickupRow[] = authed
+    ? (liveQuery.data?.rows ?? []).map(dbPickupToUi)
+    : demoRows;
+
+  const refreshLive = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["pickups"] });
+  };
 
   const registerRows = useMemo(() => {
     if (!appliedRegisterFilters) return rows;
@@ -388,32 +399,7 @@ function PickupPage() {
 
   const openEdit = (row: PickupRow) => {
     setEditing(row);
-    setForm({
-      customer: { ...row.customer },
-      pickupDate: row.pickupDate,
-      origin: { ...row.origin },
-      mobileNo: row.mobileNo,
-      shipper: { ...row.shipper },
-      contact: row.contact,
-      address1: row.address1,
-      address2: row.address2,
-      zipCode: row.zipCode,
-      city: row.city,
-      state: row.state,
-      payOption: row.payOption,
-      consigneeDetails: row.consigneeDetails,
-      serviceCenter: row.serviceCenter,
-      vehicleReq: row.vehicleReq,
-      area: { ...row.area },
-      fieldExecutive: { ...row.fieldExecutive },
-      salesExecutive: { ...row.salesExecutive },
-      specialInstructions: row.specialInstructions,
-      reason: row.reason,
-      pickupReady: row.pickupReady,
-      pickupTime: row.pickupTime,
-      bookedBy: row.bookedBy,
-      editedBy: row.editedBy,
-    });
+    setForm(uiRowToForm(row));
     setShowForm(true);
   };
 
@@ -423,9 +409,28 @@ function PickupPage() {
     setForm(emptyForm());
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.mobileNo.trim()) return toast.error("Mobile No. is required");
     if (!form.shipper.name.trim() && !form.shipper.code.trim()) return toast.error("Shipper Name is required");
+
+    if (authed) {
+      setSaving(true);
+      try {
+        await savePickup({
+          id: editing?.id ?? null,
+          rowVersion: editing?.rowVersion ?? null,
+          fields: uiFormToPickupFields(form),
+        });
+        await refreshLive();
+        toast.success(editing ? "Pickup updated" : "Pickup saved");
+        closeForm();
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
     if (editing) {
       const updated = formToRow(form, editing.pickupNo, editing.id);
@@ -433,18 +438,41 @@ function PickupPage() {
       updated.awbNo = editing.awbNo;
       updated.confirm = editing.confirm;
       updated.cancel = editing.cancel;
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? updated : r)));
+      updated.rowVersion = editing.rowVersion;
+      updated.status = editing.status;
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? updated : r)));
       toast.success("Pickup updated");
     } else {
-      setRows((prev) => [formToRow(form, nextPickupNo), ...prev]);
+      setDemoRows((prev) => [formToRow(form, nextPickupNo), ...prev]);
       toast.success("Pickup saved");
     }
     closeForm();
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+    if (authed) {
+      try {
+        if (deleteTarget.status === "CANCELLED") {
+          await softDeletePickup(deleteTarget.id, deleteTarget.rowVersion);
+        } else {
+          await cancelPickup({
+            id: deleteTarget.id,
+            rowVersion: deleteTarget.rowVersion,
+            reason: "Deleted from pickup screen",
+          });
+        }
+        await refreshLive();
+        toast.success(`Removed pickup ${deleteTarget.pickupNo}`);
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+        return;
+      } finally {
+        setDeleteTarget(null);
+      }
+      return;
+    }
+    setDemoRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
     setSelectedIds((prev) => {
       const next = new Set(prev);
       next.delete(deleteTarget.id);
@@ -495,13 +523,22 @@ function PickupPage() {
     if (!silent) toast.success("Column filters cleared");
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setSearch("");
     clearColFilters(true);
     setSelectedIds(new Set());
     setAppliedRegisterFilters(null);
     setShowRegister(false);
     closeForm();
+    if (authed) {
+      try {
+        await refreshLive();
+        toast.success("Refreshed");
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      }
+      return;
+    }
     toast.success("Refreshed");
   };
 
@@ -575,7 +612,7 @@ function PickupPage() {
     return false;
   };
 
-  const handleTransfer = () => {
+  const handleTransfer = async () => {
     if (!transferForm.date) return toast.error("Date is required");
     if (!transferForm.fromFieldExecutive.code && !transferForm.fromFieldExecutive.name) {
       return toast.error("From Field Executive is required");
@@ -584,8 +621,30 @@ function PickupPage() {
       return toast.error("To Field Executive is required");
     }
 
+    if (authed) {
+      try {
+        const count = await transferPickups({
+          date: transferForm.date,
+          fromFeId: transferForm.fromFieldExecutive.id ?? null,
+          toFeId: transferForm.toFieldExecutive.id ?? null,
+          fromFeCode: transferForm.fromFieldExecutive.code || null,
+          toFeCode: transferForm.toFieldExecutive.code || null,
+        });
+        await refreshLive();
+        toast.success(
+          count > 0
+            ? `Transferred ${count} pickup${count === 1 ? "" : "s"} to ${transferForm.toFieldExecutive.name || transferForm.toFieldExecutive.code}`
+            : "No matching pickups found for transfer",
+        );
+        closeTransfer();
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      }
+      return;
+    }
+
     let count = 0;
-    setRows((prev) =>
+    setDemoRows((prev) =>
       prev.map((r) => {
         if (r.pickupDate !== transferForm.date) return r;
         if (!matchesFieldExecutive(r, transferForm.fromFieldExecutive)) return r;
@@ -647,20 +706,20 @@ function PickupPage() {
               <FormSection title="Pickup Details">
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
                   <FieldWrapper label="Customer">
-                    <LookupPairInput lookup="customer" value={form.customer} onChange={(v) => setForm((f) => ({ ...f, customer: v }))} />
+                    <LookupPairInput live={authed} lookup="customer" value={form.customer} onChange={(v) => setForm((f) => ({ ...f, customer: v }))} />
                   </FieldWrapper>
                   <FieldWrapper label="PickUp Date">
                     <Input type="date" value={form.pickupDate} onChange={(e) => setForm((f) => ({ ...f, pickupDate: e.target.value }))} />
                   </FieldWrapper>
                   <FieldWrapper label="Origin">
-                    <LookupPairInput lookup="destination" value={form.origin} onChange={(v) => setForm((f) => ({ ...f, origin: v }))} />
+                    <LookupPairInput live={authed} lookup="destination" value={form.origin} onChange={(v) => setForm((f) => ({ ...f, origin: v }))} />
                   </FieldWrapper>
                   <FieldWrapper label="Mobile No." required>
                     <Input value={form.mobileNo} onChange={(e) => setForm((f) => ({ ...f, mobileNo: e.target.value }))} inputMode="tel" />
                   </FieldWrapper>
 
                   <FieldWrapper label="Shipper Name" required>
-                    <LookupPairInput lookup="shipper" value={form.shipper} onChange={(v) => setForm((f) => ({ ...f, shipper: v }))} />
+                    <LookupPairInput live={authed} lookup="shipper" value={form.shipper} onChange={(v) => setForm((f) => ({ ...f, shipper: v }))} />
                   </FieldWrapper>
                   <FieldWrapper label="Contact">
                     <Input value={form.contact} onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))} />
@@ -693,14 +752,29 @@ function PickupPage() {
                   </FieldWrapper>
 
                   <FieldWrapper label="Service Center">
-                    <Select value={form.serviceCenter} onValueChange={(v) => setForm((f) => ({ ...f, serviceCenter: v }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {SERVICE_CENTRES.map((sc) => (
-                          <SelectItem key={sc.code} value={sc.code}>{sc.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {authed ? (
+                      <LookupPairInput
+                        live
+                        lookup="serviceCentre"
+                        value={{ id: form.serviceCenterId || undefined, code: form.serviceCenter, name: form.serviceCenter }}
+                        onChange={(v) =>
+                          setForm((f) => ({
+                            ...f,
+                            serviceCenter: v.code,
+                            serviceCenterId: v.id ?? "",
+                          }))
+                        }
+                      />
+                    ) : (
+                      <Select value={form.serviceCenter} onValueChange={(v) => setForm((f) => ({ ...f, serviceCenter: v, serviceCenterId: "" }))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {SERVICE_CENTRES.map((sc) => (
+                            <SelectItem key={sc.code} value={sc.code}>{sc.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </FieldWrapper>
 
                   <div className="flex items-end pb-1">
@@ -729,13 +803,13 @@ function PickupPage() {
                     </Select>
                   </FieldWrapper>
                   <FieldWrapper label="Area">
-                    <LookupPairInput lookup="area" value={form.area} onChange={(v) => setForm((f) => ({ ...f, area: v }))} />
+                    <LookupPairInput live={authed} lookup="area" value={form.area} onChange={(v) => setForm((f) => ({ ...f, area: v }))} />
                   </FieldWrapper>
                   <FieldWrapper label="Field Executive">
-                    <LookupPairInput lookup="fieldExecutive" value={form.fieldExecutive} onChange={(v) => setForm((f) => ({ ...f, fieldExecutive: v }))} />
+                    <LookupPairInput live={authed} lookup="fieldExecutive" value={form.fieldExecutive} onChange={(v) => setForm((f) => ({ ...f, fieldExecutive: v }))} />
                   </FieldWrapper>
                   <FieldWrapper label="Sales Executive">
-                    <LookupPairInput lookup="salesExecutive" value={form.salesExecutive} onChange={(v) => setForm((f) => ({ ...f, salesExecutive: v }))} />
+                    <LookupPairInput live={authed} lookup="salesExecutive" value={form.salesExecutive} onChange={(v) => setForm((f) => ({ ...f, salesExecutive: v }))} />
                   </FieldWrapper>
 
                   <FieldWrapper label="Special Instructions" className="md:col-span-2">
@@ -753,7 +827,9 @@ function PickupPage() {
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
-              <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
+              <Button disabled={saving} onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+                {saving ? "Saving…" : "Save"}
+              </Button>
               <Button variant="destructive" onClick={closeForm}>Close</Button>
             </div>
           </div>
@@ -812,6 +888,7 @@ function PickupPage() {
                   </FieldWrapper>
                   <FieldWrapper label="Service Center">
                     <LookupPairInput
+                      live={authed}
                       lookup="serviceCentre"
                       value={registerFilters.serviceCenter}
                       onChange={(v) => patchRegister("serviceCenter", v)}
@@ -833,6 +910,7 @@ function PickupPage() {
 
                   <FieldWrapper label="Area">
                     <LookupPairInput
+                      live={authed}
                       lookup="area"
                       value={registerFilters.area}
                       onChange={(v) => patchRegister("area", v)}
@@ -840,6 +918,7 @@ function PickupPage() {
                   </FieldWrapper>
                   <FieldWrapper label="Sales Executive">
                     <LookupPairInput
+                      live={authed}
                       lookup="salesExecutive"
                       value={registerFilters.salesExecutive}
                       onChange={(v) => patchRegister("salesExecutive", v)}
@@ -1005,6 +1084,7 @@ function PickupPage() {
             </FieldWrapper>
             <FieldWrapper label="Area">
               <LookupPairInput
+                live={authed}
                 lookup="area"
                 value={generateForm.area}
                 onChange={(v) => setGenerateForm((f) => ({ ...f, area: v }))}
@@ -1012,6 +1092,7 @@ function PickupPage() {
             </FieldWrapper>
             <FieldWrapper label="Field Executive">
               <LookupPairInput
+                live={authed}
                 lookup="fieldExecutive"
                 value={generateForm.fieldExecutive}
                 onChange={(v) => setGenerateForm((f) => ({ ...f, fieldExecutive: v }))}
@@ -1055,6 +1136,7 @@ function PickupPage() {
             </FieldWrapper>
             <FieldWrapper label="From Field Executive" className="md:col-span-2">
               <LookupPairInput
+                live={authed}
                 lookup="fieldExecutive"
                 value={transferForm.fromFieldExecutive}
                 onChange={(v) => setTransferForm((f) => ({ ...f, fromFieldExecutive: v }))}
@@ -1062,6 +1144,7 @@ function PickupPage() {
             </FieldWrapper>
             <FieldWrapper label="To Field Executive" className="md:col-span-2">
               <LookupPairInput
+                live={authed}
                 lookup="fieldExecutive"
                 value={transferForm.toFieldExecutive}
                 onChange={(v) => setTransferForm((f) => ({ ...f, toFieldExecutive: v }))}
@@ -1153,18 +1236,35 @@ function LookupPairInput({
   value,
   onChange,
   lookup,
+  live = false,
 }: {
   value: LookupPair;
   onChange: (v: LookupPair) => void;
   lookup: LookupKey;
+  live?: boolean;
 }) {
   const [lookupOpen, setLookupOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const liveKey = DEMO_TO_LIVE_LOOKUP[lookup];
+  const { data: liveRows, isFetching } = useLookup(liveKey ?? "branch", query, {
+    enabled: live && lookupOpen && Boolean(liveKey),
+  });
 
   return (
     <>
       <div className="flex gap-1">
-        <Input value={value.code} onChange={(e) => onChange({ ...value, code: e.target.value })} className="w-24" placeholder="Code" />
-        <Input value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} className="flex-1" placeholder="Name" />
+        <Input
+          value={value.code}
+          onChange={(e) => onChange({ ...value, id: undefined, code: e.target.value })}
+          className="w-24"
+          placeholder="Code"
+        />
+        <Input
+          value={value.name}
+          onChange={(e) => onChange({ ...value, id: undefined, name: e.target.value })}
+          className="flex-1"
+          placeholder="Name"
+        />
         <Button
           size="icon"
           variant="outline"
@@ -1175,13 +1275,53 @@ function LookupPairInput({
           <Search className="h-4 w-4" />
         </Button>
       </div>
-      <MasterLookupDialog
-        open={lookupOpen}
-        onOpenChange={setLookupOpen}
-        lookup={lookup}
-        returnField="code"
-        onSelect={(_v, option: LookupOption) => onChange({ code: option.code, name: option.name })}
-      />
+      {live && liveKey ? (
+        <Dialog
+          open={lookupOpen}
+          onOpenChange={(o) => {
+            setLookupOpen(o);
+            if (!o) setQuery("");
+          }}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogTitle className="text-base font-semibold">Select {lookup}</DialogTitle>
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search…"
+              className="mb-2"
+            />
+            <div className="max-h-72 overflow-auto rounded border">
+              {(liveRows ?? []).map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted/50"
+                  onClick={() => {
+                    onChange({ id: row.id, code: row.code, name: row.name });
+                    setLookupOpen(false);
+                    setQuery("");
+                  }}
+                >
+                  <span className="font-medium">{row.name}</span>
+                  <span className="text-muted-foreground">{row.code}</span>
+                </button>
+              ))}
+              {!isFetching && (liveRows ?? []).length === 0 && (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground">No matches</div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <MasterLookupDialog
+          open={lookupOpen}
+          onOpenChange={setLookupOpen}
+          lookup={lookup}
+          returnField="code"
+          onSelect={(_v, option: LookupOption) => onChange({ code: option.code, name: option.name })}
+        />
+      )}
     </>
   );
 }

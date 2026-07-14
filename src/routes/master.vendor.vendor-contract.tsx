@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,34 +60,31 @@ import {
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import type { LookupKey, LookupOption } from "@/lib/master-lookups";
 
-type LookupPair = { code: string; name: string };
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import {
+  fetchVendorContractList,
+  fetchVendorContractSlabs,
+  saveVendorContract,
+  vendorContractsResource,
+} from "@/lib/masters/resources/vendorContracts";
+import { vendorContractCreateSchema } from "@/lib/masters/schemas/vendorContracts";
+import { toErrorMessage, importSummary } from "@/lib/masters/screen";
+import {
+  dbVendorContractToUi,
+  slabsToDraftRates,
+  type UiRateLine,
+  type UiVendorContractForm,
+  type UiVendorContractRow,
+  uiSlabsFromDraft,
+  uiVendorContractToSavePayload,
+} from "@/lib/masters/vendorContractUiMap";
+
+type LookupPair = { id?: string; code: string; name: string };
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
-
-type VendorContractRow = {
-  id: string;
-  fromDate: string;
-  vendorCode: string;
-  vendorName: string;
-  originCode: string;
-  originName: string;
-  zoneCode: string;
-  zoneName: string;
-  countryCode: string;
-  countryName: string;
-  destinationCode: string;
-  destinationName: string;
-  productCode: string;
-  productName: string;
-  serviceCode: string;
-  serviceName: string;
-  contractNo: string;
-  unit: string;
-  days: string;
-  rateType: string;
-  weight: string;
-  rate: string;
-};
 
 type SearchFilters = {
   vendor: LookupPair;
@@ -97,12 +95,8 @@ type SearchFilters = {
   origin: LookupPair;
   destination: LookupPair;
   product: LookupPair;
-  service: LookupPair;
+  service: string;
 };
-
-type ContractForm = Omit<VendorContractRow, "id">;
-
-type RateLineDraft = { rateType: string; weight: string; rate: string };
 
 type IncreaseRateForm = {
   fromDate: string;
@@ -129,25 +123,30 @@ const emptyFilters = (): SearchFilters => ({
   origin: emptyPair(),
   destination: emptyPair(),
   product: emptyPair(),
-  service: emptyPair(),
+  service: "",
 });
 
-const emptyForm = (): ContractForm => ({
+const emptyForm = (): UiVendorContractForm => ({
   fromDate: format(new Date(), "yyyy-MM-dd"),
+  vendorId: "",
   vendorCode: "",
   vendorName: "",
+  originId: "",
   originCode: "",
   originName: "",
+  zoneId: "",
   zoneCode: "",
   zoneName: "",
+  countryId: "",
   countryCode: "",
   countryName: "",
+  destinationId: "",
   destinationCode: "",
   destinationName: "",
+  productId: "",
   productCode: "",
   productName: "",
-  serviceCode: "",
-  serviceName: "",
+  service: "",
   contractNo: "",
   unit: "",
   days: "",
@@ -167,22 +166,63 @@ export const Route = createFileRoute("/master/vendor/vendor-contract")({
 });
 
 function VendorContractPage() {
-  const [rows, setRows] = useState<VendorContractRow[]>([]);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(vendorContractsResource);
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<UiVendorContractRow[]>([]);
   const [filters, setFilters] = useState<SearchFilters>(emptyFilters());
   const [appliedFilters, setAppliedFilters] = useState<SearchFilters>(emptyFilters());
   const [hasSearched, setHasSearched] = useState(false);
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<VendorContractRow | null>(null);
-  const [form, setForm] = useState<ContractForm>(emptyForm());
-  const [draftRates, setDraftRates] = useState<RateLineDraft[]>([]);
-  const [deleteTarget, setDeleteTarget] = useState<VendorContractRow | null>(null);
+  const [editing, setEditing] = useState<UiVendorContractRow | null>(null);
+  const [form, setForm] = useState<UiVendorContractForm>(emptyForm());
+  const [draftRates, setDraftRates] = useState<UiRateLine[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<UiVendorContractRow | null>(null);
   const [increaseRateOpen, setIncreaseRateOpen] = useState(false);
   const [increaseForm, setIncreaseForm] = useState<IncreaseRateForm>(emptyIncreaseForm());
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
+  const liveQuery = useQuery({
+    queryKey: masterKeys.list(vendorContractsResource.key, {
+      live: true,
+      searched: hasSearched,
+      filters: appliedFilters,
+    }),
+    enabled: authed && hasSearched,
+    queryFn: async () => {
+      const flat = await fetchVendorContractList({
+        vendorId: appliedFilters.vendor.id,
+        zoneId: appliedFilters.zone.id,
+        contractNo: appliedFilters.contractNo,
+        fromDate: appliedFilters.fromDate || undefined,
+        countryId: appliedFilters.country.id,
+        originId: appliedFilters.origin.id,
+        destinationId: appliedFilters.destination.id,
+        productId: appliedFilters.product.id,
+        service: appliedFilters.service || undefined,
+      });
+      return flat.map((row) =>
+        dbVendorContractToUi(row, {
+          seq: row.seq,
+          rate_type: row.rate_type,
+          weight: row.weight,
+          rate: row.rate,
+        }),
+      );
+    },
+  });
+
+  const rows: UiVendorContractRow[] = authed ? (liveQuery.data ?? []) : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
+
   const filtered = useMemo(() => {
-    if (!hasSearched) return rows;
+    if (authed || !hasSearched) return rows;
     const f = appliedFilters;
     return rows.filter((r) => {
       if (f.vendor.code && !r.vendorCode.toLowerCase().includes(f.vendor.code.toLowerCase())) return false;
@@ -199,11 +239,10 @@ function VendorContractPage() {
       if (f.destination.name && !r.destinationName.toLowerCase().includes(f.destination.name.toLowerCase())) return false;
       if (f.product.code && !r.productCode.toLowerCase().includes(f.product.code.toLowerCase())) return false;
       if (f.product.name && !r.productName.toLowerCase().includes(f.product.name.toLowerCase())) return false;
-      if (f.service.code && !r.serviceCode.toLowerCase().includes(f.service.code.toLowerCase())) return false;
-      if (f.service.name && !r.serviceName.toLowerCase().includes(f.service.name.toLowerCase())) return false;
+      if (f.service && !r.service.toLowerCase().includes(f.service.toLowerCase())) return false;
       return true;
     });
-  }, [rows, appliedFilters, hasSearched]);
+  }, [rows, appliedFilters, hasSearched, authed]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -223,11 +262,48 @@ function VendorContractPage() {
     setIncreaseRateOpen(true);
   };
 
-  const openEdit = (row: VendorContractRow) => {
+  const openEdit = async (row: UiVendorContractRow) => {
     setEditing(row);
-    const { id: _id, ...rest } = row;
-    setForm(rest);
-    setDraftRates([]);
+    setForm({
+      fromDate: row.fromDate,
+      vendorId: row.vendorId,
+      vendorCode: row.vendorCode,
+      vendorName: row.vendorName,
+      originId: row.originId,
+      originCode: row.originCode,
+      originName: row.originName,
+      zoneId: row.zoneId,
+      zoneCode: row.zoneCode,
+      zoneName: row.zoneName,
+      countryId: row.countryId,
+      countryCode: row.countryCode,
+      countryName: row.countryName,
+      destinationId: row.destinationId,
+      destinationCode: row.destinationCode,
+      destinationName: row.destinationName,
+      productId: row.productId,
+      productCode: row.productCode,
+      productName: row.productName,
+      service: row.service,
+      contractNo: row.contractNo,
+      unit: row.unit,
+      days: row.days,
+      rateType: "",
+      weight: "",
+      rate: "",
+    });
+
+    if (authed) {
+      try {
+        const slabs = await fetchVendorContractSlabs(row.contractId);
+        setDraftRates(slabsToDraftRates(slabs));
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not load rate slabs"));
+        setDraftRates([]);
+      }
+    } else {
+      setDraftRates([]);
+    }
     setOpen(true);
   };
 
@@ -242,47 +318,93 @@ function VendorContractPage() {
     toast.success("Rate line added");
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.fromDate) return toast.error("From Date is required");
-    if (!form.vendorCode.trim()) return toast.error("Vendor is required");
-    if (!form.productCode.trim() && !form.productName.trim()) return toast.error("Product is required");
+    if (!form.vendorId && !form.vendorCode.trim()) return toast.error("Vendor is required");
+    if (!form.productId && !form.productCode.trim() && !form.productName.trim()) {
+      return toast.error("Product is required");
+    }
+
+    const slabs = uiSlabsFromDraft(form, draftRates);
+    if (slabs.length === 0) return toast.error("Add at least one rate line");
+
+    if (authed) {
+      if (!form.vendorId || !form.productId) {
+        return toast.error("Select vendor and product from lookup when signed in");
+      }
+      setSaving(true);
+      try {
+        const fields = vendorContractCreateSchema.parse(uiVendorContractToSavePayload(form));
+        await saveVendorContract({
+          id: editing?.contractId ?? null,
+          rowVersion: editing?.row_version ?? null,
+          fields,
+          slabs,
+        });
+        await queryClient.invalidateQueries({ queryKey: masterKeys.all(vendorContractsResource.key) });
+        toast.success(editing ? "Vendor contract updated" : "Vendor contract saved");
+        setOpen(false);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save vendor contract"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
     const lines = draftRates.length > 0
       ? draftRates
-      : form.rateType && form.weight && form.rate
-        ? [{ rateType: form.rateType, weight: form.weight, rate: form.rate }]
-        : [];
-
-    if (lines.length === 0) return toast.error("Add at least one rate line");
+      : [{ rateType: form.rateType, weight: form.weight, rate: form.rate }];
 
     if (editing) {
       const line = lines[0];
-      setRows((prev) =>
+      setDemoRows((prev) =>
         prev.map((r) =>
           r.id === editing.id
-            ? { ...editing, ...form, rateType: line.rateType, weight: line.weight, rate: line.rate }
+            ? {
+                ...editing,
+                ...form,
+                rateType: line.rateType,
+                weight: line.weight,
+                rate: line.rate,
+              }
             : r,
         ),
       );
       toast.success("Vendor contract updated");
     } else {
-      const newRows = lines.map((line) => ({
-        id: crypto.randomUUID(),
+      const contractId = crypto.randomUUID();
+      const newRows = lines.map((line, idx) => ({
+        id: `${contractId}:${idx + 1}`,
+        contractId,
+        slabSeq: idx + 1,
         ...form,
         rateType: line.rateType,
         weight: line.weight,
         rate: line.rate,
       }));
-      setRows((prev) => [...newRows, ...prev]);
+      setDemoRows((prev) => [...newRows, ...prev]);
       toast.success(`Added ${newRows.length} vendor rate${newRows.length === 1 ? "" : "s"}`);
     }
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success("Vendor contract deleted");
+    const row = deleteTarget;
+
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.contractId, rowVersion: row.row_version ?? 0 });
+        await queryClient.invalidateQueries({ queryKey: masterKeys.all(vendorContractsResource.key) });
+        toast.success("Vendor contract deleted");
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete vendor contract"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.contractId !== row.contractId));
+      toast.success("Vendor contract deleted");
+    }
     setDeleteTarget(null);
   };
 
@@ -304,9 +426,14 @@ function VendorContractPage() {
   const handleIncreaseRateSave = () => {
     if (!increaseForm.increaseBy) return toast.error("Select Increase Type");
     if (filtered.length === 0) return toast.error("No matching vendor rates to update");
+    if (authed) {
+      toast.info("Bulk rate increase will be enabled with a dedicated RPC");
+      setIncreaseRateOpen(false);
+      return;
+    }
 
     const targetIds = new Set(filtered.map((r) => r.id));
-    setRows((prev) =>
+    setDemoRows((prev) =>
       prev.map((r) => {
         if (!targetIds.has(r.id)) return r;
         const current = parseFloat(r.rate);
@@ -322,6 +449,29 @@ function VendorContractPage() {
     setIncreaseRateOpen(false);
   };
 
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) return toast.error("File is empty");
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          vendorContractsResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
+      toast.info("Import will be enabled with backend wiring");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Import failed"));
+    }
+  };
+
   const patchFilter = <K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
   };
@@ -331,7 +481,7 @@ function VendorContractPage() {
       <MasterBreadcrumb trail={["Master", "Vendor", "Vendor Contract"]} />
 
       <Card className="overflow-hidden border p-0">
-        <input ref={importInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={() => toast.info("Import will be enabled with backend wiring")} />
+        <input ref={importInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFile} />
 
         <div className="p-4 md:p-6">
           <div className="mb-3 flex items-start justify-between gap-3">
@@ -341,10 +491,12 @@ function VendorContractPage() {
                 <IconButton label="IncreaseRate" onClick={openIncreaseRate}><Plus className="h-4 w-4" /></IconButton>
               </div>
             </TooltipProvider>
-            <Button size="sm" onClick={openAddContract} className="h-9 gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add
-            </Button>
+            {canAdd ? (
+              <Button size="sm" onClick={openAddContract} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            ) : null}
           </div>
 
           <Badge className="mb-4 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">Vendor Rate</Badge>
@@ -385,7 +537,7 @@ function VendorContractPage() {
               <LookupPairInput lookup="destination" value={filters.destination} onChange={(v) => patchFilter("destination", v)} />
             </FieldWrapper>
             <FieldWrapper label="Service">
-              <LookupPairInput lookup="product" value={filters.service} onChange={(v) => patchFilter("service", v)} />
+              <Input value={filters.service} onChange={(e) => patchFilter("service", e.target.value)} />
             </FieldWrapper>
 
             <FieldWrapper label="Contract No" className="md:col-span-2 lg:col-span-1">
@@ -461,7 +613,13 @@ function VendorContractPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pageRows.length === 0 ? (
+              {authed && liveQuery.isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={11} className="h-32 text-center text-sm text-muted-foreground">
+                    Loading vendor contracts…
+                  </TableCell>
+                </TableRow>
+              ) : pageRows.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={11} className="h-32 text-center text-sm text-muted-foreground">
                     No data available in table
@@ -473,7 +631,7 @@ function VendorContractPage() {
                     <TableCell>{r.fromDate}</TableCell>
                     <TableCell>{r.vendorCode} — {r.vendorName}</TableCell>
                     <TableCell>{r.productName || r.productCode}</TableCell>
-                    <TableCell>{r.serviceName || r.serviceCode}</TableCell>
+                    <TableCell>{r.service}</TableCell>
                     <TableCell>{r.originName || r.originCode}</TableCell>
                     <TableCell>{r.destinationName || r.destinationCode}</TableCell>
                     <TableCell>{r.zoneName || r.zoneCode}</TableCell>
@@ -482,12 +640,16 @@ function VendorContractPage() {
                     <TableCell className="text-right">{r.rate}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
-                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)} aria-label="Edit">
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(r)} aria-label="Delete">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canModify ? (
+                          <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)} aria-label="Edit">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        {canDelete ? (
+                          <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(r)} aria-label="Delete">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -518,52 +680,48 @@ function VendorContractPage() {
             <FieldWrapper label="Origin">
               <LookupPairInput
                 lookup="destination"
-                value={{ code: form.originCode, name: form.originName }}
-                onChange={(v) => setForm((f) => ({ ...f, originCode: v.code, originName: v.name }))}
+                value={{ id: form.originId, code: form.originCode, name: form.originName }}
+                onChange={(v) => setForm((f) => ({ ...f, originId: v.id ?? "", originCode: v.code, originName: v.name }))}
               />
             </FieldWrapper>
             <FieldWrapper label="Vendor">
               <LookupPairInput
                 lookup="vendor"
-                value={{ code: form.vendorCode, name: form.vendorName }}
-                onChange={(v) => setForm((f) => ({ ...f, vendorCode: v.code, vendorName: v.name }))}
+                value={{ id: form.vendorId, code: form.vendorCode, name: form.vendorName }}
+                onChange={(v) => setForm((f) => ({ ...f, vendorId: v.id ?? "", vendorCode: v.code, vendorName: v.name }))}
               />
             </FieldWrapper>
             <FieldWrapper label="Product">
               <LookupPairInput
                 lookup="product"
-                value={{ code: form.productCode, name: form.productName }}
-                onChange={(v) => setForm((f) => ({ ...f, productCode: v.code, productName: v.name }))}
+                value={{ id: form.productId, code: form.productCode, name: form.productName }}
+                onChange={(v) => setForm((f) => ({ ...f, productId: v.id ?? "", productCode: v.code, productName: v.name }))}
               />
             </FieldWrapper>
 
             <FieldWrapper label="Zone">
               <LookupPairInput
                 lookup="zone"
-                value={{ code: form.zoneCode, name: form.zoneName }}
-                onChange={(v) => setForm((f) => ({ ...f, zoneCode: v.code, zoneName: v.name }))}
+                value={{ id: form.zoneId, code: form.zoneCode, name: form.zoneName }}
+                onChange={(v) => setForm((f) => ({ ...f, zoneId: v.id ?? "", zoneCode: v.code, zoneName: v.name }))}
               />
             </FieldWrapper>
             <FieldWrapper label="Country">
               <LookupPairInput
                 lookup="country"
-                value={{ code: form.countryCode, name: form.countryName }}
-                onChange={(v) => setForm((f) => ({ ...f, countryCode: v.code, countryName: v.name }))}
+                value={{ id: form.countryId, code: form.countryCode, name: form.countryName }}
+                onChange={(v) => setForm((f) => ({ ...f, countryId: v.id ?? "", countryCode: v.code, countryName: v.name }))}
               />
             </FieldWrapper>
             <FieldWrapper label="Destination">
               <LookupPairInput
                 lookup="destination"
-                value={{ code: form.destinationCode, name: form.destinationName }}
-                onChange={(v) => setForm((f) => ({ ...f, destinationCode: v.code, destinationName: v.name }))}
+                value={{ id: form.destinationId, code: form.destinationCode, name: form.destinationName }}
+                onChange={(v) => setForm((f) => ({ ...f, destinationId: v.id ?? "", destinationCode: v.code, destinationName: v.name }))}
               />
             </FieldWrapper>
             <FieldWrapper label="Service">
-              <LookupPairInput
-                lookup="product"
-                value={{ code: form.serviceCode, name: form.serviceName }}
-                onChange={(v) => setForm((f) => ({ ...f, serviceCode: v.code, serviceName: v.name }))}
-              />
+              <Input value={form.service} onChange={(e) => setForm((f) => ({ ...f, service: e.target.value }))} />
             </FieldWrapper>
 
             <FieldWrapper label="Unit">
@@ -628,7 +786,7 @@ function VendorContractPage() {
           ) : null}
 
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
+            <Button onClick={handleSave} disabled={saving} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
             <Button variant="destructive" onClick={() => setOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
@@ -639,7 +797,7 @@ function VendorContractPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete vendor contract?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove the rate entry for{" "}
+              This will remove the contract for{" "}
               <span className="font-medium text-foreground">{deleteTarget?.vendorName || deleteTarget?.vendorCode}</span>.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -684,7 +842,7 @@ function LookupPairInput({
         onOpenChange={setLookupOpen}
         lookup={lookup}
         returnField="code"
-        onSelect={(_v, option: LookupOption) => onChange({ code: option.code, name: option.name })}
+        onSelect={(_v, option: LookupOption) => onChange({ id: option.id, code: option.code, name: option.name })}
       />
     </div>
   );

@@ -18,6 +18,15 @@ import {
 import { FieldWrapper, MasterBreadcrumb } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import { toErrorMessage } from "@/lib/masters/screen";
+import { ConflictError } from "@/lib/masters/core/baseCrud";
+import {
+  getShipmentTracking,
+  holdShipment,
+  releaseShipmentHold,
+} from "@/lib/transactions/resources/tracking";
+import { trackingHoldSchema } from "@/lib/transactions/schemas/tracking";
 
 type LookupPair = { code: string; name: string };
 type UpdateOption = "" | "awb-hold" | "entry-lock";
@@ -86,12 +95,13 @@ export const Route = createFileRoute("/transaction/tracking/update-entry")({
 });
 
 function UpdateEntryPage() {
+  const { isAuthenticated: authed } = useAuth();
   const [option, setOption] = useState<UpdateOption>("");
   const [awbHoldForm, setAwbHoldForm] = useState<AwbHoldForm>(emptyAwbHoldForm());
   const [entryLockForm, setEntryLockForm] = useState<EntryLockForm>(emptyEntryLockForm());
+  const [saving, setSaving] = useState(false);
 
-  const patchAwbHold = (patch: Partial<AwbHoldForm>) =>
-    setAwbHoldForm((f) => ({ ...f, ...patch }));
+  const patchAwbHold = (patch: Partial<AwbHoldForm>) => setAwbHoldForm((f) => ({ ...f, ...patch }));
 
   const patchEntryLock = (patch: Partial<EntryLockForm>) =>
     setEntryLockForm((f) => ({ ...f, ...patch }));
@@ -102,14 +112,52 @@ function UpdateEntryPage() {
     setEntryLockForm(emptyEntryLockForm());
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!option) return toast.error("Option is required");
 
     if (option === "awb-hold") {
       const awb = awbHoldForm.awbNo.trim();
       if (!awb) return toast.error("AWB No. is required");
       const action = awbHoldForm.holdType === "hold" ? "held" : "released";
-      toast.success(`AWB ${awb} ${action}${awbHoldForm.sendMail ? " — mail queued" : ""}`);
+
+      if (!authed) {
+        toast.success(`AWB ${awb} ${action}${awbHoldForm.sendMail ? " — mail queued" : ""} (demo)`);
+        return;
+      }
+
+      const parsed = trackingHoldSchema.safeParse({
+        remark: awbHoldForm.remark || undefined,
+        shipper_email: awbHoldForm.shipperMailId || undefined,
+        send_mail: awbHoldForm.sendMail,
+      });
+      if (!parsed.success) {
+        return toast.error(parsed.error.issues[0]?.message ?? "Invalid hold fields");
+      }
+
+      setSaving(true);
+      try {
+        const timeline = await getShipmentTracking(awb);
+        if (!timeline.found || !timeline.shipment) {
+          toast.error(`No record found for AWB ${awb}`);
+          return;
+        }
+        const rowVersion = Number(timeline.shipment.row_version ?? 0);
+        if (awbHoldForm.holdType === "hold") {
+          await holdShipment({ awb_no: awb, row_version: rowVersion, fields: parsed.data });
+        } else {
+          await releaseShipmentHold({
+            awb_no: awb,
+            row_version: rowVersion,
+            fields: parsed.data,
+          });
+        }
+        toast.success(`AWB ${awb} ${action}${awbHoldForm.sendMail ? " — mail flagged" : ""}`);
+      } catch (err) {
+        if (err instanceof ConflictError) toast.error(err.message);
+        else toast.error(toErrorMessage(err));
+      } finally {
+        setSaving(false);
+      }
       return;
     }
 
@@ -117,9 +165,7 @@ function UpdateEntryPage() {
     if (!entryLockForm.toDate.trim()) return toast.error("To Date is required");
     if (!entryLockForm.lockAction) return toast.error("Lock / UnLock is required");
 
-    toast.success(
-      `Entry lock update applied (${entryLockForm.lockAction}) from ${entryLockForm.fromDate} to ${entryLockForm.toDate}`,
-    );
+    toast.message("Entry lock update remains a placeholder in Tracking Foundation.");
   };
 
   const handleReset = () => {
@@ -136,6 +182,7 @@ function UpdateEntryPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Update Entry</h1>
         <p className="text-sm text-muted-foreground">
           Apply AWB hold/release updates or bulk entry lock changes by date range.
+          {authed ? " Connected to live backend." : " Demo mode — sign in for live hold/release."}
         </p>
       </div>
 
@@ -143,7 +190,10 @@ function UpdateEntryPage() {
         <div className="space-y-4">
           <div className="max-w-md">
             <FieldWrapper label="Option">
-              <Select value={option || undefined} onValueChange={(v) => handleOptionChange(v as UpdateOption)}>
+              <Select
+                value={option || undefined}
+                onValueChange={(v) => handleOptionChange(v as UpdateOption)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select Option" />
                 </SelectTrigger>
@@ -322,7 +372,11 @@ function UpdateEntryPage() {
         </div>
 
         <div className="mt-6 flex flex-wrap justify-end gap-2">
-          <Button onClick={handleSave} className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90">
+          <Button
+            onClick={() => void handleSave()}
+            disabled={saving}
+            className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90"
+          >
             Save
           </Button>
           <Button variant="destructive" onClick={handleReset} className="min-w-24">

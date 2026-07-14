@@ -60,6 +60,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { flightsResource, type FlightRow as FlightDbRow } from "@/lib/masters/resources/flights";
+import { flightCreateSchema, flightUpdateSchema } from "@/lib/masters/schemas/flights";
+import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
 
 type FlightType = "Prime" | "GCR";
 
@@ -68,6 +77,7 @@ type FlightRow = {
   code: string;
   name: string;
   type: FlightType;
+  row_version?: number;
 };
 
 const FLIGHT_TYPES: FlightType[] = ["Prime", "GCR"];
@@ -118,7 +128,10 @@ export const Route = createFileRoute("/master/sales/flight")({
   head: () => ({
     meta: [
       { title: "Flight — Master — Courier ERP" },
-      { name: "description", content: "Manage the flight master used for air waybill and routing." },
+      {
+        name: "description",
+        content: "Manage the flight master used for air waybill and routing.",
+      },
     ],
   }),
   component: FlightPage,
@@ -128,15 +141,45 @@ function emptyRow(): Omit<FlightRow, "id"> {
   return { code: "", name: "", type: "Prime" };
 }
 
+function rowToView(r: FlightDbRow): FlightRow {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    type: r.flight_type === "GCR" ? "GCR" : "Prime",
+    row_version: r.row_version,
+  };
+}
+
+function toRaw(form: Omit<FlightRow, "id">) {
+  return {
+    code: form.code,
+    name: form.name,
+    flight_type: form.type === "GCR" ? "GCR" : "PRIME",
+  };
+}
+
 function FlightPage() {
-  const [rows, setRows] = useState<FlightRow[]>(SEED);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(flightsResource);
+  const live = useMasterList(flightsResource, { enabled: authed });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<FlightRow[]>(SEED);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<FlightRow | null>(null);
   const [form, setForm] = useState<Omit<FlightRow, "id">>(emptyRow());
   const [deleteTarget, setDeleteTarget] = useState<FlightRow | null>(null);
+  const [saving, setSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const rows: FlightRow[] = authed ? (live.rows as FlightDbRow[]).map(rowToView) : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -160,36 +203,68 @@ function FlightPage() {
 
   const openEdit = (row: FlightRow) => {
     setEditing(row);
-    const { id: _id, ...rest } = row;
+    const { id: _id, row_version: _rv, ...rest } = row;
     setForm(rest);
     setOpen(true);
   };
 
-  const handleSave = () => {
-    if (!form.code.trim()) {
-      toast.error("Flight Code is required");
+  const handleSave = async () => {
+    const raw = toRaw(form);
+    if (authed) {
+      setSaving(true);
+      try {
+        if (editing) {
+          const patch = flightUpdateSchema.parse(raw);
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch,
+          });
+          toast.success("Flight updated");
+        } else {
+          const values = flightCreateSchema.parse(raw);
+          await rc.create.mutateAsync(values);
+          toast.success("Flight added");
+        }
+        setOpen(false);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save flight"));
+      } finally {
+        setSaving(false);
+      }
       return;
     }
-    if (!form.name.trim()) {
-      toast.error("Flight Name is required");
+    try {
+      if (editing) flightUpdateSchema.parse(raw);
+      else flightCreateSchema.parse(raw);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Please fix the form"));
       return;
     }
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
       toast.success("Flight updated");
     } else {
-      const id = crypto.randomUUID();
-      setRows((prev) => [{ id, ...form }, ...prev]);
+      setDemoRows((prev) => [{ id: crypto.randomUUID(), ...form }, ...prev]);
       toast.success("Flight added");
     }
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
     const row = deleteTarget;
-    setRows((prev) => prev.filter((r) => r.id !== row.id));
-    toast.success(`Deleted ${row.code}`);
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.code}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete flight"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.code}`);
+    }
     setDeleteTarget(null);
   };
 
@@ -198,9 +273,7 @@ function FlightPage() {
     const csv = [
       header.join(","),
       ...rows.map((r) =>
-        [r.code, r.name, r.type]
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-          .join(","),
+        [r.code, r.name, r.type].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
       ),
     ].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -223,39 +296,28 @@ function FlightPage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) {
+      const parsed = parseCsv(text);
+      if (parsed.rows.length === 0) {
         toast.error("File is empty");
         return;
       }
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "";
-        let inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsed.rows,
+          flightsResource.importColumns,
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        toast.success(importSummary(res));
+        return;
+      }
       const imported: FlightRow[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const [code, name, type] = parseRow(lines[i]);
-        if (!code?.trim()) continue;
-        const t = (type || "").trim();
+      for (const rec of mapCsvToImportRows(parsed.rows, flightsResource.importColumns)) {
+        if (!rec.code?.trim()) continue;
+        const t = (rec.flight_type || "").trim().toUpperCase();
         imported.push({
           id: crypto.randomUUID(),
-          code: code.trim(),
-          name: (name || "").trim(),
+          code: rec.code.trim(),
+          name: (rec.name || "").trim(),
           type: t === "GCR" ? "GCR" : "Prime",
         });
       }
@@ -263,16 +325,17 @@ function FlightPage() {
         toast.error("No valid rows found");
         return;
       }
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
   const handleRefresh = () => {
     setSearch("");
     setPage(1);
+    if (authed) queryClient.invalidateQueries({ queryKey: masterKeys.all(flightsResource.key) });
     toast.success("Refreshed");
   };
 
@@ -321,9 +384,11 @@ function FlightPage() {
               <IconButton label="Export" onClick={handleExport}>
                 <Download className="h-4 w-4" />
               </IconButton>
-              <IconButton label="Import" onClick={handleImport}>
-                <Upload className="h-4 w-4" />
-              </IconButton>
+              {canAdd ? (
+                <IconButton label="Import" onClick={handleImport}>
+                  <Upload className="h-4 w-4" />
+                </IconButton>
+              ) : null}
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>
@@ -343,10 +408,12 @@ function FlightPage() {
                 className="h-9 w-56 pl-8"
               />
             </div>
-            <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add
-            </Button>
+            {canAdd ? (
+              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -375,24 +442,28 @@ function FlightPage() {
                     <TableCell>{r.type}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          onClick={() => openEdit(r)}
-                          aria-label={`Edit ${r.code}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(r)}
-                          aria-label={`Delete ${r.code}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canModify ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(r)}
+                            aria-label={`Edit ${r.code}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        {canDelete ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(r)}
+                            aria-label={`Delete ${r.code}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -420,10 +491,7 @@ function FlightPage() {
             >
               <ChevronRight className="h-4 w-4" />
             </PagerButton>
-            <PagerButton
-              disabled={currentPage === totalPages}
-              onClick={() => setPage(totalPages)}
-            >
+            <PagerButton disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
               <ChevronsRight className="h-4 w-4" />
             </PagerButton>
           </div>
@@ -473,8 +541,12 @@ function FlightPage() {
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
-              Save
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              {saving ? "Saving…" : "Save"}
             </Button>
             <Button variant="destructive" onClick={() => setOpen(false)}>
               Cancel
@@ -490,7 +562,8 @@ function FlightPage() {
             <AlertDialogDescription>
               This will permanently remove{" "}
               <span className="font-medium text-foreground">{deleteTarget?.code}</span>
-              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the flight master. This action cannot be undone.
+              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the flight master. This
+              action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

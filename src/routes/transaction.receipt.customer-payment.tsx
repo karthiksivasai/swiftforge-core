@@ -1,26 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  FilePlus,
-  RefreshCw,
-  Filter,
-  Plus,
-  Search,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { FilePlus, RefreshCw, Filter, Plus, Search, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,9 +27,23 @@ import {
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import { toErrorMessage } from "@/lib/masters/screen";
+import {
+  approveCustomerPayment,
+  listCustomerPayments,
+  rejectCustomerPayment,
+  saveCustomerPayment,
+} from "@/lib/transactions/resources/finance";
+import { dbPaymentToUi, paymentFormToFields } from "@/lib/transactions/financeUiMap";
+import {
+  canApproveCustomerPayment,
+  canRejectCustomerPayment,
+  canUpdateCustomerPayment,
+} from "@/lib/transactions/schemas/finance";
 import { cn } from "@/lib/utils";
 
-type LookupPair = { code: string; name: string };
+type LookupPair = { id?: string; code: string; name: string };
 type PageView = "list" | "entry";
 type ApprovalStatus = "Pending" | "Approved" | "Rejected";
 
@@ -64,18 +65,14 @@ type PaymentRow = {
   remark: string;
   approved: ApprovalStatus;
   fileName: string;
+  status: string;
+  rowVersion: number;
   form: PaymentForm;
 };
 
-type ColFilterKey =
-  | "date"
-  | "customerName"
-  | "paidDate"
-  | "amount"
-  | "remark"
-  | "approved";
+type ColFilterKey = "date" | "customerName" | "paidDate" | "amount" | "remark" | "approved";
 
-const SEED_ROWS: Omit<PaymentRow, "id" | "form">[] = [
+const SEED_ROWS: Omit<PaymentRow, "id" | "form" | "status" | "rowVersion">[] = [
   {
     date: "06/05/2026",
     customerName: "DAP COURIERS AND LOGISTICS PRIVATE LIMITED",
@@ -163,7 +160,9 @@ const emptyForm = (): PaymentForm => ({
   fileName: "",
 });
 
-const rowToForm = (row: Omit<PaymentRow, "id" | "form">): PaymentForm => ({
+const rowToForm = (
+  row: Omit<PaymentRow, "id" | "form" | "status" | "rowVersion">,
+): PaymentForm => ({
   date: parseDisplayDate(row.date),
   paidDate: parseDisplayDate(row.paidDate),
   amount: row.amount,
@@ -172,7 +171,15 @@ const rowToForm = (row: Omit<PaymentRow, "id" | "form">): PaymentForm => ({
   fileName: row.fileName,
 });
 
-const formToRow = (form: PaymentForm, id: string, approved: ApprovalStatus): PaymentRow => ({
+const statusFromApproved = (approved: ApprovalStatus): string =>
+  approved === "Approved" ? "APPROVED" : approved === "Rejected" ? "REJECTED" : "PENDING";
+
+const formToRow = (
+  form: PaymentForm,
+  id: string,
+  approved: ApprovalStatus,
+  rowVersion = 1,
+): PaymentRow => ({
   id,
   date: formatDisplayDate(form.date),
   customerName: form.customer.name || form.customer.code,
@@ -181,6 +188,8 @@ const formToRow = (form: PaymentForm, id: string, approved: ApprovalStatus): Pay
   remark: form.remark,
   approved,
   fileName: form.fileName,
+  status: statusFromApproved(approved),
+  rowVersion,
   form: { ...form },
 });
 
@@ -188,6 +197,8 @@ const buildSeedRows = (): PaymentRow[] =>
   SEED_ROWS.map((row) => ({
     id: crypto.randomUUID(),
     ...row,
+    status: statusFromApproved(row.approved),
+    rowVersion: 1,
     form: rowToForm(row),
   }));
 
@@ -218,15 +229,30 @@ export const Route = createFileRoute("/transaction/receipt/customer-payment")({
 });
 
 function CustomerPaymentPage() {
+  const { isAuthenticated: authed } = useAuth();
+  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<PageView>("list");
-  const [rows, setRows] = useState<PaymentRow[]>(buildSeedRows);
+  const [demoRows, setDemoRows] = useState<PaymentRow[]>(buildSeedRows);
   const [editing, setEditing] = useState<PaymentRow | null>(null);
   const [form, setForm] = useState<PaymentForm>(emptyForm());
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState(emptyColFilters);
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<PaymentRow | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const liveQuery = useQuery({
+    queryKey: ["customer_payments", "list"],
+    queryFn: () => listCustomerPayments({ pageSize: 500 }),
+    enabled: authed,
+  });
+
+  const rows: PaymentRow[] = authed ? (liveQuery.data?.rows ?? []).map(dbPaymentToUi) : demoRows;
+
+  const refreshLive = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["customer_payments"] });
+  };
 
   const patchForm = (patch: Partial<PaymentForm>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -234,21 +260,17 @@ function CustomerPaymentPage() {
     const q = search.trim().toLowerCase();
     return rows.filter((row) => {
       if (q) {
-        const hay = [
-          row.date,
-          row.customerName,
-          row.paidDate,
-          row.amount,
-          row.remark,
-          row.approved,
-        ]
+        const hay = [row.date, row.customerName, row.paidDate, row.amount, row.remark, row.approved]
           .join(" ")
           .toLowerCase();
         if (!hay.includes(q)) return false;
       }
       const cf = colFilters;
       if (cf.date && !row.date.includes(cf.date)) return false;
-      if (cf.customerName && !row.customerName.toLowerCase().includes(cf.customerName.toLowerCase())) {
+      if (
+        cf.customerName &&
+        !row.customerName.toLowerCase().includes(cf.customerName.toLowerCase())
+      ) {
         return false;
       }
       if (cf.paidDate && !row.paidDate.includes(cf.paidDate)) return false;
@@ -274,6 +296,9 @@ function CustomerPaymentPage() {
   };
 
   const openEntry = (row: PaymentRow) => {
+    if (authed && !canUpdateCustomerPayment(row.status)) {
+      return toast.error("Only pending payments can be edited");
+    }
     setEditing(row);
     setForm({ ...row.form });
     setView("entry");
@@ -285,39 +310,128 @@ function CustomerPaymentPage() {
     setForm(emptyForm());
   };
 
-  const persistEntry = () => {
+  const persistEntry = async () => {
     if (!form.customer.code.trim() && !form.customer.name.trim()) {
       return toast.error("Customer is required");
     }
     if (!form.amount.trim()) return toast.error("Amount is required");
 
+    if (authed) {
+      setSaving(true);
+      try {
+        await saveCustomerPayment({
+          id: editing?.id ?? null,
+          row_version: editing?.rowVersion ?? null,
+          fields: paymentFormToFields(form),
+        });
+        await refreshLive();
+        toast.success(editing ? "Customer payment saved" : "Customer payment created");
+        closeEntry();
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     const payload = formToRow(
       form,
       editing?.id ?? crypto.randomUUID(),
       editing?.approved ?? "Pending",
+      editing?.rowVersion ?? 1,
     );
 
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? payload : r)));
-      toast.success("Customer payment saved");
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? payload : r)));
+      toast.success("Customer payment saved (demo)");
     } else {
-      setRows((prev) => [payload, ...prev]);
-      toast.success("Customer payment created");
+      setDemoRows((prev) => [payload, ...prev]);
+      toast.success("Customer payment created (demo)");
     }
     closeEntry();
   };
 
+  const approveRow = async (row: PaymentRow) => {
+    if (!canApproveCustomerPayment(row.status)) {
+      return toast.error("Only pending payments can be approved");
+    }
+    if (authed) {
+      try {
+        await approveCustomerPayment({ id: row.id, row_version: row.rowVersion });
+        await refreshLive();
+        toast.success("Customer payment approved");
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      }
+      return;
+    }
+    setDemoRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id
+          ? {
+              ...r,
+              approved: "Approved" as const,
+              status: "APPROVED",
+              rowVersion: r.rowVersion + 1,
+            }
+          : r,
+      ),
+    );
+    toast.success("Customer payment approved (demo)");
+  };
+
+  const rejectRow = async (row: PaymentRow) => {
+    if (!canRejectCustomerPayment(row.status)) {
+      return toast.error("Only pending payments can be rejected");
+    }
+    const reason = window.prompt("Rejection reason (optional):") ?? "";
+    if (authed) {
+      try {
+        await rejectCustomerPayment({
+          id: row.id,
+          row_version: row.rowVersion,
+          reason: reason.trim() || null,
+        });
+        await refreshLive();
+        toast.success("Customer payment rejected");
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      }
+      return;
+    }
+    setDemoRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id
+          ? {
+              ...r,
+              approved: "Rejected" as const,
+              status: "REJECTED",
+              rowVersion: r.rowVersion + 1,
+            }
+          : r,
+      ),
+    );
+    toast.success("Customer payment rejected (demo)");
+  };
+
   const confirmDelete = () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+    if (authed) {
+      toast.info("Delete is not available for finance history");
+      setDeleteTarget(null);
+      return;
+    }
+    setDemoRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
     toast.success("Customer payment deleted");
     setDeleteTarget(null);
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setSearch("");
     setColFilters(emptyColFilters());
     setPage(1);
+    if (authed) await refreshLive();
     toast.success("List refreshed");
   };
 
@@ -358,7 +472,10 @@ function CustomerPaymentPage() {
                 />
               </FieldWrapper>
               <FieldWrapper label="Remark">
-                <Input value={form.remark} onChange={(e) => patchForm({ remark: e.target.value })} />
+                <Input
+                  value={form.remark}
+                  onChange={(e) => patchForm({ remark: e.target.value })}
+                />
               </FieldWrapper>
               <FieldWrapper label="Customer" required className="md:col-span-2">
                 <LookupPairInput
@@ -397,7 +514,11 @@ function CustomerPaymentPage() {
           </FormSection>
 
           <div className="mt-6 flex flex-wrap justify-end gap-2">
-            <Button onClick={persistEntry} className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90">
+            <Button
+              onClick={persistEntry}
+              disabled={saving}
+              className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
               Save
             </Button>
             <Button variant="destructive" onClick={closeEntry} className="min-w-24">
@@ -417,6 +538,9 @@ function CustomerPaymentPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Customer Payment</h1>
         <p className="text-sm text-muted-foreground">
           Record customer payment submissions and track approval status.
+          {authed
+            ? " Connected to live backend."
+            : " Demo mode — sign in for live customer payments."}
         </p>
       </div>
 
@@ -455,13 +579,21 @@ function CustomerPaymentPage() {
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Date</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Customer Name</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Paid Date</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Customer Name
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Paid Date
+                </TableHead>
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Amount</TableHead>
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Remark</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Approved</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Approved
+                </TableHead>
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Image</TableHead>
-                <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">Action</TableHead>
+                <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">
+                  Action
+                </TableHead>
               </TableRow>
               <TableRow className="bg-muted/20 hover:bg-muted/20">
                 {(
@@ -539,6 +671,26 @@ function CustomerPaymentPage() {
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </IconButton>
+                        {row.approved === "Pending" ? (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-xs text-emerald-600"
+                              onClick={() => approveRow(row)}
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-xs text-destructive"
+                              onClick={() => rejectRow(row)}
+                            >
+                              Reject
+                            </Button>
+                          </>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
