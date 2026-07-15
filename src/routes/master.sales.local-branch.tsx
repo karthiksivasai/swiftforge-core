@@ -546,10 +546,10 @@ function LocalBranchPage() {
         serviceablePincodes,
       });
       if (recordId) {
-        const updated = await rc.update(recordId, payload, rowVersion ?? 0);
+        const updated = await rc.update.mutateAsync({ id: recordId, patch: payload, rowVersion: rowVersion ?? 0 });
         setRowVersion(updated.row_version);
       } else {
-        const created = await rc.create(payload);
+        const created = await rc.create.mutateAsync(payload);
         setRecordId(created.id);
         setRowVersion(created.row_version);
       }

@@ -842,7 +842,7 @@ function LookupPairInput({
         onOpenChange={setLookupOpen}
         lookup={lookup}
         returnField="code"
-        onSelect={(_v, option: LookupOption) => onChange({ id: option.id, code: option.code, name: option.name })}
+        onSelect={(_v, option: LookupOption) => onChange({ id: option.code, code: option.code, name: option.name })}
       />
     </div>
   );

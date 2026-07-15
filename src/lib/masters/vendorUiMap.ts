@@ -343,8 +343,8 @@ export function uiVendorToSavePayload(form: UiVendorRow) {
   const services: VendorServiceInput[] = form.services.map((s) => ({
     service: s.service.trim(),
     billing_vendor_id: s.billingVendorId || null,
-    min_weight: s.minWeight || null,
-    max_weight: s.maxWeight || null,
+    min_weight: s.minWeight ? Number(s.minWeight) : null,
+    max_weight: s.maxWeight ? Number(s.maxWeight) : null,
     vendor_link: s.vendorLink || null,
     is_single_piece: s.isSinglePiece,
     status: toDbStatus(s.status),

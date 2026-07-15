@@ -354,6 +354,7 @@ function ConsigneePage() {
           code: rec.code.trim(),
           name: (rec.name || "").trim(),
           customer: (rec.customer || rec.customer_name || "").trim(),
+          customerId: "",
           mobile: (rec.mobile || "").trim(),
           email: (rec.email || "").trim(),
           address: (rec.address || "").trim(),
