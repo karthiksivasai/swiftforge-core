@@ -85,7 +85,7 @@ export function unitToUi(unit: string): string {
 }
 
 export function dbVendorContractToUi(
-  root: VendorContractRow & Record<string, string>,
+  root: VendorContractRow & Record<string, unknown>,
   slab: VendorContractSlabRow,
 ): UiVendorContractRow {
   return {
