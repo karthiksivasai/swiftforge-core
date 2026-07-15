@@ -29,6 +29,11 @@ import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
 import { getShipmentTracking } from "@/lib/transactions/resources/tracking";
 import { mapTrackingToAwbQuery } from "@/lib/transactions/trackingUiMap";
+import { getCarrierAdapter } from "@/lib/integrations/adapter";
+import {
+  fetchShipmentCarrierMeta,
+  normalizeVendorToCarrierCode,
+} from "@/lib/integrations/carriers";
 
 type LookupPair = { code: string; name: string };
 type QueryTab = "shipping" | "additional" | "filter";
@@ -151,6 +156,13 @@ type AwbQueryRecord = {
   manifest: ManifestLine[];
   manifestInscan: ManifestInscanLine[];
   statusDetails: StatusLine[];
+  shipmentId?: string;
+  rowVersion?: number;
+  carrierProviderCode?: string;
+  carrierBookingRef?: string;
+  carrierTrackingNo?: string;
+  carrierBookingStatus?: string;
+  carrierLabelFileId?: string;
 };
 
 type FilterForm = {
@@ -567,6 +579,31 @@ function AwbQueryPage() {
         setQueryResult(null);
         return toast.error(`No record found for AWB ${q}`);
       }
+      let carrierMeta = {
+        carrierProviderCode: mapped.carrierProviderCode,
+        carrierBookingRef: mapped.carrierBookingRef,
+        carrierTrackingNo: mapped.carrierTrackingNo,
+        carrierBookingStatus: mapped.carrierBookingStatus,
+        carrierLabelFileId: mapped.carrierLabelFileId,
+        rowVersion: mapped.rowVersion,
+      };
+      if (mapped.shipmentId) {
+        try {
+          const meta = await fetchShipmentCarrierMeta(mapped.shipmentId);
+          if (meta) {
+            carrierMeta = {
+              carrierProviderCode: meta.carrier_provider_code ?? undefined,
+              carrierBookingRef: meta.carrier_booking_ref ?? undefined,
+              carrierTrackingNo: meta.carrier_tracking_no ?? undefined,
+              carrierBookingStatus: meta.carrier_booking_status ?? undefined,
+              carrierLabelFileId: meta.carrier_label_file_id ?? undefined,
+              rowVersion: meta.row_version,
+            };
+          }
+        } catch {
+          /* carrier columns optional if migration not applied yet */
+        }
+      }
       setQueryResult({
         awbNo: mapped.awbNo,
         lastAwbNo: mapped.lastAwbNo,
@@ -601,6 +638,8 @@ function AwbQueryPage() {
         manifest: [],
         manifestInscan: [],
         statusDetails: mapped.statusDetails,
+        shipmentId: mapped.shipmentId,
+        ...carrierMeta,
       });
       setLastAwbNo(q);
       setAwbInput(q);
@@ -613,6 +652,45 @@ function AwbQueryPage() {
   const handleRepeat = () => {
     if (!lastAwbNo) return toast.info("No previous AWB to repeat");
     void runAwbQuery(lastAwbNo);
+  };
+
+  const resolveQueryCarrier = () =>
+    queryResult?.carrierProviderCode ||
+    normalizeVendorToCarrierCode(queryResult?.vendorName) ||
+    "FEDEX";
+
+  const handleQueryCarrierTrack = async () => {
+    if (!queryResult?.shipmentId) return toast.error("Load an AWB first");
+    if (!authed) return toast.success("Tracking refreshed (demo)");
+    try {
+      const result = await getCarrierAdapter(resolveQueryCarrier()).track({
+        shipmentId: queryResult.shipmentId,
+        rowVersion: queryResult.rowVersion ?? 1,
+      });
+      if (result.status !== "SUCCESS") throw new Error(result.message);
+      toast.success("Carrier tracking refreshed");
+      await runAwbQuery(queryResult.awbNo);
+    } catch (e) {
+      toast.error(toErrorMessage(e));
+    }
+  };
+
+  const handleQueryCarrierLabel = async () => {
+    if (!queryResult?.shipmentId) return toast.error("Load an AWB first");
+    if (!authed) return toast.success("Label metadata ready (demo)");
+    try {
+      const result = await getCarrierAdapter(resolveQueryCarrier()).label({
+        shipmentId: queryResult.shipmentId,
+        rowVersion: queryResult.rowVersion ?? 1,
+      });
+      if (result.status !== "SUCCESS") throw new Error(result.message);
+      toast.success(
+        `Label metadata: ${result.data?.original_name ?? result.data?.file_id ?? "saved"}`,
+      );
+      await runAwbQuery(queryResult.awbNo);
+    } catch (e) {
+      toast.error(toErrorMessage(e));
+    }
   };
 
   const handleFilterSearch = () => {
@@ -769,6 +847,43 @@ function AwbQueryPage() {
 
           <TabsContent value="shipping" className="mt-0">
             <div className="space-y-4 p-4 md:p-6">
+              {queryResult?.shipmentId ? (
+                <FormSection title="Carrier tracking">
+                  <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <ReadOnlyField
+                      label="Provider"
+                      value={queryResult.carrierProviderCode || resolveQueryCarrier()}
+                    />
+                    <ReadOnlyField
+                      label="Booking status"
+                      value={queryResult.carrierBookingStatus || "NONE"}
+                    />
+                    <ReadOnlyField label="Booking ref" value={queryResult.carrierBookingRef} />
+                    <ReadOnlyField label="Tracking no" value={queryResult.carrierTrackingNo} />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={queryResult.carrierBookingStatus !== "BOOKED"}
+                      onClick={() => void handleQueryCarrierTrack()}
+                    >
+                      <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                      Refresh tracking
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={queryResult.carrierBookingStatus !== "BOOKED"}
+                      onClick={() => void handleQueryCarrierLabel()}
+                    >
+                      Download label
+                    </Button>
+                  </div>
+                </FormSection>
+              ) : null}
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr_1fr_auto]">
                 <DetailPanel title="Customer Details" text={queryResult?.customerDetails ?? ""} />
                 <FormSection title="POD Details">

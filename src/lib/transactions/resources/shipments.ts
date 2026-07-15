@@ -82,6 +82,12 @@ export type ShipmentRow = BaseRow & {
   is_locked: boolean;
   is_hold: boolean;
   wizard_extras: Record<string, unknown>;
+  carrier_provider_code: string | null;
+  carrier_booking_ref: string | null;
+  carrier_tracking_no: string | null;
+  carrier_label_file_id: string | null;
+  carrier_booking_status: string | null;
+  carrier_last_sync_at: string | null;
   customers: NamedRef;
   products: NamedRef;
   vendors: NamedRef;
@@ -152,6 +158,8 @@ const SHIPMENT_COLUMNS = `
   cash_receipt_no, amount_received, balance_amount, cash_receipt_date,
   forwarding_awb, delivery_awb, return_awb, delivery_vendor_id, delivery_service,
   flight_no, current_status, status_at, is_locked, is_hold, wizard_extras,
+  carrier_provider_code, carrier_booking_ref, carrier_tracking_no,
+  carrier_label_file_id, carrier_booking_status, carrier_last_sync_at,
   created_at, created_by, updated_at, updated_by, deleted_at, row_version,
   customers(code,name),
   products(code,name),

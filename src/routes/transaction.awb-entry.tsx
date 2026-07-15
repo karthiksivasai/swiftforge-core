@@ -79,6 +79,8 @@ import {
   dbShipmentToListRow,
   uiFormToShipmentPayload,
 } from "@/lib/transactions/shipmentUiMap";
+import { getCarrierAdapter } from "@/lib/integrations/adapter";
+import { normalizeVendorToCarrierCode, SUPPORTED_CARRIER_CODES } from "@/lib/integrations/carriers";
 
 type LookupPair = { id?: string; code: string; name: string };
 
@@ -247,7 +249,17 @@ type AwbFullForm = {
   kyc: KycData;
 };
 
-type AwbRow = AwbFullForm & { id: string; rowVersion?: number; status?: string; pickupId?: string };
+type AwbRow = AwbFullForm & {
+  id: string;
+  rowVersion?: number;
+  status?: string;
+  pickupId?: string;
+  carrierProviderCode?: string;
+  carrierBookingRef?: string;
+  carrierTrackingNo?: string;
+  carrierBookingStatus?: string;
+  carrierLabelFileId?: string;
+};
 
 type SearchField = "awbNo" | "forwardingNo" | "deliveryNo" | "referenceNo";
 
@@ -1128,6 +1140,11 @@ function AwbEntryPage() {
           chargeWeight: list.weight,
           forwardingNo: list.forwardingNo,
           deliveryNo: list.deliveryNo,
+          carrierProviderCode: list.carrierProviderCode,
+          carrierBookingRef: list.carrierBookingRef,
+          carrierTrackingNo: list.carrierTrackingNo,
+          carrierBookingStatus: list.carrierBookingStatus,
+          carrierLabelFileId: list.carrierLabelFileId,
         };
       })
     : demoRows;
@@ -1385,13 +1402,28 @@ function AwbEntryPage() {
         }
         const children = await fetchShipmentChildren(row.id);
         const patch = dbShipmentToFormPatch(full, children);
-        const { id: _id, rowVersion, status, ...rest } = patch;
+        const {
+          id: _id,
+          rowVersion,
+          status,
+          carrierProviderCode,
+          carrierBookingRef,
+          carrierTrackingNo,
+          carrierBookingStatus,
+          carrierLabelFileId,
+          ...rest
+        } = patch;
         setEditing({
           ...emptyForm(),
           ...rest,
           id: row.id,
           rowVersion,
           status,
+          carrierProviderCode,
+          carrierBookingRef,
+          carrierTrackingNo,
+          carrierBookingStatus,
+          carrierLabelFileId,
         } as AwbRow);
         setForm(normalizeForm({ ...emptyForm(), ...rest } as AwbFullForm));
         setRatingSummary(null);
@@ -1636,6 +1668,183 @@ function AwbEntryPage() {
     setCancelShipmentTarget(null);
     if (editing?.id === target.id) closeForm();
   };
+
+  const resolveCarrierCode = () =>
+    editing?.carrierProviderCode ||
+    normalizeVendorToCarrierCode(form.vendor.code) ||
+    normalizeVendorToCarrierCode(editing?.vendor?.code) ||
+    "FEDEX";
+
+  const patchEditingCarrier = (data: Record<string, unknown> | undefined) => {
+    if (!editing || !data) return;
+    setEditing((prev) =>
+      prev
+        ? {
+            ...prev,
+            rowVersion: Number(data.row_version ?? prev.rowVersion ?? 1),
+            carrierProviderCode: data.provider_code
+              ? String(data.provider_code)
+              : prev.carrierProviderCode,
+            carrierBookingRef: data.booking_ref ? String(data.booking_ref) : prev.carrierBookingRef,
+            carrierTrackingNo: data.tracking_no ? String(data.tracking_no) : prev.carrierTrackingNo,
+            carrierBookingStatus: data.carrier_booking_status
+              ? String(data.carrier_booking_status)
+              : prev.carrierBookingStatus,
+            carrierLabelFileId: data.file_id ? String(data.file_id) : prev.carrierLabelFileId,
+          }
+        : prev,
+    );
+  };
+
+  const handleCarrierBook = async () => {
+    if (!editing?.id) return;
+    if (!authed) {
+      setEditing((prev) =>
+        prev
+          ? {
+              ...prev,
+              carrierProviderCode: resolveCarrierCode(),
+              carrierBookingRef: `DEMO-${Date.now()}`,
+              carrierTrackingNo: `TRK-${editing.awbNo || "DEMO"}`,
+              carrierBookingStatus: "BOOKED",
+            }
+          : prev,
+      );
+      toast.success("Booked with carrier (demo)");
+      return;
+    }
+    setSaving(true);
+    try {
+      const code = resolveCarrierCode();
+      const result = await getCarrierAdapter(code).book({
+        shipmentId: editing.id,
+        rowVersion: editing.rowVersion ?? 1,
+      });
+      if (result.status !== "SUCCESS") throw new Error(result.message);
+      patchEditingCarrier(result.data);
+      await refreshLive();
+      toast.success(
+        `Carrier booked (${result.data?.provider_code ?? code}) — ${result.data?.tracking_no ?? ""}`,
+      );
+    } catch (e) {
+      toast.error(toErrorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCarrierCancel = async () => {
+    if (!editing?.id) return;
+    if (!authed) {
+      setEditing((prev) => (prev ? { ...prev, carrierBookingStatus: "CANCELLED" } : prev));
+      toast.success("Carrier booking cancelled (demo)");
+      return;
+    }
+    setSaving(true);
+    try {
+      const code = resolveCarrierCode();
+      const result = await getCarrierAdapter(code).cancel({
+        shipmentId: editing.id,
+        rowVersion: editing.rowVersion ?? 1,
+      });
+      if (result.status !== "SUCCESS") throw new Error(result.message);
+      patchEditingCarrier(result.data);
+      await refreshLive();
+      toast.success("Carrier booking cancelled");
+    } catch (e) {
+      toast.error(toErrorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCarrierTrack = async () => {
+    if (!editing?.id) return;
+    if (!authed) {
+      toast.success("Tracking refreshed (demo)");
+      return;
+    }
+    setSaving(true);
+    try {
+      const code = resolveCarrierCode();
+      const result = await getCarrierAdapter(code).track({
+        shipmentId: editing.id,
+        rowVersion: editing.rowVersion ?? 1,
+      });
+      if (result.status !== "SUCCESS") throw new Error(result.message);
+      patchEditingCarrier(result.data);
+      await refreshLive();
+      toast.success("Carrier tracking refreshed");
+    } catch (e) {
+      toast.error(toErrorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCarrierLabel = async () => {
+    if (!editing?.id) return;
+    if (!authed) {
+      toast.success("Label metadata ready (demo)");
+      return;
+    }
+    setSaving(true);
+    try {
+      const code = resolveCarrierCode();
+      const result = await getCarrierAdapter(code).label({
+        shipmentId: editing.id,
+        rowVersion: editing.rowVersion ?? 1,
+      });
+      if (result.status !== "SUCCESS") throw new Error(result.message);
+      patchEditingCarrier(result.data);
+      await refreshLive();
+      toast.success(
+        `Label metadata: ${result.data?.original_name ?? result.data?.file_id ?? "saved"}`,
+      );
+    } catch (e) {
+      toast.error(toErrorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCarrierServiceability = async () => {
+    const origin = form.shipper.pincode.trim();
+    const dest = form.consignee.pincode.trim();
+    if (!origin || !dest) {
+      toast.error("Shipper and consignee pincode are required for serviceability");
+      return;
+    }
+    if (!authed) {
+      toast.success(`Serviceable (demo): ${origin} → ${dest}`);
+      return;
+    }
+    setSaving(true);
+    try {
+      const code = resolveCarrierCode();
+      const result = await getCarrierAdapter(code).serviceability({
+        originPincode: origin,
+        destinationPincode: dest,
+      });
+      if (result.status !== "SUCCESS") throw new Error(result.message);
+      toast.success(
+        `${code}: ${result.message}${result.data?.reason ? ` — ${result.data.reason}` : ""}`,
+      );
+    } catch (e) {
+      toast.error(toErrorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const canCarrierActions = Boolean(
+    editing?.id &&
+    formStatus &&
+    formStatus !== "DRAFT" &&
+    formStatus !== "CANCELLED" &&
+    formStatus !== "VOID",
+  );
+  const carrierBooked = editing?.carrierBookingStatus === "BOOKED";
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
@@ -2624,6 +2833,97 @@ function AwbEntryPage() {
                   </FormSection>
                 </div>
               </fieldset>
+              {canCarrierActions ? (
+                <div className="border-t px-4 py-4 md:px-6">
+                  <FormSection title="Carrier booking & tracking">
+                    <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <FieldWrapper label="Provider">
+                        <Input
+                          readOnly
+                          className="bg-muted/30"
+                          value={editing?.carrierProviderCode || resolveCarrierCode()}
+                        />
+                      </FieldWrapper>
+                      <FieldWrapper label="Booking status">
+                        <Input
+                          readOnly
+                          className="bg-muted/30"
+                          value={editing?.carrierBookingStatus || "NONE"}
+                        />
+                      </FieldWrapper>
+                      <FieldWrapper label="Booking ref">
+                        <Input
+                          readOnly
+                          className="bg-muted/30"
+                          value={editing?.carrierBookingRef || ""}
+                        />
+                      </FieldWrapper>
+                      <FieldWrapper label="Tracking no">
+                        <Input
+                          readOnly
+                          className="bg-muted/30"
+                          value={editing?.carrierTrackingNo || ""}
+                        />
+                      </FieldWrapper>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {!carrierBooked ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={saving}
+                          onClick={() => void handleCarrierBook()}
+                        >
+                          Book with carrier
+                        </Button>
+                      ) : (
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={saving}
+                            onClick={() => void handleCarrierCancel()}
+                          >
+                            Cancel booking
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={saving}
+                            onClick={() => void handleCarrierTrack()}
+                          >
+                            Refresh tracking
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={saving}
+                            onClick={() => void handleCarrierLabel()}
+                          >
+                            Download label
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={saving}
+                        onClick={() => void handleCarrierServiceability()}
+                      >
+                        Check serviceability
+                      </Button>
+                      <span className="self-center text-xs text-muted-foreground">
+                        Supported: {SUPPORTED_CARRIER_CODES.join(", ")}
+                      </span>
+                    </div>
+                  </FormSection>
+                </div>
+              ) : null}
               <div className="border-t px-4 py-4 md:px-6">
                 {bookingErrors.length > 0 ? (
                   <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">

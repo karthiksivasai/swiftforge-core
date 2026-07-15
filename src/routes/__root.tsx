@@ -155,7 +155,7 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isAuthRoute = pathname === "/login";
+  const isBareRoute = pathname === "/login" || pathname.startsWith("/public/");
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -163,7 +163,7 @@ function RootComponent() {
         <TenantProvider>
           <AuthProvider>
             <TooltipProvider delayDuration={0}>
-              {isAuthRoute ? (
+              {isBareRoute ? (
                 <>
                   <Outlet />
                   <Toaster />

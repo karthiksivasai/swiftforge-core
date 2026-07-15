@@ -834,7 +834,9 @@ function BaggingPage() {
       ["Manifest", "MasterAWB", "Origin", "Destination", "Vendor", "Shipment", "Weight"],
       [[row.manifestNo, row.masterAwbNo, row.origin, row.destination, row.vendorName, String(row.shipment), row.weight]],
     );
-    toast.success(`Exported ${safeName}`);
+    toast.success(
+      `Exported ${safeName} (local). Full CSB-III/IV/V sandbox export is under Utility → Integration Configuration.`,
+    );
   };
 
   const openAddProgress = (row: BaggingRow) => {

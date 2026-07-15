@@ -357,7 +357,21 @@ export const FIELD_LABELS: Record<ReportFieldKey, string> = {
   awbNo: "AWB No.",
 };
 
-export const LOOKUP_FIELDS: Partial<Record<ReportFieldKey, "customer" | "destination" | "product" | "vendor" | "zone" | "fieldExecutive" | "exception" | "serviceCentre">> = {
+export const LOOKUP_FIELDS: Partial<
+  Record<
+    ReportFieldKey,
+    | "customer"
+    | "destination"
+    | "product"
+    | "vendor"
+    | "zone"
+    | "fieldExecutive"
+    | "exception"
+    | "serviceCentre"
+    | "paymentType"
+    | "serviceType"
+  >
+> = {
   customer: "customer",
   origin: "destination",
   serviceCenter: "serviceCentre",
@@ -367,4 +381,6 @@ export const LOOKUP_FIELDS: Partial<Record<ReportFieldKey, "customer" | "destina
   zone: "zone",
   fieldExecutive: "fieldExecutive",
   exception: "exception",
+  paymentType: "paymentType",
+  serviceType: "serviceType",
 };

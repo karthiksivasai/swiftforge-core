@@ -154,6 +154,14 @@ export const VENDOR_AGGREGATE_PERMISSIONS = {
 export type VendorAggregateKey = keyof typeof VENDOR_AGGREGATE_PERMISSIONS;
 
 /**
+ * Integration framework permission (Phase 7 — Milestone 7A).
+ * Reuses vendor-master — no new RBAC slug.
+ */
+export const INTEGRATION_PERMISSIONS = {
+  credentials: "mst.vendor-master",
+} as const;
+
+/**
  * Service mapping master permission slug (Phase 3 — Operation Masters).
  * Seeded in migration 0010 as `mst.service-mapping`.
  */
@@ -258,6 +266,49 @@ export const FINANCE_PERMISSIONS = {
   expenseEntry: "txn.expense-entry",
   expenseAuthorize: "txn.expense-authorize",
   customerPay: "txn.customer-pay",
+  debitNote: "txn.debit-note",
+  creditNote: "txn.credit-note",
+  invoiceIrnGeneration: "doc.invoice-irn-generation",
+  invoiceCancelAfterIrn: "doc.invoice-cancel-after-irn-generated",
 } as const;
 
 export type FinancePermissionKey = keyof typeof FINANCE_PERMISSIONS;
+
+/**
+ * Customs EDI / CSB export permission slugs (Phase 7 — Milestone 7F).
+ * Seeded in migration 0010.
+ */
+export const CUSTOMS_EDI_PERMISSIONS = {
+  ediCsbFiles: "rpt.edi-csb-files",
+  bagging: "txn.bagging",
+} as const;
+
+export type CustomsEdiPermissionKey = keyof typeof CUSTOMS_EDI_PERMISSIONS;
+
+/**
+ * Utility tax/fuel setup permission slugs (Phase 6 — Milestone 6D).
+ * Seeded in migration 0010.
+ */
+export const UTILITY_TAX_FUEL_PERMISSIONS = {
+  fuelSetup: "utl.fuel-setup",
+  taxSetup: "utl.tax-surcharge-setup",
+} as const;
+
+export type UtilityTaxFuelPermissionKey = keyof typeof UTILITY_TAX_FUEL_PERMISSIONS;
+
+/**
+ * Utility notification / email setup permission slugs (Phase 6 — Milestone 6E).
+ * Seeded in migration 0010.
+ */
+export const UTILITY_NOTIFICATION_PERMISSIONS = {
+  notification: "utl.notification",
+  xpresionSetup: "utl.xpresion-setup",
+} as const;
+
+export type UtilityNotificationPermissionKey = keyof typeof UTILITY_NOTIFICATION_PERMISSIONS;
+
+/**
+ * Utility serviceable pincode permission slug (Phase 6 — Milestone 6F).
+ * Seeded in migration 0010.
+ */
+export const UTILITY_SERVICEABLE_PINCODE_PERMISSION = "utl.serviceable-pincode" as const;

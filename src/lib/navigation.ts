@@ -221,6 +221,10 @@ export const NAVIGATION: NavSection[] = [
     items: makeLeaves("/utility", [
       { label: "Serviceable Pincode", slug: "serviceable-pincode" },
       { label: "Notification", slug: "notification" },
+      { label: "Notification Setup", slug: "notification-setup" },
+      { label: "Notification Templates", slug: "notification-templates" },
+      { label: "Integration Configuration", slug: "integration-configuration" },
+      { label: "Webhooks", slug: "webhooks" },
     ]),
     groups: [
       makeGroup("utility", {
@@ -257,7 +261,9 @@ export const NAVIGATION: NavSection[] = [
         slug: "rate-zone-update",
         items: [
           { label: "Rate Update", slug: "rate-update" },
+          { label: "Rate Update Jobs", slug: "rate-update-jobs" },
           { label: "Zone Update", slug: "zone-update" },
+          { label: "Zone Update Jobs", slug: "zone-update-jobs" },
           { label: "Rate Import", slug: "rate-import" },
         ],
       }),

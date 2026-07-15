@@ -95,6 +95,12 @@ export type AwbQueryMapped = {
   rowVersion: number;
   isHold: boolean;
   currentStatus: string;
+  shipmentId: string;
+  carrierProviderCode?: string;
+  carrierBookingRef?: string;
+  carrierTrackingNo?: string;
+  carrierBookingStatus?: string;
+  carrierLabelFileId?: string;
 };
 
 export function mapTrackingToAwbQuery(result: ShipmentTrackingResult): AwbQueryMapped | null {
@@ -216,5 +222,11 @@ export function mapTrackingToAwbQuery(result: ShipmentTrackingResult): AwbQueryM
     rowVersion: Number(s.row_version ?? 1),
     isHold: Boolean(result.is_hold ?? s.is_hold),
     currentStatus: status,
+    shipmentId: String(s.id ?? ""),
+    carrierProviderCode: s.carrier_provider_code ? String(s.carrier_provider_code) : undefined,
+    carrierBookingRef: s.carrier_booking_ref ? String(s.carrier_booking_ref) : undefined,
+    carrierTrackingNo: s.carrier_tracking_no ? String(s.carrier_tracking_no) : undefined,
+    carrierBookingStatus: s.carrier_booking_status ? String(s.carrier_booking_status) : undefined,
+    carrierLabelFileId: s.carrier_label_file_id ? String(s.carrier_label_file_id) : undefined,
   };
 }

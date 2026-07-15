@@ -13,8 +13,12 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as DemoRouteImport } from './routes/demo'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as UtilityWebhooksRouteImport } from './routes/utility.webhooks'
 import { Route as UtilityServiceablePincodeRouteImport } from './routes/utility.serviceable-pincode'
+import { Route as UtilityNotificationTemplatesRouteImport } from './routes/utility.notification-templates'
+import { Route as UtilityNotificationSetupRouteImport } from './routes/utility.notification-setup'
 import { Route as UtilityNotificationRouteImport } from './routes/utility.notification'
+import { Route as UtilityIntegrationConfigurationRouteImport } from './routes/utility.integration-configuration'
 import { Route as UtilitySplatRouteImport } from './routes/utility.$'
 import { Route as TransactionUnDeliveryScanRouteImport } from './routes/transaction.un-delivery-scan'
 import { Route as TransactionTransferRunRouteImport } from './routes/transaction.transfer-run'
@@ -31,17 +35,22 @@ import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
 import { Route as ReportsStatementsRouteImport } from './routes/reports.statements'
 import { Route as ReportsScanRouteImport } from './routes/reports.scan'
 import { Route as ReportsOperationsRouteImport } from './routes/reports.operations'
+import { Route as ReportsJobsRouteImport } from './routes/reports.jobs'
 import { Route as ReportsAwbRouteImport } from './routes/reports.awb'
 import { Route as ReportsArReportRouteImport } from './routes/reports.ar-report'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
+import { Route as PublicTrackRouteImport } from './routes/public.track'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
+import { Route as ReportsRunIndexRouteImport } from './routes/reports.run.index'
 import { Route as UtilityUsersUserSetupRouteImport } from './routes/utility.users.user-setup'
 import { Route as UtilityUsersLoggedinUsersRouteImport } from './routes/utility.users.loggedin-users'
 import { Route as UtilityUsersAccessRightsRouteImport } from './routes/utility.users.access-rights'
 import { Route as UtilityTaxChargesSetupTaxSetupRouteImport } from './routes/utility.tax-charges-setup.tax-setup'
 import { Route as UtilityTaxChargesSetupSetupRouteImport } from './routes/utility.tax-charges-setup.setup'
 import { Route as UtilityTaxChargesSetupFuelSetupRouteImport } from './routes/utility.tax-charges-setup.fuel-setup'
+import { Route as UtilityRateZoneUpdateZoneUpdateJobsRouteImport } from './routes/utility.rate-zone-update.zone-update-jobs'
 import { Route as UtilityRateZoneUpdateZoneUpdateRouteImport } from './routes/utility.rate-zone-update.zone-update'
+import { Route as UtilityRateZoneUpdateRateUpdateJobsRouteImport } from './routes/utility.rate-zone-update.rate-update-jobs'
 import { Route as UtilityRateZoneUpdateRateUpdateRouteImport } from './routes/utility.rate-zone-update.rate-update'
 import { Route as UtilityRateZoneUpdateRateImportRouteImport } from './routes/utility.rate-zone-update.rate-import'
 import { Route as UtilityExcelImportPodMergingRouteImport } from './routes/utility.excel-import.pod-merging'
@@ -64,6 +73,7 @@ import { Route as TransactionRateCompareVendorRateCompareRouteImport } from './r
 import { Route as TransactionRateCompareCustomerRateCompareRouteImport } from './routes/transaction.rate-compare.customer-rate-compare'
 import { Route as TransactionOutScanObcEntryRouteImport } from './routes/transaction.out-scan.obc-entry'
 import { Route as TransactionBulkImportPodToExcelRouteImport } from './routes/transaction.bulk-import.pod-to-excel'
+import { Route as ReportsRunReportKeyRouteImport } from './routes/reports.run.$reportKey'
 import { Route as MasterVendorVendorContractRouteImport } from './routes/master.vendor.vendor-contract'
 import { Route as MasterVendorVendorRouteImport } from './routes/master.vendor.vendor'
 import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
@@ -114,10 +124,27 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const UtilityWebhooksRoute = UtilityWebhooksRouteImport.update({
+  id: '/utility/webhooks',
+  path: '/utility/webhooks',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UtilityServiceablePincodeRoute =
   UtilityServiceablePincodeRouteImport.update({
     id: '/utility/serviceable-pincode',
     path: '/utility/serviceable-pincode',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityNotificationTemplatesRoute =
+  UtilityNotificationTemplatesRouteImport.update({
+    id: '/utility/notification-templates',
+    path: '/utility/notification-templates',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityNotificationSetupRoute =
+  UtilityNotificationSetupRouteImport.update({
+    id: '/utility/notification-setup',
+    path: '/utility/notification-setup',
     getParentRoute: () => rootRouteImport,
   } as any)
 const UtilityNotificationRoute = UtilityNotificationRouteImport.update({
@@ -125,6 +152,12 @@ const UtilityNotificationRoute = UtilityNotificationRouteImport.update({
   path: '/utility/notification',
   getParentRoute: () => rootRouteImport,
 } as any)
+const UtilityIntegrationConfigurationRoute =
+  UtilityIntegrationConfigurationRouteImport.update({
+    id: '/utility/integration-configuration',
+    path: '/utility/integration-configuration',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const UtilitySplatRoute = UtilitySplatRouteImport.update({
   id: '/utility/$',
   path: '/utility/$',
@@ -208,6 +241,11 @@ const ReportsOperationsRoute = ReportsOperationsRouteImport.update({
   path: '/reports/operations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReportsJobsRoute = ReportsJobsRouteImport.update({
+  id: '/reports/jobs',
+  path: '/reports/jobs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReportsAwbRoute = ReportsAwbRouteImport.update({
   id: '/reports/awb',
   path: '/reports/awb',
@@ -223,9 +261,19 @@ const ReportsSplatRoute = ReportsSplatRouteImport.update({
   path: '/reports/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PublicTrackRoute = PublicTrackRouteImport.update({
+  id: '/public/track',
+  path: '/public/track',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MasterSplatRoute = MasterSplatRouteImport.update({
   id: '/master/$',
   path: '/master/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsRunIndexRoute = ReportsRunIndexRouteImport.update({
+  id: '/reports/run/',
+  path: '/reports/run/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const UtilityUsersUserSetupRoute = UtilityUsersUserSetupRouteImport.update({
@@ -263,10 +311,22 @@ const UtilityTaxChargesSetupFuelSetupRoute =
     path: '/utility/tax-charges-setup/fuel-setup',
     getParentRoute: () => rootRouteImport,
   } as any)
+const UtilityRateZoneUpdateZoneUpdateJobsRoute =
+  UtilityRateZoneUpdateZoneUpdateJobsRouteImport.update({
+    id: '/utility/rate-zone-update/zone-update-jobs',
+    path: '/utility/rate-zone-update/zone-update-jobs',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const UtilityRateZoneUpdateZoneUpdateRoute =
   UtilityRateZoneUpdateZoneUpdateRouteImport.update({
     id: '/utility/rate-zone-update/zone-update',
     path: '/utility/rate-zone-update/zone-update',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityRateZoneUpdateRateUpdateJobsRoute =
+  UtilityRateZoneUpdateRateUpdateJobsRouteImport.update({
+    id: '/utility/rate-zone-update/rate-update-jobs',
+    path: '/utility/rate-zone-update/rate-update-jobs',
     getParentRoute: () => rootRouteImport,
   } as any)
 const UtilityRateZoneUpdateRateUpdateRoute =
@@ -401,6 +461,11 @@ const TransactionBulkImportPodToExcelRoute =
     path: '/transaction/bulk-import/pod-to-excel',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ReportsRunReportKeyRoute = ReportsRunReportKeyRouteImport.update({
+  id: '/reports/run/$reportKey',
+  path: '/reports/run/$reportKey',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MasterVendorVendorContractRoute =
   MasterVendorVendorContractRouteImport.update({
     id: '/master/vendor/vendor-contract',
@@ -562,9 +627,11 @@ export interface FileRoutesByFullPath {
   '/demo': typeof DemoRoute
   '/login': typeof LoginRoute
   '/master/$': typeof MasterSplatRoute
+  '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
   '/reports/ar-report': typeof ReportsArReportRoute
   '/reports/awb': typeof ReportsAwbRoute
+  '/reports/jobs': typeof ReportsJobsRoute
   '/reports/operations': typeof ReportsOperationsRoute
   '/reports/scan': typeof ReportsScanRoute
   '/reports/statements': typeof ReportsStatementsRoute
@@ -581,8 +648,12 @@ export interface FileRoutesByFullPath {
   '/transaction/transfer-run': typeof TransactionTransferRunRoute
   '/transaction/un-delivery-scan': typeof TransactionUnDeliveryScanRoute
   '/utility/$': typeof UtilitySplatRoute
+  '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
+  '/utility/notification-setup': typeof UtilityNotificationSetupRoute
+  '/utility/notification-templates': typeof UtilityNotificationTemplatesRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/utility/webhooks': typeof UtilityWebhooksRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -612,6 +683,7 @@ export interface FileRoutesByFullPath {
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
   '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
+  '/reports/run/$reportKey': typeof ReportsRunReportKeyRoute
   '/transaction/bulk-import/pod-to-excel': typeof TransactionBulkImportPodToExcelRoute
   '/transaction/out-scan/obc-entry': typeof TransactionOutScanObcEntryRoute
   '/transaction/rate-compare/customer-rate-compare': typeof TransactionRateCompareCustomerRateCompareRoute
@@ -634,13 +706,16 @@ export interface FileRoutesByFullPath {
   '/utility/excel-import/pod-merging': typeof UtilityExcelImportPodMergingRoute
   '/utility/rate-zone-update/rate-import': typeof UtilityRateZoneUpdateRateImportRoute
   '/utility/rate-zone-update/rate-update': typeof UtilityRateZoneUpdateRateUpdateRoute
+  '/utility/rate-zone-update/rate-update-jobs': typeof UtilityRateZoneUpdateRateUpdateJobsRoute
   '/utility/rate-zone-update/zone-update': typeof UtilityRateZoneUpdateZoneUpdateRoute
+  '/utility/rate-zone-update/zone-update-jobs': typeof UtilityRateZoneUpdateZoneUpdateJobsRoute
   '/utility/tax-charges-setup/fuel-setup': typeof UtilityTaxChargesSetupFuelSetupRoute
   '/utility/tax-charges-setup/setup': typeof UtilityTaxChargesSetupSetupRoute
   '/utility/tax-charges-setup/tax-setup': typeof UtilityTaxChargesSetupTaxSetupRoute
   '/utility/users/access-rights': typeof UtilityUsersAccessRightsRoute
   '/utility/users/loggedin-users': typeof UtilityUsersLoggedinUsersRoute
   '/utility/users/user-setup': typeof UtilityUsersUserSetupRoute
+  '/reports/run/': typeof ReportsRunIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -648,9 +723,11 @@ export interface FileRoutesByTo {
   '/demo': typeof DemoRoute
   '/login': typeof LoginRoute
   '/master/$': typeof MasterSplatRoute
+  '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
   '/reports/ar-report': typeof ReportsArReportRoute
   '/reports/awb': typeof ReportsAwbRoute
+  '/reports/jobs': typeof ReportsJobsRoute
   '/reports/operations': typeof ReportsOperationsRoute
   '/reports/scan': typeof ReportsScanRoute
   '/reports/statements': typeof ReportsStatementsRoute
@@ -667,8 +744,12 @@ export interface FileRoutesByTo {
   '/transaction/transfer-run': typeof TransactionTransferRunRoute
   '/transaction/un-delivery-scan': typeof TransactionUnDeliveryScanRoute
   '/utility/$': typeof UtilitySplatRoute
+  '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
+  '/utility/notification-setup': typeof UtilityNotificationSetupRoute
+  '/utility/notification-templates': typeof UtilityNotificationTemplatesRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/utility/webhooks': typeof UtilityWebhooksRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -698,6 +779,7 @@ export interface FileRoutesByTo {
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
   '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
+  '/reports/run/$reportKey': typeof ReportsRunReportKeyRoute
   '/transaction/bulk-import/pod-to-excel': typeof TransactionBulkImportPodToExcelRoute
   '/transaction/out-scan/obc-entry': typeof TransactionOutScanObcEntryRoute
   '/transaction/rate-compare/customer-rate-compare': typeof TransactionRateCompareCustomerRateCompareRoute
@@ -720,13 +802,16 @@ export interface FileRoutesByTo {
   '/utility/excel-import/pod-merging': typeof UtilityExcelImportPodMergingRoute
   '/utility/rate-zone-update/rate-import': typeof UtilityRateZoneUpdateRateImportRoute
   '/utility/rate-zone-update/rate-update': typeof UtilityRateZoneUpdateRateUpdateRoute
+  '/utility/rate-zone-update/rate-update-jobs': typeof UtilityRateZoneUpdateRateUpdateJobsRoute
   '/utility/rate-zone-update/zone-update': typeof UtilityRateZoneUpdateZoneUpdateRoute
+  '/utility/rate-zone-update/zone-update-jobs': typeof UtilityRateZoneUpdateZoneUpdateJobsRoute
   '/utility/tax-charges-setup/fuel-setup': typeof UtilityTaxChargesSetupFuelSetupRoute
   '/utility/tax-charges-setup/setup': typeof UtilityTaxChargesSetupSetupRoute
   '/utility/tax-charges-setup/tax-setup': typeof UtilityTaxChargesSetupTaxSetupRoute
   '/utility/users/access-rights': typeof UtilityUsersAccessRightsRoute
   '/utility/users/loggedin-users': typeof UtilityUsersLoggedinUsersRoute
   '/utility/users/user-setup': typeof UtilityUsersUserSetupRoute
+  '/reports/run': typeof ReportsRunIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -735,9 +820,11 @@ export interface FileRoutesById {
   '/demo': typeof DemoRoute
   '/login': typeof LoginRoute
   '/master/$': typeof MasterSplatRoute
+  '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
   '/reports/ar-report': typeof ReportsArReportRoute
   '/reports/awb': typeof ReportsAwbRoute
+  '/reports/jobs': typeof ReportsJobsRoute
   '/reports/operations': typeof ReportsOperationsRoute
   '/reports/scan': typeof ReportsScanRoute
   '/reports/statements': typeof ReportsStatementsRoute
@@ -754,8 +841,12 @@ export interface FileRoutesById {
   '/transaction/transfer-run': typeof TransactionTransferRunRoute
   '/transaction/un-delivery-scan': typeof TransactionUnDeliveryScanRoute
   '/utility/$': typeof UtilitySplatRoute
+  '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
+  '/utility/notification-setup': typeof UtilityNotificationSetupRoute
+  '/utility/notification-templates': typeof UtilityNotificationTemplatesRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/utility/webhooks': typeof UtilityWebhooksRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -785,6 +876,7 @@ export interface FileRoutesById {
   '/master/sales/zone': typeof MasterSalesZoneRoute
   '/master/vendor/vendor': typeof MasterVendorVendorRoute
   '/master/vendor/vendor-contract': typeof MasterVendorVendorContractRoute
+  '/reports/run/$reportKey': typeof ReportsRunReportKeyRoute
   '/transaction/bulk-import/pod-to-excel': typeof TransactionBulkImportPodToExcelRoute
   '/transaction/out-scan/obc-entry': typeof TransactionOutScanObcEntryRoute
   '/transaction/rate-compare/customer-rate-compare': typeof TransactionRateCompareCustomerRateCompareRoute
@@ -807,13 +899,16 @@ export interface FileRoutesById {
   '/utility/excel-import/pod-merging': typeof UtilityExcelImportPodMergingRoute
   '/utility/rate-zone-update/rate-import': typeof UtilityRateZoneUpdateRateImportRoute
   '/utility/rate-zone-update/rate-update': typeof UtilityRateZoneUpdateRateUpdateRoute
+  '/utility/rate-zone-update/rate-update-jobs': typeof UtilityRateZoneUpdateRateUpdateJobsRoute
   '/utility/rate-zone-update/zone-update': typeof UtilityRateZoneUpdateZoneUpdateRoute
+  '/utility/rate-zone-update/zone-update-jobs': typeof UtilityRateZoneUpdateZoneUpdateJobsRoute
   '/utility/tax-charges-setup/fuel-setup': typeof UtilityTaxChargesSetupFuelSetupRoute
   '/utility/tax-charges-setup/setup': typeof UtilityTaxChargesSetupSetupRoute
   '/utility/tax-charges-setup/tax-setup': typeof UtilityTaxChargesSetupTaxSetupRoute
   '/utility/users/access-rights': typeof UtilityUsersAccessRightsRoute
   '/utility/users/loggedin-users': typeof UtilityUsersLoggedinUsersRoute
   '/utility/users/user-setup': typeof UtilityUsersUserSetupRoute
+  '/reports/run/': typeof ReportsRunIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -823,9 +918,11 @@ export interface FileRouteTypes {
     | '/demo'
     | '/login'
     | '/master/$'
+    | '/public/track'
     | '/reports/$'
     | '/reports/ar-report'
     | '/reports/awb'
+    | '/reports/jobs'
     | '/reports/operations'
     | '/reports/scan'
     | '/reports/statements'
@@ -842,8 +939,12 @@ export interface FileRouteTypes {
     | '/transaction/transfer-run'
     | '/transaction/un-delivery-scan'
     | '/utility/$'
+    | '/utility/integration-configuration'
     | '/utility/notification'
+    | '/utility/notification-setup'
+    | '/utility/notification-templates'
     | '/utility/serviceable-pincode'
+    | '/utility/webhooks'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -873,6 +974,7 @@ export interface FileRouteTypes {
     | '/master/sales/zone'
     | '/master/vendor/vendor'
     | '/master/vendor/vendor-contract'
+    | '/reports/run/$reportKey'
     | '/transaction/bulk-import/pod-to-excel'
     | '/transaction/out-scan/obc-entry'
     | '/transaction/rate-compare/customer-rate-compare'
@@ -895,13 +997,16 @@ export interface FileRouteTypes {
     | '/utility/excel-import/pod-merging'
     | '/utility/rate-zone-update/rate-import'
     | '/utility/rate-zone-update/rate-update'
+    | '/utility/rate-zone-update/rate-update-jobs'
     | '/utility/rate-zone-update/zone-update'
+    | '/utility/rate-zone-update/zone-update-jobs'
     | '/utility/tax-charges-setup/fuel-setup'
     | '/utility/tax-charges-setup/setup'
     | '/utility/tax-charges-setup/tax-setup'
     | '/utility/users/access-rights'
     | '/utility/users/loggedin-users'
     | '/utility/users/user-setup'
+    | '/reports/run/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -909,9 +1014,11 @@ export interface FileRouteTypes {
     | '/demo'
     | '/login'
     | '/master/$'
+    | '/public/track'
     | '/reports/$'
     | '/reports/ar-report'
     | '/reports/awb'
+    | '/reports/jobs'
     | '/reports/operations'
     | '/reports/scan'
     | '/reports/statements'
@@ -928,8 +1035,12 @@ export interface FileRouteTypes {
     | '/transaction/transfer-run'
     | '/transaction/un-delivery-scan'
     | '/utility/$'
+    | '/utility/integration-configuration'
     | '/utility/notification'
+    | '/utility/notification-setup'
+    | '/utility/notification-templates'
     | '/utility/serviceable-pincode'
+    | '/utility/webhooks'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -959,6 +1070,7 @@ export interface FileRouteTypes {
     | '/master/sales/zone'
     | '/master/vendor/vendor'
     | '/master/vendor/vendor-contract'
+    | '/reports/run/$reportKey'
     | '/transaction/bulk-import/pod-to-excel'
     | '/transaction/out-scan/obc-entry'
     | '/transaction/rate-compare/customer-rate-compare'
@@ -981,13 +1093,16 @@ export interface FileRouteTypes {
     | '/utility/excel-import/pod-merging'
     | '/utility/rate-zone-update/rate-import'
     | '/utility/rate-zone-update/rate-update'
+    | '/utility/rate-zone-update/rate-update-jobs'
     | '/utility/rate-zone-update/zone-update'
+    | '/utility/rate-zone-update/zone-update-jobs'
     | '/utility/tax-charges-setup/fuel-setup'
     | '/utility/tax-charges-setup/setup'
     | '/utility/tax-charges-setup/tax-setup'
     | '/utility/users/access-rights'
     | '/utility/users/loggedin-users'
     | '/utility/users/user-setup'
+    | '/reports/run'
   id:
     | '__root__'
     | '/'
@@ -995,9 +1110,11 @@ export interface FileRouteTypes {
     | '/demo'
     | '/login'
     | '/master/$'
+    | '/public/track'
     | '/reports/$'
     | '/reports/ar-report'
     | '/reports/awb'
+    | '/reports/jobs'
     | '/reports/operations'
     | '/reports/scan'
     | '/reports/statements'
@@ -1014,8 +1131,12 @@ export interface FileRouteTypes {
     | '/transaction/transfer-run'
     | '/transaction/un-delivery-scan'
     | '/utility/$'
+    | '/utility/integration-configuration'
     | '/utility/notification'
+    | '/utility/notification-setup'
+    | '/utility/notification-templates'
     | '/utility/serviceable-pincode'
+    | '/utility/webhooks'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -1045,6 +1166,7 @@ export interface FileRouteTypes {
     | '/master/sales/zone'
     | '/master/vendor/vendor'
     | '/master/vendor/vendor-contract'
+    | '/reports/run/$reportKey'
     | '/transaction/bulk-import/pod-to-excel'
     | '/transaction/out-scan/obc-entry'
     | '/transaction/rate-compare/customer-rate-compare'
@@ -1067,13 +1189,16 @@ export interface FileRouteTypes {
     | '/utility/excel-import/pod-merging'
     | '/utility/rate-zone-update/rate-import'
     | '/utility/rate-zone-update/rate-update'
+    | '/utility/rate-zone-update/rate-update-jobs'
     | '/utility/rate-zone-update/zone-update'
+    | '/utility/rate-zone-update/zone-update-jobs'
     | '/utility/tax-charges-setup/fuel-setup'
     | '/utility/tax-charges-setup/setup'
     | '/utility/tax-charges-setup/tax-setup'
     | '/utility/users/access-rights'
     | '/utility/users/loggedin-users'
     | '/utility/users/user-setup'
+    | '/reports/run/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1082,9 +1207,11 @@ export interface RootRouteChildren {
   DemoRoute: typeof DemoRoute
   LoginRoute: typeof LoginRoute
   MasterSplatRoute: typeof MasterSplatRoute
+  PublicTrackRoute: typeof PublicTrackRoute
   ReportsSplatRoute: typeof ReportsSplatRoute
   ReportsArReportRoute: typeof ReportsArReportRoute
   ReportsAwbRoute: typeof ReportsAwbRoute
+  ReportsJobsRoute: typeof ReportsJobsRoute
   ReportsOperationsRoute: typeof ReportsOperationsRoute
   ReportsScanRoute: typeof ReportsScanRoute
   ReportsStatementsRoute: typeof ReportsStatementsRoute
@@ -1101,8 +1228,12 @@ export interface RootRouteChildren {
   TransactionTransferRunRoute: typeof TransactionTransferRunRoute
   TransactionUnDeliveryScanRoute: typeof TransactionUnDeliveryScanRoute
   UtilitySplatRoute: typeof UtilitySplatRoute
+  UtilityIntegrationConfigurationRoute: typeof UtilityIntegrationConfigurationRoute
   UtilityNotificationRoute: typeof UtilityNotificationRoute
+  UtilityNotificationSetupRoute: typeof UtilityNotificationSetupRoute
+  UtilityNotificationTemplatesRoute: typeof UtilityNotificationTemplatesRoute
   UtilityServiceablePincodeRoute: typeof UtilityServiceablePincodeRoute
+  UtilityWebhooksRoute: typeof UtilityWebhooksRoute
   MasterCustomerConsigneeRoute: typeof MasterCustomerConsigneeRoute
   MasterCustomerCustomerRoute: typeof MasterCustomerCustomerRoute
   MasterCustomerCustomerRateRoute: typeof MasterCustomerCustomerRateRoute
@@ -1132,6 +1263,7 @@ export interface RootRouteChildren {
   MasterSalesZoneRoute: typeof MasterSalesZoneRoute
   MasterVendorVendorRoute: typeof MasterVendorVendorRoute
   MasterVendorVendorContractRoute: typeof MasterVendorVendorContractRoute
+  ReportsRunReportKeyRoute: typeof ReportsRunReportKeyRoute
   TransactionBulkImportPodToExcelRoute: typeof TransactionBulkImportPodToExcelRoute
   TransactionOutScanObcEntryRoute: typeof TransactionOutScanObcEntryRoute
   TransactionRateCompareCustomerRateCompareRoute: typeof TransactionRateCompareCustomerRateCompareRoute
@@ -1154,13 +1286,16 @@ export interface RootRouteChildren {
   UtilityExcelImportPodMergingRoute: typeof UtilityExcelImportPodMergingRoute
   UtilityRateZoneUpdateRateImportRoute: typeof UtilityRateZoneUpdateRateImportRoute
   UtilityRateZoneUpdateRateUpdateRoute: typeof UtilityRateZoneUpdateRateUpdateRoute
+  UtilityRateZoneUpdateRateUpdateJobsRoute: typeof UtilityRateZoneUpdateRateUpdateJobsRoute
   UtilityRateZoneUpdateZoneUpdateRoute: typeof UtilityRateZoneUpdateZoneUpdateRoute
+  UtilityRateZoneUpdateZoneUpdateJobsRoute: typeof UtilityRateZoneUpdateZoneUpdateJobsRoute
   UtilityTaxChargesSetupFuelSetupRoute: typeof UtilityTaxChargesSetupFuelSetupRoute
   UtilityTaxChargesSetupSetupRoute: typeof UtilityTaxChargesSetupSetupRoute
   UtilityTaxChargesSetupTaxSetupRoute: typeof UtilityTaxChargesSetupTaxSetupRoute
   UtilityUsersAccessRightsRoute: typeof UtilityUsersAccessRightsRoute
   UtilityUsersLoggedinUsersRoute: typeof UtilityUsersLoggedinUsersRoute
   UtilityUsersUserSetupRoute: typeof UtilityUsersUserSetupRoute
+  ReportsRunIndexRoute: typeof ReportsRunIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1193,6 +1328,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/utility/webhooks': {
+      id: '/utility/webhooks'
+      path: '/utility/webhooks'
+      fullPath: '/utility/webhooks'
+      preLoaderRoute: typeof UtilityWebhooksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/utility/serviceable-pincode': {
       id: '/utility/serviceable-pincode'
       path: '/utility/serviceable-pincode'
@@ -1200,11 +1342,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UtilityServiceablePincodeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/utility/notification-templates': {
+      id: '/utility/notification-templates'
+      path: '/utility/notification-templates'
+      fullPath: '/utility/notification-templates'
+      preLoaderRoute: typeof UtilityNotificationTemplatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/notification-setup': {
+      id: '/utility/notification-setup'
+      path: '/utility/notification-setup'
+      fullPath: '/utility/notification-setup'
+      preLoaderRoute: typeof UtilityNotificationSetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/utility/notification': {
       id: '/utility/notification'
       path: '/utility/notification'
       fullPath: '/utility/notification'
       preLoaderRoute: typeof UtilityNotificationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/integration-configuration': {
+      id: '/utility/integration-configuration'
+      path: '/utility/integration-configuration'
+      fullPath: '/utility/integration-configuration'
+      preLoaderRoute: typeof UtilityIntegrationConfigurationRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/utility/$': {
@@ -1319,6 +1482,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReportsOperationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reports/jobs': {
+      id: '/reports/jobs'
+      path: '/reports/jobs'
+      fullPath: '/reports/jobs'
+      preLoaderRoute: typeof ReportsJobsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reports/awb': {
       id: '/reports/awb'
       path: '/reports/awb'
@@ -1340,11 +1510,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReportsSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/public/track': {
+      id: '/public/track'
+      path: '/public/track'
+      fullPath: '/public/track'
+      preLoaderRoute: typeof PublicTrackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/master/$': {
       id: '/master/$'
       path: '/master/$'
       fullPath: '/master/$'
       preLoaderRoute: typeof MasterSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports/run/': {
+      id: '/reports/run/'
+      path: '/reports/run'
+      fullPath: '/reports/run/'
+      preLoaderRoute: typeof ReportsRunIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/utility/users/user-setup': {
@@ -1389,11 +1573,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UtilityTaxChargesSetupFuelSetupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/utility/rate-zone-update/zone-update-jobs': {
+      id: '/utility/rate-zone-update/zone-update-jobs'
+      path: '/utility/rate-zone-update/zone-update-jobs'
+      fullPath: '/utility/rate-zone-update/zone-update-jobs'
+      preLoaderRoute: typeof UtilityRateZoneUpdateZoneUpdateJobsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/utility/rate-zone-update/zone-update': {
       id: '/utility/rate-zone-update/zone-update'
       path: '/utility/rate-zone-update/zone-update'
       fullPath: '/utility/rate-zone-update/zone-update'
       preLoaderRoute: typeof UtilityRateZoneUpdateZoneUpdateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/rate-zone-update/rate-update-jobs': {
+      id: '/utility/rate-zone-update/rate-update-jobs'
+      path: '/utility/rate-zone-update/rate-update-jobs'
+      fullPath: '/utility/rate-zone-update/rate-update-jobs'
+      preLoaderRoute: typeof UtilityRateZoneUpdateRateUpdateJobsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/utility/rate-zone-update/rate-update': {
@@ -1548,6 +1746,13 @@ declare module '@tanstack/react-router' {
       path: '/transaction/bulk-import/pod-to-excel'
       fullPath: '/transaction/bulk-import/pod-to-excel'
       preLoaderRoute: typeof TransactionBulkImportPodToExcelRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports/run/$reportKey': {
+      id: '/reports/run/$reportKey'
+      path: '/reports/run/$reportKey'
+      fullPath: '/reports/run/$reportKey'
+      preLoaderRoute: typeof ReportsRunReportKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/master/vendor/vendor-contract': {
@@ -1762,9 +1967,11 @@ const rootRouteChildren: RootRouteChildren = {
   DemoRoute: DemoRoute,
   LoginRoute: LoginRoute,
   MasterSplatRoute: MasterSplatRoute,
+  PublicTrackRoute: PublicTrackRoute,
   ReportsSplatRoute: ReportsSplatRoute,
   ReportsArReportRoute: ReportsArReportRoute,
   ReportsAwbRoute: ReportsAwbRoute,
+  ReportsJobsRoute: ReportsJobsRoute,
   ReportsOperationsRoute: ReportsOperationsRoute,
   ReportsScanRoute: ReportsScanRoute,
   ReportsStatementsRoute: ReportsStatementsRoute,
@@ -1781,8 +1988,12 @@ const rootRouteChildren: RootRouteChildren = {
   TransactionTransferRunRoute: TransactionTransferRunRoute,
   TransactionUnDeliveryScanRoute: TransactionUnDeliveryScanRoute,
   UtilitySplatRoute: UtilitySplatRoute,
+  UtilityIntegrationConfigurationRoute: UtilityIntegrationConfigurationRoute,
   UtilityNotificationRoute: UtilityNotificationRoute,
+  UtilityNotificationSetupRoute: UtilityNotificationSetupRoute,
+  UtilityNotificationTemplatesRoute: UtilityNotificationTemplatesRoute,
   UtilityServiceablePincodeRoute: UtilityServiceablePincodeRoute,
+  UtilityWebhooksRoute: UtilityWebhooksRoute,
   MasterCustomerConsigneeRoute: MasterCustomerConsigneeRoute,
   MasterCustomerCustomerRoute: MasterCustomerCustomerRoute,
   MasterCustomerCustomerRateRoute: MasterCustomerCustomerRateRoute,
@@ -1812,6 +2023,7 @@ const rootRouteChildren: RootRouteChildren = {
   MasterSalesZoneRoute: MasterSalesZoneRoute,
   MasterVendorVendorRoute: MasterVendorVendorRoute,
   MasterVendorVendorContractRoute: MasterVendorVendorContractRoute,
+  ReportsRunReportKeyRoute: ReportsRunReportKeyRoute,
   TransactionBulkImportPodToExcelRoute: TransactionBulkImportPodToExcelRoute,
   TransactionOutScanObcEntryRoute: TransactionOutScanObcEntryRoute,
   TransactionRateCompareCustomerRateCompareRoute:
@@ -1841,13 +2053,18 @@ const rootRouteChildren: RootRouteChildren = {
   UtilityExcelImportPodMergingRoute: UtilityExcelImportPodMergingRoute,
   UtilityRateZoneUpdateRateImportRoute: UtilityRateZoneUpdateRateImportRoute,
   UtilityRateZoneUpdateRateUpdateRoute: UtilityRateZoneUpdateRateUpdateRoute,
+  UtilityRateZoneUpdateRateUpdateJobsRoute:
+    UtilityRateZoneUpdateRateUpdateJobsRoute,
   UtilityRateZoneUpdateZoneUpdateRoute: UtilityRateZoneUpdateZoneUpdateRoute,
+  UtilityRateZoneUpdateZoneUpdateJobsRoute:
+    UtilityRateZoneUpdateZoneUpdateJobsRoute,
   UtilityTaxChargesSetupFuelSetupRoute: UtilityTaxChargesSetupFuelSetupRoute,
   UtilityTaxChargesSetupSetupRoute: UtilityTaxChargesSetupSetupRoute,
   UtilityTaxChargesSetupTaxSetupRoute: UtilityTaxChargesSetupTaxSetupRoute,
   UtilityUsersAccessRightsRoute: UtilityUsersAccessRightsRoute,
   UtilityUsersLoggedinUsersRoute: UtilityUsersLoggedinUsersRoute,
   UtilityUsersUserSetupRoute: UtilityUsersUserSetupRoute,
+  ReportsRunIndexRoute: ReportsRunIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

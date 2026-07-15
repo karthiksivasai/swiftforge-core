@@ -123,6 +123,11 @@ export type UiShipmentListRow = {
   forwardingNo: string;
   deliveryNo: string;
   referenceNo: string;
+  carrierProviderCode?: string;
+  carrierBookingRef?: string;
+  carrierTrackingNo?: string;
+  carrierBookingStatus?: string;
+  carrierLabelFileId?: string;
 };
 
 function partyToJson(p: PartyDetails): Record<string, unknown> {
@@ -297,18 +302,37 @@ export function dbShipmentToListRow(row: ShipmentDbRow): UiShipmentListRow {
     forwardingNo: row.forwarding_awb ?? "",
     deliveryNo: row.delivery_awb ?? "",
     referenceNo: row.reference_no ?? "",
+    carrierProviderCode: row.carrier_provider_code ?? undefined,
+    carrierBookingRef: row.carrier_booking_ref ?? undefined,
+    carrierTrackingNo: row.carrier_tracking_no ?? undefined,
+    carrierBookingStatus: row.carrier_booking_status ?? undefined,
+    carrierLabelFileId: row.carrier_label_file_id ?? undefined,
   };
 }
 
 export function dbShipmentToFormPatch(
   row: ShipmentDbRow,
   children: ShipmentChildren,
-): Partial<AwbLiveForm> & { id: string; rowVersion: number; status: string } {
+): Partial<AwbLiveForm> & {
+  id: string;
+  rowVersion: number;
+  status: string;
+  carrierProviderCode?: string;
+  carrierBookingRef?: string;
+  carrierTrackingNo?: string;
+  carrierBookingStatus?: string;
+  carrierLabelFileId?: string;
+} {
   const extras = (row.wizard_extras ?? {}) as Record<string, unknown>;
   return {
     id: row.id,
     rowVersion: row.row_version,
     status: row.current_status,
+    carrierProviderCode: row.carrier_provider_code ?? undefined,
+    carrierBookingRef: row.carrier_booking_ref ?? undefined,
+    carrierTrackingNo: row.carrier_tracking_no ?? undefined,
+    carrierBookingStatus: row.carrier_booking_status ?? undefined,
+    carrierLabelFileId: row.carrier_label_file_id ?? undefined,
     awbNo: row.awb_no,
     bookDate: row.book_date,
     bookTime: row.book_time ? String(row.book_time).slice(0, 5) : "",

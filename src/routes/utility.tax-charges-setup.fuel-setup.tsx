@@ -1,18 +1,40 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { IconButton, MasterBreadcrumb, PAGE_SIZE, TablePager } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
-import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import { parseCsv, mapCsvToImportRows } from "@/lib/masters/core";
+import { importSummary, toErrorMessage } from "@/lib/masters/screen";
+import type { LookupKey, LookupOption } from "@/lib/master-lookups";
+import { canDo } from "@/lib/permissions";
+import { UTILITY_TAX_FUEL_PERMISSIONS } from "@/lib/permissions";
+import {
+  deleteFuelRate,
+  FUEL_IMPORT_COLUMNS,
+  importFuelRates,
+  listFuelRates,
+  saveFuelRate,
+} from "@/lib/tax-fuel/resources";
+import { fuelRateSchema } from "@/lib/tax-fuel/schemas";
+import type { FuelRate } from "@/lib/tax-fuel/types";
 
 type LookupPair = { code: string; name: string };
-type LookupField = "customer" | "vendor" | "product" | "destination" | "service";
+type LookupField = "customer" | "vendor" | "product" | "destination" | "zone";
 
 type FuelRow = {
   id: string;
@@ -21,77 +43,112 @@ type FuelRow = {
   vendor: LookupPair;
   product: LookupPair;
   destination: LookupPair;
-  service: LookupPair;
+  zone: LookupPair;
   fromDate: string;
   toDate: string;
   percentage: string;
+  status: string;
+  row_version?: number;
 };
 
-type FuelForm = Omit<FuelRow, "id" | "entryCode">;
+type FuelForm = Omit<FuelRow, "id" | "entryCode" | "row_version" | "status"> & {
+  status: string;
+};
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const ddmmyyyyToIso = (value: string) => {
+  if (!value) return "";
+  if (value.includes("-") && value.length >= 10) return value.slice(0, 10);
   const [day, month, year] = value.split("/");
   return year && month && day ? `${year}-${month}-${day}` : value;
 };
 const isoToDdmmyyyy = (value: string) => {
-  const [year, month, day] = value.split("-");
+  if (!value) return "";
+  const [year, month, day] = value.slice(0, 10).split("-");
   return year && month && day ? `${day}/${month}/${year}` : value;
 };
 
 const seedRows: FuelRow[] = [
-  ["180619", "BAND 2", "UPS", "CARD", "CARD", "CARD", "06/07/2026", "12/07/2026", "39.00"],
-  ["180618", "BAND 2", "FDX", "CARD", "CARD", "CARD", "06/07/2026", "12/07/2026", "38.25"],
-  ["180617", "BAND 2", "DHL1", "CARD", "CARD", "CARD", "06/07/2026", "12/07/2026", "40.75"],
-  ["180616", "BAND 2", "DHL1", "CARD", "CARD", "CARD", "29/06/2026", "05/07/2026", "42.75"],
-  ["180615", "BAND 2", "FEDE", "CARD", "CARD", "CARD", "29/06/2026", "05/07/2026", "38.50"],
-  ["180614", "BAND 2", "UPS", "CARD", "CARD", "CARD", "29/06/2026", "05/07/2026", "39.25"],
-  ["180613", "BAND 2", "DHL1", "CARD", "CARD", "CARD", "22/06/2026", "28/06/2026", "45.25"],
-  ["180612", "BAND 2", "FEDE", "CARD", "CARD", "CARD", "22/06/2026", "28/06/2026", "41.50"],
-  ["180611", "BAND 2", "UPS", "CARD", "CARD", "CARD", "22/06/2026", "28/06/2026", "42.25"],
-  ["180610", "BAND 2", "DHL1", "CARD", "CARD", "CARD", "15/06/2026", "21/06/2026", "47.00"],
-].map(([entryCode, customer, vendor, product, destination, service, fromDate, toDate, percentage], index) => ({
-  id: String(index + 1),
-  entryCode,
-  customer: { code: customer, name: customer },
-  vendor: { code: vendor, name: vendor },
-  product: { code: product, name: product },
-  destination: { code: destination, name: destination },
-  service: { code: service, name: service },
-  fromDate,
-  toDate,
-  percentage,
-}));
+  ["180619", "BAND 2", "UPS", "CARD", "CARD", "Z1", "06/07/2026", "12/07/2026", "39.00"],
+  ["180618", "BAND 2", "FDX", "CARD", "CARD", "Z1", "06/07/2026", "12/07/2026", "38.25"],
+].map(
+  (
+    [entryCode, customer, vendor, product, destination, zone, fromDate, toDate, percentage],
+    index,
+  ) => ({
+    id: String(index + 1),
+    entryCode,
+    customer: { code: customer, name: customer },
+    vendor: { code: vendor, name: vendor },
+    product: { code: product, name: product },
+    destination: { code: destination, name: destination },
+    zone: { code: zone, name: zone },
+    fromDate,
+    toDate,
+    percentage,
+    status: "ACTIVE",
+  }),
+);
 
 const emptyForm = (): FuelForm => ({
   customer: emptyPair(),
   vendor: emptyPair(),
   product: emptyPair(),
   destination: emptyPair(),
-  service: emptyPair(),
+  zone: emptyPair(),
   fromDate: todayIso(),
   toDate: todayIso(),
   percentage: "",
+  status: "ACTIVE",
 });
+
+function dbToUi(r: FuelRate): FuelRow {
+  return {
+    id: r.id,
+    entryCode: r.entry_code ?? "",
+    customer: { code: r.customer_code ?? "", name: r.customer_name ?? r.customer_code ?? "" },
+    vendor: { code: r.vendor_code ?? "", name: r.vendor_name ?? r.vendor_code ?? "" },
+    product: { code: r.product_code ?? "", name: r.product_name ?? r.product_code ?? "" },
+    destination: {
+      code: r.destination_code ?? "",
+      name: r.destination_name ?? r.destination_code ?? "",
+    },
+    zone: { code: r.zone_code ?? "", name: r.zone_name ?? r.zone_code ?? "" },
+    fromDate: isoToDdmmyyyy(r.from_date),
+    toDate: r.to_date ? isoToDdmmyyyy(r.to_date) : "",
+    percentage: String(r.percentage),
+    status: r.status,
+    row_version: r.row_version,
+  };
+}
 
 export const Route = createFileRoute("/utility/tax-charges-setup/fuel-setup")({
   head: () => ({
     meta: [
       { title: "Fuel Setup — Utility — Courier ERP" },
-      { name: "description", content: "Configure fuel percentage by customer, vendor, product, destination, and service." },
+      {
+        name: "description",
+        content: "Configure fuel percentage by customer, product, and zone.",
+      },
     ],
   }),
   component: FuelSetupPage,
 });
 
 function FuelSetupPage() {
-  const [rows, setRows] = useState<FuelRow[]>(seedRows);
+  const { isAuthenticated: authed, permissions } = useAuth();
+  const queryClient = useQueryClient();
+  const importRef = useRef<HTMLInputElement | null>(null);
+
+  const [demoRows, setDemoRows] = useState<FuelRow[]>(seedRows);
   const [screen, setScreen] = useState<"list" | "form">("list");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingRv, setEditingRv] = useState<number | null>(null);
   const [form, setForm] = useState<FuelForm>(emptyForm());
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [busy, setBusy] = useState(false);
   const [lookupOpen, setLookupOpen] = useState<LookupKey | null>(null);
   const [lookupField, setLookupField] = useState<LookupField | null>(null);
   const [filters, setFilters] = useState({
@@ -100,26 +157,64 @@ function FuelSetupPage() {
     vendor: "",
     product: "",
     destination: "",
-    service: "",
+    zone: "",
     fromDate: "",
     toDate: "",
     percentage: "",
   });
+
+  const liveQuery = useQuery({
+    queryKey: ["fuel-rates", search],
+    queryFn: () => listFuelRates({ search: search || null, page: 1, pageSize: 200 }),
+    enabled: authed,
+  });
+
+  const liveRows = (liveQuery.data?.rows ?? []).map(dbToUi);
+  const rows: FuelRow[] = authed ? liveRows : demoRows;
+
+  const canAdd = !authed || canDo(permissions, UTILITY_TAX_FUEL_PERMISSIONS.fuelSetup, "add");
+  const canModify = !authed || canDo(permissions, UTILITY_TAX_FUEL_PERMISSIONS.fuelSetup, "modify");
+  const canDelete =
+    !authed || canDo(permissions, UTILITY_TAX_FUEL_PERMISSIONS.fuelSetup, "delete") || canModify;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((row) => {
       const values = rowValues(row);
       if (q && !values.some((value) => value.toLowerCase().includes(q))) return false;
-      if (filters.entryCode && !row.entryCode.toLowerCase().includes(filters.entryCode.toLowerCase())) return false;
-      if (filters.customer && !row.customer.name.toLowerCase().includes(filters.customer.toLowerCase())) return false;
-      if (filters.vendor && !row.vendor.name.toLowerCase().includes(filters.vendor.toLowerCase())) return false;
-      if (filters.product && !row.product.name.toLowerCase().includes(filters.product.toLowerCase())) return false;
-      if (filters.destination && !row.destination.name.toLowerCase().includes(filters.destination.toLowerCase())) return false;
-      if (filters.service && !row.service.name.toLowerCase().includes(filters.service.toLowerCase())) return false;
-      if (filters.fromDate && !row.fromDate.toLowerCase().includes(filters.fromDate.toLowerCase())) return false;
-      if (filters.toDate && !row.toDate.toLowerCase().includes(filters.toDate.toLowerCase())) return false;
-      if (filters.percentage && !row.percentage.toLowerCase().includes(filters.percentage.toLowerCase())) return false;
+      if (
+        filters.entryCode &&
+        !row.entryCode.toLowerCase().includes(filters.entryCode.toLowerCase())
+      )
+        return false;
+      if (
+        filters.customer &&
+        !row.customer.name.toLowerCase().includes(filters.customer.toLowerCase())
+      )
+        return false;
+      if (filters.vendor && !row.vendor.name.toLowerCase().includes(filters.vendor.toLowerCase()))
+        return false;
+      if (
+        filters.product &&
+        !row.product.name.toLowerCase().includes(filters.product.toLowerCase())
+      )
+        return false;
+      if (
+        filters.destination &&
+        !row.destination.name.toLowerCase().includes(filters.destination.toLowerCase())
+      )
+        return false;
+      if (filters.zone && !row.zone.name.toLowerCase().includes(filters.zone.toLowerCase()))
+        return false;
+      if (filters.fromDate && !row.fromDate.toLowerCase().includes(filters.fromDate.toLowerCase()))
+        return false;
+      if (filters.toDate && !row.toDate.toLowerCase().includes(filters.toDate.toLowerCase()))
+        return false;
+      if (
+        filters.percentage &&
+        !row.percentage.toLowerCase().includes(filters.percentage.toLowerCase())
+      )
+        return false;
       return true;
     });
   }, [filters, rows, search]);
@@ -134,21 +229,24 @@ function FuelSetupPage() {
 
   const openAdd = () => {
     setEditingId(null);
+    setEditingRv(null);
     setForm(emptyForm());
     setScreen("form");
   };
 
   const openEdit = (row: FuelRow) => {
     setEditingId(row.id);
+    setEditingRv(row.row_version ?? null);
     setForm({
       customer: row.customer,
       vendor: row.vendor,
       product: row.product,
       destination: row.destination,
-      service: row.service,
+      zone: row.zone,
       fromDate: ddmmyyyyToIso(row.fromDate),
       toDate: ddmmyyyyToIso(row.toDate),
       percentage: row.percentage,
+      status: row.status || "ACTIVE",
     });
     setScreen("form");
   };
@@ -158,31 +256,111 @@ function FuelSetupPage() {
     setLookupOpen(lookup);
   };
 
-  const handleLookupSelect = (option: LookupOption) => {
+  const handleLookupSelect = (_value: string, option: LookupOption) => {
     if (!lookupField) return;
     patch({ [lookupField]: { code: option.code, name: option.name } });
     setLookupOpen(null);
   };
 
-  const save = () => {
-    if (!form.customer.name.trim()) return toast.error("Customer is required");
-    if (!form.vendor.name.trim()) return toast.error("Vendor is required");
-    if (!form.product.name.trim()) return toast.error("Product is required");
-    if (!form.destination.name.trim()) return toast.error("Destination is required");
-    if (!form.service.name.trim()) return toast.error("Service is required");
-    if (!form.percentage.trim()) return toast.error("Percentage is required");
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ["fuel-rates"] });
+  };
+
+  const save = async () => {
+    const raw = {
+      customer_code: form.customer.code.trim() || null,
+      vendor_code: form.vendor.code.trim() || null,
+      product_code: form.product.code.trim() || null,
+      zone_code: form.zone.code.trim() || null,
+      destination_code: form.destination.code.trim() || null,
+      from_date: form.fromDate,
+      to_date: form.toDate || null,
+      percentage: form.percentage,
+      status: (form.status === "INACTIVE" ? "INACTIVE" : "ACTIVE") as "ACTIVE" | "INACTIVE",
+    };
+    try {
+      fuelRateSchema.parse(raw);
+    } catch (err) {
+      return toast.error(toErrorMessage(err, "Please fix the form"));
+    }
+
+    if (authed) {
+      setBusy(true);
+      try {
+        await saveFuelRate({
+          fields: raw,
+          id: editingId,
+          rowVersion: editingRv,
+        });
+        toast.success(editingId ? "Fuel setup updated" : "Fuel setup saved");
+        invalidate();
+        setScreen("list");
+      } catch (err) {
+        toast.error(toErrorMessage(err));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
 
     const nextRow: FuelRow = {
       id: editingId ?? crypto.randomUUID(),
-      entryCode: editingId ? rows.find((row) => row.id === editingId)?.entryCode ?? nextEntryCode(rows) : nextEntryCode(rows),
-      ...form,
+      entryCode: editingId
+        ? (demoRows.find((row) => row.id === editingId)?.entryCode ?? nextEntryCode(demoRows))
+        : nextEntryCode(demoRows),
+      customer: form.customer,
+      vendor: form.vendor,
+      product: form.product,
+      destination: form.destination,
+      zone: form.zone,
       fromDate: isoToDdmmyyyy(form.fromDate),
       toDate: isoToDdmmyyyy(form.toDate),
+      percentage: form.percentage,
+      status: form.status,
     };
-
-    setRows((current) => (editingId ? current.map((row) => (row.id === editingId ? nextRow : row)) : [nextRow, ...current]));
+    setDemoRows((current) =>
+      editingId
+        ? current.map((row) => (row.id === editingId ? nextRow : row))
+        : [nextRow, ...current],
+    );
     setScreen("list");
     toast.success(editingId ? "Fuel setup updated" : "Fuel setup saved");
+  };
+
+  const handleDelete = async (row: FuelRow) => {
+    if (authed) {
+      try {
+        await deleteFuelRate(row.id, row.row_version);
+        toast.success("Deleted");
+        invalidate();
+      } catch (err) {
+        toast.error(toErrorMessage(err));
+      }
+      return;
+    }
+    setDemoRows((current) => current.filter((item) => item.id !== row.id));
+    toast.success("Deleted");
+  };
+
+  const handleImport = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = parseCsv(text);
+      const rows = mapCsvToImportRows(parsed.rows, [...FUEL_IMPORT_COLUMNS]);
+      if (!rows.length) return toast.error("No rows to import");
+      if (!authed) {
+        toast.success(`Demo import preview: ${rows.length} rows`);
+        return;
+      }
+      const validated = await importFuelRates("VALIDATE", rows);
+      toast.message(importSummary(validated));
+      if (validated.error_count > 0) return;
+      const committed = await importFuelRates("COMMIT", rows);
+      toast.success(importSummary(committed));
+      invalidate();
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Import failed"));
+    }
   };
 
   if (screen === "form") {
@@ -191,23 +369,73 @@ function FuelSetupPage() {
         <MasterBreadcrumb trail={["Utility", "Tax / Charges Setup", "Fuel Setup"]} />
 
         <Card className="min-w-0 border p-4">
+          <p className="mb-3 text-xs text-muted-foreground">
+            Lookup priority: Customer + Product + Zone → Product + Zone → Global. After changes, run
+            Rate Update Jobs to refresh shipment charges.
+          </p>
           <div className="grid gap-x-3 gap-y-2 lg:grid-cols-4">
-            <LookupFieldInput label="Customer" value={form.customer} onChange={(customer) => patch({ customer })} onLookupOpen={() => openLookup("customer", "customer")} />
-            <LookupFieldInput label="Vendor" value={form.vendor} onChange={(vendor) => patch({ vendor })} onLookupOpen={() => openLookup("vendor", "vendor")} />
-            <LookupFieldInput label="Product" value={form.product} onChange={(product) => patch({ product })} onLookupOpen={() => openLookup("product", "product")} />
-            <LookupFieldInput label="Destination" value={form.destination} onChange={(destination) => patch({ destination })} onLookupOpen={() => openLookup("destination", "destination")} />
-            <LookupFieldInput label="Service" value={form.service} onChange={(service) => patch({ service })} onLookupOpen={() => openLookup("service", "serviceType")} />
-            <TextField label="From Date" type="date" value={form.fromDate} onChange={(fromDate) => patch({ fromDate })} />
-            <TextField label="To Date" type="date" value={form.toDate} onChange={(toDate) => patch({ toDate })} />
-            <TextField label="Percentage" value={form.percentage} onChange={(percentage) => patch({ percentage })} />
+            <LookupFieldInput
+              label="Customer"
+              value={form.customer}
+              onChange={(customer) => patch({ customer })}
+              onLookupOpen={() => openLookup("customer", "customer")}
+            />
+            <LookupFieldInput
+              label="Vendor"
+              value={form.vendor}
+              onChange={(vendor) => patch({ vendor })}
+              onLookupOpen={() => openLookup("vendor", "vendor")}
+            />
+            <LookupFieldInput
+              label="Product"
+              value={form.product}
+              onChange={(product) => patch({ product })}
+              onLookupOpen={() => openLookup("product", "product")}
+            />
+            <LookupFieldInput
+              label="Zone"
+              value={form.zone}
+              onChange={(zone) => patch({ zone })}
+              onLookupOpen={() => openLookup("zone", "zone")}
+            />
+            <LookupFieldInput
+              label="Destination"
+              value={form.destination}
+              onChange={(destination) => patch({ destination })}
+              onLookupOpen={() => openLookup("destination", "destination")}
+            />
+            <TextField
+              label="From Date"
+              type="date"
+              value={form.fromDate}
+              onChange={(fromDate) => patch({ fromDate })}
+            />
+            <TextField
+              label="To Date"
+              type="date"
+              value={form.toDate}
+              onChange={(toDate) => patch({ toDate })}
+            />
+            <TextField
+              label="Percentage"
+              value={form.percentage}
+              onChange={(percentage) => patch({ percentage })}
+            />
           </div>
         </Card>
 
         <div className="flex justify-end gap-2">
-          <Button onClick={save} className="h-8 rounded-full bg-green-500 px-8 text-white hover:bg-green-600">
+          <Button
+            disabled={busy || (editingId ? !canModify : !canAdd)}
+            onClick={() => void save()}
+            className="h-8 rounded-full bg-green-500 px-8 text-white hover:bg-green-600"
+          >
             Save
           </Button>
-          <Button onClick={() => setScreen("list")} className="h-8 rounded-full bg-red-500 px-8 text-white hover:bg-red-600">
+          <Button
+            onClick={() => setScreen("list")}
+            className="h-8 rounded-full bg-red-500 px-8 text-white hover:bg-red-600"
+          >
             Cancel
           </Button>
         </div>
@@ -230,20 +458,57 @@ function FuelSetupPage() {
 
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Fuel Setup</h1>
-        <p className="text-sm text-muted-foreground">Configure fuel percentages by customer, vendor, and product.</p>
+        <p className="text-sm text-muted-foreground">
+          Configure fuel percentages by customer, product, and zone.
+        </p>
       </div>
 
       <Card className="overflow-hidden p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <div className="flex items-center gap-1.5">
-            <IconButton label="Export" onClick={() => toast.success("Export queued")}><Download className="h-4 w-4" /></IconButton>
+            <IconButton label="Export" onClick={() => toast.success("Export queued")}>
+              <Download className="h-4 w-4" />
+            </IconButton>
+            <IconButton
+              label="Import"
+              onClick={() => {
+                if (authed && !canAdd) {
+                  toast.error("Permission denied");
+                  return;
+                }
+                importRef.current?.click();
+              }}
+            >
+              <Upload className="h-4 w-4" />
+            </IconButton>
+            <input
+              ref={importRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void handleImport(file);
+                event.target.value = "";
+              }}
+            />
           </div>
           <div className="flex items-end gap-2">
             <label className="flex flex-col gap-1 text-xs text-foreground">
               Search:
-              <Input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} className="h-9 w-56" />
+              <Input
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                className="h-9 w-56"
+              />
             </label>
-            <Button size="sm" className="h-9 gap-1.5" onClick={openAdd}><Plus className="h-4 w-4" />Add</Button>
+            <Button size="sm" className="h-9 gap-1.5" onClick={openAdd} disabled={!canAdd}>
+              <Plus className="h-4 w-4" />
+              Add
+            </Button>
           </div>
         </div>
 
@@ -251,14 +516,40 @@ function FuelSetupPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
-                {["Entry Code", "Customer", "Vendor", "Product", "Destination", "Service", "From Date", "To Date", "Percentage", "Action"].map((heading) => (
+                {[
+                  "Entry Code",
+                  "Customer",
+                  "Vendor",
+                  "Product",
+                  "Zone",
+                  "Destination",
+                  "From Date",
+                  "To Date",
+                  "Percentage",
+                  "Action",
+                ].map((heading) => (
                   <TableHead key={heading} className="whitespace-nowrap text-sidebar-foreground">
-                    <span className="flex items-center justify-between gap-2">{heading}{heading !== "Action" ? <span className="text-xs">⇅</span> : null}</span>
+                    <span className="flex items-center justify-between gap-2">
+                      {heading}
+                      {heading !== "Action" ? <span className="text-xs">⇅</span> : null}
+                    </span>
                   </TableHead>
                 ))}
               </TableRow>
               <TableRow className="bg-muted/20 hover:bg-muted/20">
-                {(["entryCode", "customer", "vendor", "product", "destination", "service", "fromDate", "toDate", "percentage"] as const).map((key) => (
+                {(
+                  [
+                    "entryCode",
+                    "customer",
+                    "vendor",
+                    "product",
+                    "zone",
+                    "destination",
+                    "fromDate",
+                    "toDate",
+                    "percentage",
+                  ] as const
+                ).map((key) => (
                   <TableHead key={key} className="py-2">
                     <Input
                       value={filters[key]}
@@ -266,7 +557,6 @@ function FuelSetupPage() {
                         setFilters((current) => ({ ...current, [key]: event.target.value }));
                         setPage(1);
                       }}
-                      placeholder={key === "entryCode" ? "Entry Code" : key === "fromDate" ? "From Date" : key === "toDate" ? "To Date" : key[0].toUpperCase() + key.slice(1)}
                       className="h-8"
                     />
                   </TableHead>
@@ -275,37 +565,88 @@ function FuelSetupPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pageRows.map((row) => (
-                <TableRow key={row.id} className="odd:bg-muted/50">
-                  <TableCell>{row.entryCode}</TableCell>
-                  <TableCell>{row.customer.name}</TableCell>
-                  <TableCell>{row.vendor.name}</TableCell>
-                  <TableCell>{row.product.name}</TableCell>
-                  <TableCell>{row.destination.name}</TableCell>
-                  <TableCell>{row.service.name}</TableCell>
-                  <TableCell>{row.fromDate}</TableCell>
-                  <TableCell>{row.toDate}</TableCell>
-                  <TableCell>{row.percentage}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <IconButton label="Edit" size="row" variant="ghost" onClick={() => openEdit(row)}><Pencil className="h-4 w-4" /></IconButton>
-                      <IconButton label="Delete" size="row" variant="ghost" onClick={() => { setRows((current) => current.filter((item) => item.id !== row.id)); toast.success("Deleted"); }}><Trash2 className="h-4 w-4 text-destructive" /></IconButton>
-                    </div>
+              {authed && liveQuery.isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="py-6 text-muted-foreground">
+                    Loading…
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                pageRows.map((row) => (
+                  <TableRow key={row.id} className="odd:bg-muted/50">
+                    <TableCell>{row.entryCode}</TableCell>
+                    <TableCell>{row.customer.name}</TableCell>
+                    <TableCell>{row.vendor.name}</TableCell>
+                    <TableCell>{row.product.name}</TableCell>
+                    <TableCell>{row.zone.name}</TableCell>
+                    <TableCell>{row.destination.name}</TableCell>
+                    <TableCell>{row.fromDate}</TableCell>
+                    <TableCell>{row.toDate}</TableCell>
+                    <TableCell>{row.percentage}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <IconButton
+                          label="Edit"
+                          size="row"
+                          variant="ghost"
+                          onClick={() => {
+                            if (!canModify) {
+                              toast.error("Permission denied");
+                              return;
+                            }
+                            openEdit(row);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </IconButton>
+                        <IconButton
+                          label="Delete"
+                          size="row"
+                          variant="ghost"
+                          onClick={() => {
+                            if (!canDelete) {
+                              toast.error("Permission denied");
+                              return;
+                            }
+                            void handleDelete(row);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </IconButton>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </div>
 
-        <TablePager totalPages={totalPages} currentPage={currentPage} setPage={setPage} startIdx={startIdx} endIdx={endIdx} total={filtered.length} />
+        <TablePager
+          totalPages={totalPages}
+          currentPage={currentPage}
+          setPage={setPage}
+          startIdx={startIdx}
+          endIdx={endIdx}
+          total={filtered.length}
+        />
       </Card>
     </div>
   );
 }
 
 function rowValues(row: FuelRow) {
-  return [row.entryCode, row.customer.name, row.vendor.name, row.product.name, row.destination.name, row.service.name, row.fromDate, row.toDate, row.percentage];
+  return [
+    row.entryCode,
+    row.customer.name,
+    row.vendor.name,
+    row.product.name,
+    row.zone.name,
+    row.destination.name,
+    row.fromDate,
+    row.toDate,
+    row.percentage,
+  ];
 }
 
 function nextEntryCode(rows: FuelRow[]) {
@@ -313,23 +654,62 @@ function nextEntryCode(rows: FuelRow[]) {
   return String(max + 1);
 }
 
-function TextField({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+function TextField({
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+}) {
   return (
     <label className="flex flex-col gap-1 text-xs font-medium text-foreground">
       {label}
-      <Input type={type} value={value} onChange={(event) => onChange(event.target.value)} className="h-9" />
+      <Input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9"
+      />
     </label>
   );
 }
 
-function LookupFieldInput({ label, value, onChange, onLookupOpen }: { label: string; value: LookupPair; onChange: (value: LookupPair) => void; onLookupOpen: () => void }) {
+function LookupFieldInput({
+  label,
+  value,
+  onChange,
+  onLookupOpen,
+}: {
+  label: string;
+  value: LookupPair;
+  onChange: (value: LookupPair) => void;
+  onLookupOpen: () => void;
+}) {
   return (
     <label className="flex flex-col gap-1 text-xs font-medium text-foreground">
       {label}
       <div className="flex gap-1">
-        <Input value={value.name} onChange={(event) => onChange({ ...value, name: event.target.value })} className="min-w-0 flex-1" />
-        <Input value={value.code} onChange={(event) => onChange({ ...value, code: event.target.value })} className="w-20" />
-        <Button size="icon" variant="outline" className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90" onClick={onLookupOpen} aria-label={`Search ${label}`}>
+        <Input
+          value={value.name}
+          onChange={(event) => onChange({ ...value, name: event.target.value })}
+          className="min-w-0 flex-1"
+        />
+        <Input
+          value={value.code}
+          onChange={(event) => onChange({ ...value, code: event.target.value })}
+          className="w-20"
+        />
+        <Button
+          size="icon"
+          variant="outline"
+          className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+          onClick={onLookupOpen}
+          aria-label={`Search ${label}`}
+        >
           <Search className="h-4 w-4" />
         </Button>
       </div>

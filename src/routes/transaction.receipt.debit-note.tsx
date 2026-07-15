@@ -25,18 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,7 +46,15 @@ import {
   downloadCsv,
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
+import { IrnActionsPanel } from "@/components/finance/irn-actions-panel";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import {
+  listEinvoiceDocuments,
+  saveEinvoiceDocument,
+  type EinvoiceDocument,
+} from "@/lib/integrations/irn";
+import { toErrorMessage } from "@/lib/masters/screen";
 
 type LookupPair = { code: string; name: string };
 type PageView = "list" | "entry" | "irn";
@@ -128,12 +126,7 @@ type IrnForm = {
 };
 
 type ColFilterKey =
-  | "debitNoteNo"
-  | "date"
-  | "customerName"
-  | "invoiceRef"
-  | "narration"
-  | "grandTotal";
+  "debitNoteNo" | "date" | "customerName" | "invoiceRef" | "narration" | "grandTotal";
 
 const DEMO_AWBS: Record<
   string,
@@ -256,7 +249,9 @@ const buildSeedRows = (): DebitNoteRow[] =>
   }));
 
 const nextNoteNo = (rows: DebitNoteRow[]) => {
-  const nums = rows.map((r) => Number.parseInt(r.debitNoteNo, 10)).filter((n) => Number.isFinite(n));
+  const nums = rows
+    .map((r) => Number.parseInt(r.debitNoteNo, 10))
+    .filter((n) => Number.isFinite(n));
   return String((nums.length > 0 ? Math.max(...nums) : 2) + 1);
 };
 
@@ -319,6 +314,7 @@ export const Route = createFileRoute("/transaction/receipt/debit-note")({
 });
 
 function DebitNotePage() {
+  const { isAuthenticated: authed } = useAuth();
   const importInputRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<PageView>("list");
   const [rows, setRows] = useState<DebitNoteRow[]>(buildSeedRows);
@@ -332,6 +328,7 @@ function DebitNotePage() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportForm, setReportForm] = useState<ReportForm>(emptyReportForm());
   const [irnForm, setIrnForm] = useState<IrnForm>(emptyIrnForm());
+  const [liveIrnDoc, setLiveIrnDoc] = useState<EinvoiceDocument | null>(null);
 
   const patchForm = (patch: Partial<DebitNoteForm>) => setForm((f) => ({ ...f, ...patch }));
   const patchReport = (patch: Partial<ReportForm>) => setReportForm((f) => ({ ...f, ...patch }));
@@ -359,7 +356,10 @@ function DebitNotePage() {
       const cf = colFilters;
       if (cf.debitNoteNo && !row.debitNoteNo.includes(cf.debitNoteNo)) return false;
       if (cf.date && !row.date.includes(cf.date)) return false;
-      if (cf.customerName && !row.customerName.toLowerCase().includes(cf.customerName.toLowerCase())) {
+      if (
+        cf.customerName &&
+        !row.customerName.toLowerCase().includes(cf.customerName.toLowerCase())
+      ) {
         return false;
       }
       if (cf.invoiceRef && !row.invoiceRef.toLowerCase().includes(cf.invoiceRef.toLowerCase())) {
@@ -392,6 +392,15 @@ function DebitNotePage() {
     setForm({ ...row.form, lines: row.form.lines.map((l) => ({ ...l })) });
     setLineDraft(emptyLineDraft());
     setView("entry");
+    setLiveIrnDoc(null);
+    if (authed) {
+      void listEinvoiceDocuments({ documentType: "DEBIT_NOTE", limit: 100 })
+        .then((docs) => {
+          const match = docs.find((d) => d.document_no === row.debitNoteNo);
+          if (match) setLiveIrnDoc(match);
+        })
+        .catch(() => undefined);
+    }
   };
 
   const closeEntry = () => {
@@ -399,9 +408,10 @@ function DebitNotePage() {
     setEditing(null);
     setForm(emptyForm());
     setLineDraft(emptyLineDraft());
+    setLiveIrnDoc(null);
   };
 
-  const persistEntry = () => {
+  const persistEntry = async () => {
     if (!form.customer.code.trim() && !form.customer.name.trim()) {
       return toast.error("Customer is required");
     }
@@ -410,14 +420,34 @@ function DebitNotePage() {
     const noteNo = editing?.debitNoteNo ?? (form.noteNo || nextNoteNo(rows));
     const payload = formToRow({ ...form, noteNo }, editing?.id ?? crypto.randomUUID());
 
+    if (authed) {
+      try {
+        const doc = await saveEinvoiceDocument({
+          document_type: "DEBIT_NOTE",
+          document_no: noteNo,
+          document_date: form.date || undefined,
+          grand_total: Number(payload.grandTotal) || lineTotals.total,
+          register_type: "B2B",
+          narration: form.narration,
+          approval_on_einvoice: form.approvalOnEInvoice,
+          gst_applies: form.gst,
+        });
+        setLiveIrnDoc(doc);
+        payload.form.irn = doc.irn ?? payload.form.irn;
+      } catch (e) {
+        return toast.error(toErrorMessage(e));
+      }
+    }
+
     if (editing) {
       setRows((prev) => prev.map((r) => (r.id === editing.id ? payload : r)));
       toast.success(`Debit Note ${noteNo} saved`);
     } else {
       setRows((prev) => [payload, ...prev]);
+      setEditing(payload);
       toast.success(`Debit Note ${noteNo} created`);
     }
-    closeEntry();
+    if (!authed) closeEntry();
   };
 
   const confirmDelete = () => {
@@ -753,8 +783,54 @@ function DebitNotePage() {
                 Approval on E-Invoice
               </label>
               <FieldWrapper label="IRN">
-                <Input value={form.irn} onChange={(e) => patchForm({ irn: e.target.value })} />
+                <Input
+                  value={liveIrnDoc?.irn ?? form.irn}
+                  onChange={(e) => patchForm({ irn: e.target.value })}
+                  readOnly={Boolean(liveIrnDoc?.irn)}
+                />
               </FieldWrapper>
+            </div>
+
+            <div className="mt-4">
+              <IrnActionsPanel
+                documentType="DEBIT_NOTE"
+                document={
+                  liveIrnDoc ??
+                  (editing
+                    ? {
+                        id: editing.id,
+                        document_type: "DEBIT_NOTE",
+                        document_no: editing.debitNoteNo,
+                        document_date: null,
+                        customer_id: null,
+                        grand_total: Number(editing.grandTotal) || 0,
+                        register_type: "B2B",
+                        status: "POSTED",
+                        irn: form.irn || null,
+                        irn_status: form.irn ? "GENERATED" : "PENDING",
+                        irn_ack_no: null,
+                        irn_ack_date: null,
+                        irn_qr_payload: null,
+                        irn_payload: {},
+                        irn_provider: null,
+                        irn_cancel_reason: null,
+                        row_version: 1,
+                      }
+                    : null)
+                }
+                demo={!authed}
+                onUpdated={(doc) => {
+                  setLiveIrnDoc(doc);
+                  patchForm({ irn: doc.irn ?? "" });
+                  setRows((prev) =>
+                    prev.map((r) =>
+                      r.debitNoteNo === doc.document_no
+                        ? { ...r, form: { ...r.form, irn: doc.irn ?? "" } }
+                        : r,
+                    ),
+                  );
+                }}
+              />
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
@@ -794,7 +870,12 @@ function DebitNotePage() {
               </FieldWrapper>
               <FieldWrapper label="Grand Total">
                 <div className="flex gap-1">
-                  <Input value={lineDraft.grandTotal} disabled readOnly className="min-w-0 flex-1" />
+                  <Input
+                    value={lineDraft.grandTotal}
+                    disabled
+                    readOnly
+                    className="min-w-0 flex-1"
+                  />
                   <Button
                     type="button"
                     className="shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
@@ -866,7 +947,10 @@ function DebitNotePage() {
           </FormSection>
 
           <div className="mt-6 flex flex-wrap justify-end gap-2">
-            <Button onClick={persistEntry} className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90">
+            <Button
+              onClick={() => void persistEntry()}
+              className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
               Save
             </Button>
             <Button variant="destructive" onClick={closeEntry} className="min-w-24">
@@ -929,13 +1013,25 @@ function DebitNotePage() {
           <table className="w-full min-w-[900px] caption-bottom text-sm">
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Debit Note No.</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Debit Note No.
+                </TableHead>
                 <TableHead className="whitespace-nowrap text-sidebar-foreground">Date</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Customer Name</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Invoice Ref.</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Narration</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Grand Total</TableHead>
-                <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">Action</TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Customer Name
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Invoice Ref.
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Narration
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-sidebar-foreground">
+                  Grand Total
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">
+                  Action
+                </TableHead>
               </TableRow>
               <TableRow className="bg-muted/20 hover:bg-muted/20">
                 {(
@@ -1054,7 +1150,9 @@ function DebitNotePage() {
       <Dialog open={reportOpen} onOpenChange={(open) => !open && closeReport()}>
         <DialogContent className="max-w-lg gap-0 overflow-hidden p-0 sm:max-w-lg">
           <div className="bg-sidebar px-4 py-3">
-            <DialogTitle className="text-base font-semibold text-sidebar-foreground">Report</DialogTitle>
+            <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+              Report
+            </DialogTitle>
           </div>
           <div className="space-y-4 p-6">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -1099,7 +1197,10 @@ function DebitNotePage() {
             </FieldWrapper>
           </div>
           <div className="flex justify-end gap-2 px-6 pb-6">
-            <Button onClick={handleReportOk} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+            <Button
+              onClick={handleReportOk}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
               OK
             </Button>
             <Button variant="destructive" onClick={closeReport}>

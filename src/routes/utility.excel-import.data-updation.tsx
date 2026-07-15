@@ -13,6 +13,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FieldWrapper, MasterBreadcrumb } from "@/components/master-table-kit";
+import {
+  downloadExcelTemplate,
+  excelImportErrorMessage,
+  runExcelImportFromFile,
+} from "@/lib/imports/excelUi";
 
 const formats = ["FORMAT1", "FORMAT2"];
 
@@ -29,21 +34,38 @@ export const Route = createFileRoute("/utility/excel-import/data-updation")({
 function DataUpdationPage() {
   const [format, setFormat] = useState("");
   const [fileName, setFileName] = useState("");
+  const [busy, setBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileRef = useRef<File | null>(null);
 
   const handleFile = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setFileName(event.target.files?.[0]?.name ?? "");
+    const file = event.target.files?.[0] ?? null;
+    fileRef.current = file;
+    setFileName(file?.name ?? "");
   };
 
-  const handleImport = () => {
+  const run = async (mode: "VALIDATE" | "COMMIT") => {
     if (!format) return toast.error("Please select format");
-    if (!fileName) return toast.error("Please select import file");
-    toast.success(`${format} data updation started`);
+    if (!fileRef.current) return toast.error("Please select import file");
+    setBusy(true);
+    try {
+      await runExcelImportFromFile({
+        file: fileRef.current,
+        importType: "DATA_UPDATE",
+        mode,
+        params: { format },
+      });
+    } catch (err) {
+      toast.error(excelImportErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleReset = () => {
     setFormat("");
     setFileName("");
+    fileRef.current = null;
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -54,7 +76,7 @@ function DataUpdationPage() {
       <Card className="min-w-0 border p-4">
         <button
           type="button"
-          onClick={() => toast.success("Data updation template download started")}
+          onClick={() => downloadExcelTemplate("DATA_UPDATE", "data-updation-template.csv")}
           className="mb-3 inline-flex items-center gap-1 text-xs text-red-500 hover:underline"
         >
           <Download className="h-3.5 w-3.5" />
@@ -80,20 +102,49 @@ function DataUpdationPage() {
 
             <FieldWrapper label="Select File">
               <div className="flex items-center gap-2">
-                <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFile} />
-                <Button type="button" variant="outline" className="h-9 px-6" onClick={() => fileInputRef.current?.click()}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleFile}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 px-6"
+                  onClick={() => fileInputRef.current?.click()}
+                >
                   Choose
                 </Button>
-                <span className="text-xs text-muted-foreground">{fileName || "No file selected"}</span>
+                <span className="text-xs text-muted-foreground">
+                  {fileName || "No file selected"}
+                </span>
               </div>
             </FieldWrapper>
           </div>
 
           <div className="flex items-center gap-2">
-            <Button onClick={handleImport} className="h-9 rounded-full bg-green-500 px-8 text-white hover:bg-green-600">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void run("VALIDATE")}
+              className="h-9 rounded-full px-6"
+            >
+              Validate
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={() => void run("COMMIT")}
+              className="h-9 rounded-full bg-green-500 px-8 text-white hover:bg-green-600"
+            >
               Import
             </Button>
-            <Button onClick={handleReset} className="h-9 rounded-full bg-red-500 px-8 text-white hover:bg-red-600">
+            <Button
+              onClick={handleReset}
+              className="h-9 rounded-full bg-red-500 px-8 text-white hover:bg-red-600"
+            >
               Reset
             </Button>
           </div>

@@ -139,4 +139,61 @@ echo "==> running Phase 4 finance-foundation verification"
 echo "==> running Phase 4 rating-engine verification"
 "${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/rating_engine_verification.sql"
 
+echo "==> running Phase 5 reporting-foundation verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/reporting_foundation_verification.sql"
+
+echo "==> running Phase 5 operational-reports verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/operational_reports_verification.sql"
+
+echo "==> running Phase 5 financial-reports verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/financial_reports_verification.sql"
+
+echo "==> running Phase 5 accounts-receivable-reports verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/accounts_receivable_reports_verification.sql"
+
+echo "==> running Phase 5 audit-security-reports verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/audit_security_reports_verification.sql"
+
+echo "==> running Phase 5 dashboard-rollups verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/dashboard_rollups_verification.sql"
+
+echo "==> running Phase 5 report-jobs verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/report_jobs_verification.sql"
+
+echo "==> running Phase 6 excel-import-suite verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/excel_import_suite_verification.sql"
+
+echo "==> running Phase 6 rate-update-jobs verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/rate_update_jobs_verification.sql"
+
+echo "==> running Phase 6 zone-update-jobs verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/zone_update_jobs_verification.sql"
+
+echo "==> running Phase 6 tax-fuel-setup verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/tax_fuel_setup_verification.sql"
+
+echo "==> running Phase 6 notifications-email-configuration verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/notifications_email_configuration_verification.sql"
+
+echo "==> running Phase 6 serviceable-pincode verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/serviceable_pincode_verification.sql"
+
+echo "==> running Phase 7 integration-framework verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/integration_framework_verification.sql"
+
+echo "==> running Phase 7 carrier-booking-tracking verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/carrier_booking_tracking_verification.sql"
+
+echo "==> running Phase 7 public-tracking-webhooks verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/public_tracking_webhooks_verification.sql"
+
+echo "==> running Phase 7 notification-delivery verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/notification_delivery_verification.sql"
+
+echo "==> running Phase 7 irn-integration verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/irn_integration_verification.sql"
+
+echo "==> running Phase 7 customs-edi verification"
+"${PSQL[@]}" "${DB[@]}" -f "$TEST_DIR/customs_edi_verification.sql"
+
 echo "==> OK: migrations applied cleanly and all verifications passed."
