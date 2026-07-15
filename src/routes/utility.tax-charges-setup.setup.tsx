@@ -343,12 +343,8 @@ const formSetupDefinitions: Record<FormSetupModuleKey, FormFieldConfig[]> = {
   ].map(toFormField),
 };
 
-function toFormField([name, type, enabled, value]: [
-  string,
-  string,
-  boolean,
-  string,
-]): FormFieldConfig {
+function toFormField(row: (string | boolean)[]): FormFieldConfig {
+  const [name, type, enabled, value] = row as [string, string, boolean, string];
   return { name, type: type as "checkbox" | "text", enabled, value };
 }
 

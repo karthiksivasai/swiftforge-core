@@ -191,7 +191,7 @@ function RateImportPage() {
         onOpenChange={(open) => {
           if (!open) setLookupOpen(null);
         }}
-        onSelect={handleLookupSelect}
+        onSelect={(_v, option) => handleLookupSelect(option)}
       />
     </div>
   );

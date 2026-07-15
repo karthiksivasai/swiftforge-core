@@ -172,7 +172,7 @@ export async function fetchVendorContractList(filters: VendorContractSearchFilte
     loadRefMap("destinations", destIds),
   ]);
 
-  const flat: Array<VendorContractRow & VendorContractSlabRow & Record<string, string>> = [];
+  const flat: Array<VendorContractRow & VendorContractSlabRow & Record<string, unknown>> = [];
   for (const c of roots) {
     const lines = slabsByContract.get(c.id) ?? [];
     const vendor = vendors.get(c.vendor_id);

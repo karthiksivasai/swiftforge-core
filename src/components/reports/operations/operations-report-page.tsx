@@ -108,7 +108,7 @@ export function OperationsReportPage() {
       }
 
       if (detail.action === "download") {
-        const exp = await exportOperationsReport(detail.id, form, "PDF");
+        const exp = await exportOperationsReport(detail.id, form, "CSV");
         if (exp.status === "error") {
           toast.error(exp.message);
           return;

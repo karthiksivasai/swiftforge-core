@@ -428,7 +428,7 @@ export function uiCustomerToSavePayload(form: UiCustomerRow) {
     vendor: f.vendor || null,
     product: f.product || null,
     destination: f.destination || null,
-    percentage: f.percentage || null,
+    percentage: f.percentage ? Number(f.percentage) : null,
   }));
 
   const otherCharges: CustomerOtherChargeInput[] = (
@@ -453,8 +453,8 @@ export function uiCustomerToSavePayload(form: UiCustomerRow) {
     product: o.product || null,
     origin: o.origin || null,
     destination: o.destination || null,
-    amount: o.amount || null,
-    minimum_value: o.minimumValue || null,
+    amount: o.amount ? Number(o.amount) : null,
+    minimum_value: o.minimumValue ? Number(o.minimumValue) : null,
   }));
 
   const volumetrics: CustomerVolumetricInput[] = (
@@ -470,9 +470,9 @@ export function uiCustomerToSavePayload(form: UiCustomerRow) {
     product: v.product || null,
     vendor: v.vendor || null,
     service: v.service || null,
-    cm_divisor: v.cmDivide || null,
-    inch_divisor: v.inchDivide || null,
-    cft: v.cft || null,
+    cm_divisor: v.cmDivide ? Number(v.cmDivide) : null,
+    inch_divisor: v.inchDivide ? Number(v.inchDivide) : null,
+    cft: v.cft ? Number(v.cft) : null,
   }));
 
   const kycDocuments: CustomerKycDocumentInput[] = (
