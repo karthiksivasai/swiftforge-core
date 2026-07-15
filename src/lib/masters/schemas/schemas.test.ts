@@ -70,6 +70,34 @@ describe("destinationCreateSchema", () => {
     });
   });
 
+  it("clears state and service_type for INTERNATIONAL", () => {
+    const out = destinationCreateSchema.parse({
+      code: "AE",
+      name: "UAE",
+      dest_type: "INTERNATIONAL",
+      country_id: UUID,
+      state_id: UUID,
+      service_type: "REGULAR",
+    });
+    expect(out.state_id).toBeNull();
+    expect(out.service_type).toBeNull();
+    expect(out.country_id).toBe(UUID);
+  });
+
+  it("clears country and service_type for LOCAL", () => {
+    const out = destinationCreateSchema.parse({
+      code: "L1",
+      name: "Local Hub",
+      dest_type: "LOCAL",
+      country_id: UUID,
+      state_id: UUID,
+      service_type: "METRO",
+    });
+    expect(out.country_id).toBeNull();
+    expect(out.service_type).toBeNull();
+    expect(out.state_id).toBe(UUID);
+  });
+
   it("rejects an invalid email but accepts empty", () => {
     expect(() => destinationCreateSchema.parse({ code: "D1", name: "D", email: "nope" })).toThrow(
       /valid email/,

@@ -249,14 +249,47 @@ function emptyForm(type: DestinationType): Omit<Destination, "id"> {
     code: "",
     name: "",
     country: type === "Domestic" ? "IN" : "",
+    countryId: "",
     state: "",
+    stateId: "",
     serviceType: "",
     status: "Active",
     email: "",
     mobile: "",
     mainBranch: "",
+    mainBranchId: "",
     zone: "",
+    zoneId: "",
     branchManifest: "",
+    manifestBranchId: "",
+  };
+}
+
+/** Reset fields that CourierWala hides for the selected destination type. */
+function applyFormType(prev: Omit<Destination, "id">, nextType: DestinationType): Omit<Destination, "id"> {
+  const base = { ...prev, type: nextType };
+  if (nextType === "International") {
+    return {
+      ...base,
+      state: "",
+      stateId: "",
+      serviceType: "",
+      country: prev.type === "International" ? prev.country : "",
+      countryId: prev.type === "International" ? prev.countryId : "",
+    };
+  }
+  if (nextType === "Local") {
+    return {
+      ...base,
+      country: "",
+      countryId: "",
+      serviceType: "",
+    };
+  }
+  return {
+    ...base,
+    country: prev.country || "IN",
+    serviceType: prev.type === "Domestic" ? prev.serviceType : "",
   };
 }
 
@@ -298,9 +331,12 @@ function rowToView(r: DestinationDbRow & Record<string, unknown>): Destination {
 
 function DestinationPage() {
   const { isAuthenticated: authed } = useAuth();
+  const [type, setType] = useState<DestinationType>("Domestic");
   const rc = useMasterResource(destinationsResource);
   const live = useMasterList(destinationsResource, {
     enabled: authed,
+    filters: { dest_type: TYPE_TO_DB[type] },
+    pageSize: 5000,
     labelRefs: [
       { idField: "country_id", table: "countries", as: "country" },
       { idField: "state_id", table: "states", as: "state" },
@@ -323,7 +359,6 @@ function DestinationPage() {
   const canDelete = !authed || rc.perms.canDelete;
   const [saving, setSaving] = useState(false);
 
-  const [type, setType] = useState<DestinationType>("Domestic");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
@@ -333,7 +368,11 @@ function DestinationPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
-  const scoped = useMemo(() => rows.filter((r) => r.type === type), [rows, type]);
+  // Live list is already filtered by dest_type; demo mode still scopes client-side.
+  const scoped = useMemo(
+    () => (authed ? rows : rows.filter((r) => r.type === type)),
+    [authed, rows, type],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -364,20 +403,24 @@ function DestinationPage() {
     setOpen(true);
   };
 
-  const toRaw = (f: Omit<Destination, "id">) => ({
-    dest_type: TYPE_TO_DB[f.type],
-    code: f.code,
-    name: f.name,
-    country_id: f.countryId || null,
-    state_id: f.stateId || null,
-    zone_id: f.zoneId || null,
-    service_type: f.serviceType || null,
-    main_branch_id: f.mainBranchId || null,
-    manifest_branch_id: f.manifestBranchId || null,
-    email: f.email || null,
-    mobile: f.mobile || null,
-    status: f.status === "In-Active" ? "INACTIVE" : "ACTIVE",
-  });
+  const toRaw = (f: Omit<Destination, "id">) => {
+    const isInternational = f.type === "International";
+    const isLocal = f.type === "Local";
+    return {
+      dest_type: TYPE_TO_DB[f.type],
+      code: f.code,
+      name: f.name,
+      country_id: isLocal ? null : f.countryId || null,
+      state_id: isInternational ? null : f.stateId || null,
+      zone_id: f.zoneId || null,
+      service_type: f.type === "Domestic" ? f.serviceType || null : null,
+      main_branch_id: f.mainBranchId || null,
+      manifest_branch_id: f.manifestBranchId || null,
+      email: f.email || null,
+      mobile: f.mobile || null,
+      status: f.status === "In-Active" ? "INACTIVE" : "ACTIVE",
+    };
+  };
 
   const handleSave = async () => {
     if (authed) {
@@ -496,7 +539,10 @@ function DestinationPage() {
       const importRows = mapCsvToImportRows(
         parsedRows,
         destinationsResource.importColumns,
-      ) as ImportRow[];
+      ).map((rec) => ({
+        ...rec,
+        dest_type: rec.dest_type?.trim() || TYPE_TO_DB[type],
+      })) as ImportRow[];
       const res = await rc.commitImport.mutateAsync(importRows);
       toast.success(importSummary(res));
       return;
@@ -572,6 +618,8 @@ function DestinationPage() {
             onValueChange={(v) => {
               setType(v as DestinationType);
               setPage(1);
+              setSelected(new Set());
+              setSearch("");
             }}
           >
             <SelectTrigger className="h-10 w-64">
@@ -787,7 +835,10 @@ function DestinationPage() {
               <Label className="text-xs font-medium text-muted-foreground">Type</Label>
               <Select
                 value={form.type}
-                onValueChange={(v) => setForm((f) => ({ ...f, type: v as DestinationType }))}
+                onValueChange={(v) =>
+                  setForm((f) => applyFormType(f, v as DestinationType))
+                }
+                disabled={Boolean(editing)}
               >
                 <SelectTrigger className="h-10 w-64">
                   <SelectValue />
@@ -853,35 +904,37 @@ function DestinationPage() {
                   )}
                 </FieldWrapper>
 
-                <FieldWrapper label="State">
-                  {authed ? (
-                    <LookupCombobox
-                      lookupKey="state"
-                      value={form.stateId ?? ""}
-                      valueLabel={form.state}
-                      onChange={(id, item) =>
-                        setForm((f) => ({ ...f, stateId: id, state: item?.name ?? "" }))
-                      }
-                      placeholder="Select State"
-                    />
-                  ) : (
-                    <Select
-                      value={form.state || undefined}
-                      onValueChange={(v) => setForm((f) => ({ ...f, state: v }))}
-                    >
-                      <SelectTrigger className="h-10">
-                        <SelectValue placeholder="Select State" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STATES.map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </FieldWrapper>
+                {form.type !== "International" ? (
+                  <FieldWrapper label="State">
+                    {authed ? (
+                      <LookupCombobox
+                        lookupKey="state"
+                        value={form.stateId ?? ""}
+                        valueLabel={form.state}
+                        onChange={(id, item) =>
+                          setForm((f) => ({ ...f, stateId: id, state: item?.name ?? "" }))
+                        }
+                        placeholder="Select State"
+                      />
+                    ) : (
+                      <Select
+                        value={form.state || undefined}
+                        onValueChange={(v) => setForm((f) => ({ ...f, state: v }))}
+                      >
+                        <SelectTrigger className="h-10">
+                          <SelectValue placeholder="Select State" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STATES.map((s) => (
+                            <SelectItem key={s} value={s}>
+                              {s}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </FieldWrapper>
+                ) : null}
 
                 <FieldWrapper label="Zone">
                   {authed ? (
@@ -913,23 +966,51 @@ function DestinationPage() {
                   )}
                 </FieldWrapper>
 
-                <FieldWrapper label="Service Type">
-                  <Select
-                    value={form.serviceType || undefined}
-                    onValueChange={(v) => setForm((f) => ({ ...f, serviceType: v }))}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select Service" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SERVICE_TYPES.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {s}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </FieldWrapper>
+                {form.type === "International" ? (
+                  <FieldWrapper label="Country">
+                    {authed ? (
+                      <LookupCombobox
+                        lookupKey="country"
+                        value={form.countryId ?? ""}
+                        valueLabel={form.country}
+                        onChange={(id, item) =>
+                          setForm((f) => ({
+                            ...f,
+                            countryId: id,
+                            country: item?.name ?? item?.code ?? "",
+                          }))
+                        }
+                        placeholder="Select Country"
+                      />
+                    ) : (
+                      <Input
+                        value={form.country}
+                        onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))}
+                        placeholder="Country code"
+                      />
+                    )}
+                  </FieldWrapper>
+                ) : null}
+
+                {form.type === "Domestic" ? (
+                  <FieldWrapper label="Service Type">
+                    <Select
+                      value={form.serviceType || undefined}
+                      onValueChange={(v) => setForm((f) => ({ ...f, serviceType: v }))}
+                    >
+                      <SelectTrigger className="h-10">
+                        <SelectValue placeholder="Select Service" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SERVICE_TYPES.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {s}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FieldWrapper>
+                ) : null}
 
                 <FieldWrapper label="Branch Manifest">
                   {authed ? (
@@ -972,6 +1053,17 @@ function DestinationPage() {
                   </Select>
                 </FieldWrapper>
               </div>
+            </fieldset>
+
+            <fieldset className="rounded-md border p-4">
+              <legend className="rounded bg-sidebar px-2 py-0.5 text-xs font-medium text-sidebar-foreground">
+                Branch details
+              </legend>
+              <p className="text-sm text-muted-foreground">
+                {form.mainBranch
+                  ? `Main branch: ${form.mainBranch}${form.branchManifest ? ` · Manifest: ${form.branchManifest}` : ""}`
+                  : "Select a main branch to associate this destination."}
+              </p>
             </fieldset>
           </div>
 

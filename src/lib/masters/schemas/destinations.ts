@@ -6,7 +6,15 @@ export const DESTINATION_TYPES = ["DOMESTIC", "INTERNATIONAL", "LOCAL"] as const
 export const SERVICE_TYPES = ["REGULAR", "METRO", "REMOTE"] as const;
 export const DESTINATION_STATUSES = ["ACTIVE", "INACTIVE"] as const;
 
-export const destinationCreateSchema = z.object({
+/**
+ * CourierWala field sets by dest_type:
+ * - DOMESTIC: state + service_type (+ zone/branches); country typically IN
+ * - INTERNATIONAL: country + zone; no state / service_type
+ * - LOCAL: state + zone; no country / service_type
+ *
+ * DB columns stay nullable; create transform clears fields that do not apply.
+ */
+const destinationFieldsSchema = z.object({
   dest_type: z.enum(DESTINATION_TYPES).default("DOMESTIC"),
   code: reqText("Code", 20),
   name: reqText("Name", 150),
@@ -21,12 +29,35 @@ export const destinationCreateSchema = z.object({
   status: z.enum(DESTINATION_STATUSES).default("ACTIVE"),
 });
 
-export const destinationUpdateSchema = destinationCreateSchema.partial();
+export function clearDestinationFieldsByType<
+  T extends {
+    dest_type?: (typeof DESTINATION_TYPES)[number];
+    country_id?: string | null;
+    state_id?: string | null;
+    service_type?: (typeof SERVICE_TYPES)[number] | null;
+  },
+>(row: T): T {
+  if (row.dest_type === "INTERNATIONAL") {
+    return { ...row, state_id: null, service_type: null };
+  }
+  if (row.dest_type === "LOCAL") {
+    return { ...row, country_id: null, service_type: null };
+  }
+  return row;
+}
+
+export const destinationCreateSchema = destinationFieldsSchema.transform(
+  clearDestinationFieldsByType,
+);
+
+export const destinationUpdateSchema = destinationFieldsSchema.partial().transform((row) =>
+  clearDestinationFieldsByType(row),
+);
 
 export type DestinationCreate = z.infer<typeof destinationCreateSchema>;
 export type DestinationUpdate = z.infer<typeof destinationUpdateSchema>;
 
-export const destinationDefaults: Partial<z.input<typeof destinationCreateSchema>> = {
+export const destinationDefaults: Partial<z.input<typeof destinationFieldsSchema>> = {
   dest_type: "DOMESTIC",
   code: "",
   name: "",
