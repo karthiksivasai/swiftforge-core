@@ -11,22 +11,25 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  // Fail loud in dev; keeps a clear signal until Phase 2 wires auth-driven usage.
-  console.warn(
-    "[supabase] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are not set. " +
-      "Copy .env.example to .env and fill in your project values.",
-  );
+const missing: string[] = [];
+if (!supabaseUrl) missing.push("VITE_SUPABASE_URL");
+if (!supabaseAnonKey) missing.push("VITE_SUPABASE_ANON_KEY");
+
+if (missing.length > 0) {
+  const message =
+    `[supabase] Missing required environment variable(s): ${missing.join(", ")}. ` +
+    `Set them in Lovable → Project Settings → Secrets (values must match your Supabase project). ` +
+    `Refusing to fall back to http://localhost:54321.`;
+  // Surface loudly so it's obvious in the preview console instead of silently
+  // pointing auth requests at localhost.
+  console.error(message);
+  throw new Error(message);
 }
 
-export const supabase: SupabaseClient = createClient(
-  supabaseUrl ?? "http://localhost:54321",
-  supabaseAnonKey ?? "public-anon-key-not-set",
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-    },
+export const supabase: SupabaseClient = createClient(supabaseUrl!, supabaseAnonKey!, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
   },
-);
+});
