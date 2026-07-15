@@ -88,7 +88,7 @@ export function validateOperationsForm(
 }
 
 /** Map UI form → Phase 5 filter bag (snake_case keys used by engine). */
-export function formToEngineFilters(form: OperationsReportForm): Record<string, unknown> {
+export function formToEngineFilters(form: OperationsReportForm): ReportFilterValues {
   const pair = (p: { code: string; name: string }) => p.code || p.name || null;
   return {
     from_date: form.fromDate || null,
