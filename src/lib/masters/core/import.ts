@@ -44,6 +44,10 @@ export type ImportMaster =
   | "shippers"
   // party aggregate (0023)
   | "customers"
+  | "local_branches"
+  | "service_mappings"
+  | "vendors"
+  | "vendor_contracts"
   // utility tax/fuel (0052)
   | "fuel_surcharge_rates"
   | "tax_rates";
