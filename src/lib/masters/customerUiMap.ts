@@ -428,7 +428,7 @@ export function uiCustomerToSavePayload(form: UiCustomerRow) {
     vendor: f.vendor || null,
     product: f.product || null,
     destination: f.destination || null,
-    percentage: f.percentage || null,
+    percentage: f.percentage ? Number(f.percentage) : null,
   }));
 
   const otherCharges: CustomerOtherChargeInput[] = (
