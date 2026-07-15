@@ -1,18 +1,1 @@
-# Supabase project configuration.
-# `project_id` is a local label; link to the real project with:
-#   supabase link --project-ref ijosczggsrvscponules
-project_id = "swiftforge-core"
-
-[db]
-# Match the Supabase Postgres major version of the remote project.
-major_version = 15
-
-[db.seed]
-enabled = true
-sql_paths = ["./seed.sql"]
-
-[storage]
-enabled = true
-
-[auth]
-enabled = true
+project_id = "gxsaepfdhrwyujxjcluf"
