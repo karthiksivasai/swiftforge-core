@@ -10,6 +10,7 @@ import {
   validateReportFilters,
   type ReportExecuteResult,
   type ReportExportFormat,
+  type ReportFilterValues,
 } from "@/lib/reports";
 import {
   REPORT_DEFINITIONS,
