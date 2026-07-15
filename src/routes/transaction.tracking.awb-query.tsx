@@ -16,12 +16,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import {
   FieldWrapper,
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
@@ -278,24 +278,26 @@ const SHIPMENT_DETAIL_FIELDS: { key: string; label: string }[] = [
   { key: "fieldExecutive", label: "Field Executive" },
 ];
 
-const FILTER_RESULT_HEADERS = [
-  "Master AWB No.",
-  "AWB No.",
-  "Booking Date",
-  "Run No.",
-  "Airline",
-  "Shipper",
-  "Consignee",
-  "City",
-  "Destination",
-  "Pieces",
-  "Charge Weight",
-  "Total Amount",
-  "Forwarder",
-  "Delivery Date",
-  "Payment Type",
-  "Manifest Type",
+const FILTER_EXPORT_COLUMNS = [
+  { key: "masterAwbNo", header: "Master AWB No." },
+  { key: "awbNo", header: "AWB No." },
+  { key: "bookingDate", header: "Booking Date" },
+  { key: "runNo", header: "Run No." },
+  { key: "airline", header: "Airline" },
+  { key: "shipper", header: "Shipper" },
+  { key: "consignee", header: "Consignee" },
+  { key: "city", header: "City" },
+  { key: "destination", header: "Destination" },
+  { key: "pieces", header: "Pieces" },
+  { key: "chargeWeight", header: "Charge Weight" },
+  { key: "totalAmount", header: "Total Amount" },
+  { key: "forwarder", header: "Forwarder" },
+  { key: "deliveryDate", header: "Delivery Date" },
+  { key: "paymentType", header: "Payment Type" },
+  { key: "manifestType", header: "Manifest Type" },
 ] as const;
+
+const FILTER_RESULT_HEADERS = FILTER_EXPORT_COLUMNS.map((c) => c.header);
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
 
@@ -731,33 +733,6 @@ function AwbQueryPage() {
     setFilterSearched(false);
     setFilterPage(1);
     toast.success("Filters reset");
-  };
-
-  const handleFilterExport = () => {
-    if (filterResults.length === 0) return toast.error("No results to export");
-    downloadCsv(
-      "awb-query-filter.csv",
-      [...FILTER_RESULT_HEADERS],
-      filterResults.map((r) => [
-        r.masterAwbNo,
-        r.awbNo,
-        r.bookingDate,
-        r.runNo,
-        r.airline,
-        r.shipper,
-        r.consignee,
-        r.city,
-        r.destination,
-        r.pieces,
-        r.chargeWeight,
-        r.totalAmount,
-        r.forwarder,
-        r.deliveryDate,
-        r.paymentType,
-        r.manifestType,
-      ]),
-    );
-    toast.success("Exported awb-query-filter.csv");
   };
 
   const filterTotalPages = Math.max(1, Math.ceil(filterResults.length / PAGE_SIZE));
@@ -1433,9 +1408,33 @@ function AwbQueryPage() {
                 >
                   Search
                 </Button>
-                <Button onClick={handleFilterExport} variant="secondary">
-                  Export
-                </Button>
+                <DataIoToolbar
+                  export={{
+                    filename: "awb-query-filter",
+                    title: "AWB Query Filter Results",
+                    columns: FILTER_EXPORT_COLUMNS,
+                    getRows: () =>
+                      filterResults.map((r) => ({
+                        masterAwbNo: r.masterAwbNo,
+                        awbNo: r.awbNo,
+                        bookingDate: r.bookingDate,
+                        runNo: r.runNo,
+                        airline: r.airline,
+                        shipper: r.shipper,
+                        consignee: r.consignee,
+                        city: r.city,
+                        destination: r.destination,
+                        pieces: r.pieces,
+                        chargeWeight: r.chargeWeight,
+                        totalAmount: r.totalAmount,
+                        forwarder: r.forwarder,
+                        deliveryDate: r.deliveryDate,
+                        paymentType: r.paymentType,
+                        manifestType: r.manifestType,
+                      })),
+                  }}
+                  disabled={filterResults.length === 0}
+                />
                 <Button variant="destructive" onClick={handleFilterReset}>
                   Reset
                 </Button>

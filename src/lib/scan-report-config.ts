@@ -125,3 +125,47 @@ export const SCAN_FIELD_LABELS: Record<ScanFieldKey, string> = {
   withClubAwbNo: "With Club AWB No",
   type: "Type",
 };
+
+export const SCAN_LOOKUP_FIELDS: Partial<
+  Record<
+    ScanFieldKey,
+    | "customer"
+    | "destination"
+    | "product"
+    | "vendor"
+    | "serviceCentre"
+    | "serviceType"
+    | "exception"
+  >
+> = {
+  serviceCenter: "serviceCentre",
+  serviceType: "serviceType",
+  origin: "destination",
+  destination: "destination",
+  customer: "customer",
+  vendor: "vendor",
+  forwardingVendor: "vendor",
+  product: "product",
+  exception: "exception",
+};
+
+export const SCAN_DATE_FIELD_KEYS: ScanFieldKey[] = [
+  "fromManifestDate",
+  "toManifestDate",
+  "fromDate",
+  "toDate",
+  "fromBookingDate",
+  "toBookingDate",
+];
+
+export const scanHasDateRange = (definition: ScanReportDefinition) => {
+  const all = [
+    ...definition.fields,
+    ...(definition.secondRowFields ?? []),
+    ...(definition.extraRows?.flat() ?? []),
+  ];
+  return SCAN_DATE_FIELD_KEYS.some((k) => all.includes(k));
+};
+
+export const scanRequiresManifestNo = (definition: ScanReportDefinition) =>
+  definition.id === "bag-wise-detail-print" || definition.id === "edi-csb-files";

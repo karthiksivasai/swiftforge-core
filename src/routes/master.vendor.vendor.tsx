@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
-import { Copy, Download, Upload, RefreshCw, Plus, Search, Pencil, Trash2 } from "lucide-react";
+import { Copy, RefreshCw, Plus, Search, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -49,8 +49,8 @@ import {
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import type { LookupKey, LookupOption } from "@/lib/master-lookups";
 import { LookupCombobox } from "@/components/masters/lookup-combobox";
@@ -58,7 +58,8 @@ import { LookupCombobox } from "@/components/masters/lookup-combobox";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   vendorsResource,
   fetchVendorChildren,
@@ -293,7 +294,6 @@ function VendorPage() {
   const [toVendor, setToVendor] = useState<VendorPick>(emptyVendorPick());
   const [vendorZones, setVendorZones] = useState<Record<string, string[]>>({});
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
   const ratesFileRef = useRef<HTMLInputElement | null>(null);
 
   const rows: UiVendorRow[] = authed
@@ -442,50 +442,11 @@ function VendorPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "vendors.csv",
-      [
-        "Vendor Code",
-        "Vendor Name",
-        "Address 1",
-        "Address 2",
-        "Phone 1",
-        "Phone 2",
-        "Mobile",
-        "Email",
-        "City",
-        "State",
-        "Status",
-      ],
-      rows.map((r) => [
-        r.code,
-        r.name,
-        r.address1,
-        r.address2,
-        r.phone1,
-        r.phone2,
-        r.mobile,
-        r.email,
-        r.city,
-        r.state,
-        r.status,
-      ]),
-    );
-    toast.success("Exported vendors.csv");
-  };
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) return toast.error("File is empty");
       if (authed) {
         const importRows = mapCsvToImportRows(
-          parsed.rows,
+          parsedRows,
           vendorsResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
@@ -493,7 +454,7 @@ function VendorPage() {
         return;
       }
       const imported: UiVendorRow[] = [];
-      for (const rec of mapCsvToImportRows(parsed.rows, vendorsResource.importColumns)) {
+      for (const rec of mapCsvToImportRows(parsedRows, vendorsResource.importColumns)) {
         if (!rec.code?.trim()) continue;
         const status =
           (rec.status || "").trim().toLowerCase() === "in-active" ? "In-Active" : "Active";
@@ -527,7 +488,10 @@ function VendorPage() {
           volumetricWeightRoundOff: String(rec.vol_weight_round_off).toLowerCase() === "true",
         });
       }
-      if (imported.length === 0) return toast.error("No valid rows found");
+      if (imported.length === 0) {
+        toast.error("No valid rows found");
+        return;
+      }
       setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
     } catch (err) {
@@ -612,22 +576,43 @@ function VendorPage() {
       </div>
 
       <Card className="overflow-hidden p-0">
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={handleImportFile}
-        />
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}>
-                <Download className="h-4 w-4" />
-              </IconButton>
-              <IconButton label="Import" onClick={() => importInputRef.current?.click()}>
-                <Upload className="h-4 w-4" />
-              </IconButton>
+              <DataIoToolbar
+                export={{
+                  filename: "vendors",
+                  title: "Vendors",
+                  columns: [
+                    { key: "code", header: "Vendor Code" },
+                    { key: "name", header: "Vendor Name" },
+                    { key: "address1", header: "Address 1" },
+                    { key: "address2", header: "Address 2" },
+                    { key: "phone1", header: "Phone 1" },
+                    { key: "phone2", header: "Phone 2" },
+                    { key: "mobile", header: "Mobile" },
+                    { key: "email", header: "Email" },
+                    { key: "city", header: "City" },
+                    { key: "state", header: "State" },
+                    { key: "status", header: "Status" },
+                  ],
+                  getRows: () =>
+                    rows.map((r) => ({
+                      code: r.code,
+                      name: r.name,
+                      address1: r.address1,
+                      address2: r.address2,
+                      phone1: r.phone1,
+                      phone2: r.phone2,
+                      mobile: r.mobile,
+                      email: r.email,
+                      city: r.city,
+                      state: r.state,
+                      status: r.status,
+                    })),
+                }}
+                import={{ onRows: handleImportRows }}
+              />
               {!authed && (
                 <IconButton label="Copy Zone" onClick={openCopyZone}>
                   <Copy className="h-4 w-4" />

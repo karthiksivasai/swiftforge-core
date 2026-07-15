@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
+import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { IconButton, MasterBreadcrumb, PAGE_SIZE, TablePager } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { useAuth } from "@/lib/auth";
-import { parseCsv, mapCsvToImportRows } from "@/lib/masters/core";
+import { mapCsvToImportRows } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import { importSummary, toErrorMessage } from "@/lib/masters/screen";
 import type { LookupKey, LookupOption } from "@/lib/master-lookups";
 import { canDo } from "@/lib/permissions";
@@ -139,7 +141,6 @@ export const Route = createFileRoute("/utility/tax-charges-setup/fuel-setup")({
 function FuelSetupPage() {
   const { isAuthenticated: authed, permissions } = useAuth();
   const queryClient = useQueryClient();
-  const importRef = useRef<HTMLInputElement | null>(null);
 
   const [demoRows, setDemoRows] = useState<FuelRow[]>(seedRows);
   const [screen, setScreen] = useState<"list" | "form">("list");
@@ -342,11 +343,9 @@ function FuelSetupPage() {
     toast.success("Deleted");
   };
 
-  const handleImport = async (file: File) => {
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      const rows = mapCsvToImportRows(parsed.rows, [...FUEL_IMPORT_COLUMNS]);
+      const rows = mapCsvToImportRows(parsedRows, [...FUEL_IMPORT_COLUMNS]);
       if (!rows.length) return toast.error("No rows to import");
       if (!authed) {
         toast.success(`Demo import preview: ${rows.length} rows`);
@@ -466,31 +465,47 @@ function FuelSetupPage() {
       <Card className="overflow-hidden p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <div className="flex items-center gap-1.5">
-            <IconButton label="Export" onClick={() => toast.success("Export queued")}>
-              <Download className="h-4 w-4" />
-            </IconButton>
-            <IconButton
-              label="Import"
-              onClick={() => {
-                if (authed && !canAdd) {
-                  toast.error("Permission denied");
-                  return;
-                }
-                importRef.current?.click();
+            <DataIoToolbar
+              export={{
+                filename: "fuel-setup",
+                title: "Fuel Setup",
+                columns: [
+                  { key: "entryCode", header: "Entry Code" },
+                  { key: "customer", header: "Customer" },
+                  { key: "vendor", header: "Vendor" },
+                  { key: "product", header: "Product" },
+                  { key: "zone", header: "Zone" },
+                  { key: "destination", header: "Destination" },
+                  { key: "fromDate", header: "From Date" },
+                  { key: "toDate", header: "To Date" },
+                  { key: "percentage", header: "Percentage" },
+                ],
+                getRows: () =>
+                  filtered.map((row) => ({
+                    entryCode: row.entryCode,
+                    customer: row.customer.name,
+                    vendor: row.vendor.name,
+                    product: row.product.name,
+                    zone: row.zone.name,
+                    destination: row.destination.name,
+                    fromDate: row.fromDate,
+                    toDate: row.toDate,
+                    percentage: row.percentage,
+                  })),
               }}
-            >
-              <Upload className="h-4 w-4" />
-            </IconButton>
-            <input
-              ref={importRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void handleImport(file);
-                event.target.value = "";
-              }}
+              import={
+                canAdd
+                  ? {
+                      onRows: (rows) => {
+                        if (authed && !canAdd) {
+                          toast.error("Permission denied");
+                          return;
+                        }
+                        return handleImportRows(rows);
+                      },
+                    }
+                  : null
+              }
             />
           </div>
           <div className="flex items-end gap-2">

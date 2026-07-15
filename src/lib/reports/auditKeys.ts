@@ -20,10 +20,10 @@ export function isAuditReportKey(key: string): key is AuditReportKey {
   return (AUDIT_REPORT_KEYS as readonly string[]).includes(key);
 }
 
-/** Map legacy operations-hub demo ids → engine report_key. */
-export const AUDIT_HUB_KEY_MAP: Record<string, AuditReportKey | null> = {
+/** Map Operations/Audit hub demo ids → engine report_key. */
+export const AUDIT_HUB_KEY_MAP: Record<string, string | null> = {
   "action-log": "action-log",
   "login-log": "login-log",
   "user-analysis": "user-activity-report",
-  "user-entry-log": null, // deferred — entry semantics overlap action log
+  "user-entry-log": "user-entry-log-report",
 };

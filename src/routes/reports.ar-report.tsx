@@ -1,24 +1,23 @@
 /**
- * AR Report hub — CourierWala Report Type dropdown over Phase 5 AR pack.
+ * Accounts (AR) hub — CourierWala Report Type dropdown → per-report filters.
  */
 import { createFileRoute } from "@tanstack/react-router";
 
-import { ReportHubShell } from "@/components/reports/report-hub-shell";
-import { AR_REPORT_KEYS } from "@/lib/reports";
+import { AccountsReportPage } from "@/components/reports/accounts/accounts-report-page";
 
 export const Route = createFileRoute("/reports/ar-report")({
   head: () => ({
     meta: [
-      { title: "AR Report — Reports — Courier ERP" },
+      { title: "Accounts — Reports — Courier ERP" },
       {
         name: "description",
-        content: "Accounts receivable reports with CourierWala-style Report Type selection.",
+        content: "Accounts receivable ledger reports with CourierWala-style Report Type selection.",
       },
     ],
   }),
-  component: ArReportsPage,
+  component: AccountsReportsRoutePage,
 });
 
-function ArReportsPage() {
-  return <ReportHubShell hubLabel="AR Report" hubs={["AR"]} allowedKeys={AR_REPORT_KEYS} />;
+function AccountsReportsRoutePage() {
+  return <AccountsReportPage />;
 }

@@ -1,8 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Download,
-  Upload,
   RefreshCw,
   Plus,
   Search,
@@ -50,8 +48,8 @@ import {
   PAGE_SIZE,
   StatusPill,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import type { LookupKey, LookupOption } from "@/lib/master-lookups";
 import { LookupCombobox } from "@/components/masters/lookup-combobox";
@@ -59,7 +57,8 @@ import { LookupCombobox } from "@/components/masters/lookup-combobox";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   serviceMappingsResource,
   type ServiceMappingRow as ServiceMappingDbRow,
@@ -263,7 +262,6 @@ function ServiceMappingPage() {
   const [form, setForm] = useState<ServiceForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<ServiceMappingRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const rows: ServiceMappingRow[] = authed
     ? (live.rows as ServiceMappingDbRow[]).map(rowToView)
@@ -395,50 +393,11 @@ function ServiceMappingPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "service-mapping.csv",
-      [
-        "Vendor Code",
-        "Vendor",
-        "Service",
-        "Service Type",
-        "Billing Vendor Code",
-        "Billing Vendor",
-        "Min Weight",
-        "Max Weight",
-        "Status",
-        "Vendor Link",
-        "Is Single Piece",
-      ],
-      rows.map((r) => [
-        r.vendorCode,
-        r.vendorName,
-        r.service,
-        r.serviceType,
-        r.billingVendorCode,
-        r.billingVendorName,
-        r.minWeight,
-        r.maxWeight,
-        r.status,
-        r.vendorLink,
-        r.isSinglePiece ? "Yes" : "No",
-      ]),
-    );
-    toast.success("Exported service-mapping.csv");
-  };
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) return toast.error("File is empty");
       if (authed) {
         const importRows = mapCsvToImportRows(
-          parsed.rows,
+          parsedRows,
           serviceMappingsResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
@@ -446,7 +405,7 @@ function ServiceMappingPage() {
         return;
       }
       const imported: ServiceMappingRow[] = [];
-      for (const rec of mapCsvToImportRows(parsed.rows, serviceMappingsResource.importColumns)) {
+      for (const rec of mapCsvToImportRows(parsedRows, serviceMappingsResource.importColumns)) {
         if (!rec.vendor_code?.trim() && !rec.service?.trim()) continue;
         const status =
           (rec.status || "").trim().toLowerCase() === "in-active" ? "In-Active" : "Active";
@@ -469,7 +428,10 @@ function ServiceMappingPage() {
           isSinglePiece: String(rec.is_single_piece || "").trim().toLowerCase() === "yes",
         });
       }
-      if (imported.length === 0) return toast.error("No valid rows found");
+      if (imported.length === 0) {
+        toast.error("No valid rows found");
+        return;
+      }
       setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
     } catch (err) {
@@ -646,24 +608,45 @@ function ServiceMappingPage() {
           </div>
 
           <Card className="overflow-hidden p-0">
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={handleImportFile}
-            />
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
               <TooltipProvider delayDuration={200}>
                 <div className="flex items-center gap-1.5">
+                  <DataIoToolbar
+                    export={{
+                      filename: "service-mapping",
+                      title: "Service Mapping",
+                      columns: [
+                        { key: "vendorCode", header: "Vendor Code" },
+                        { key: "vendorName", header: "Vendor" },
+                        { key: "service", header: "Service" },
+                        { key: "serviceType", header: "Service Type" },
+                        { key: "billingVendorCode", header: "Billing Vendor Code" },
+                        { key: "billingVendorName", header: "Billing Vendor" },
+                        { key: "minWeight", header: "Min Weight" },
+                        { key: "maxWeight", header: "Max Weight" },
+                        { key: "status", header: "Status" },
+                        { key: "vendorLink", header: "Vendor Link" },
+                        { key: "isSinglePiece", header: "Is Single Piece" },
+                      ],
+                      getRows: () =>
+                        rows.map((r) => ({
+                          vendorCode: r.vendorCode,
+                          vendorName: r.vendorName,
+                          service: r.service,
+                          serviceType: r.serviceType,
+                          billingVendorCode: r.billingVendorCode,
+                          billingVendorName: r.billingVendorName,
+                          minWeight: r.minWeight,
+                          maxWeight: r.maxWeight,
+                          status: r.status,
+                          vendorLink: r.vendorLink,
+                          isSinglePiece: r.isSinglePiece ? "Yes" : "No",
+                        })),
+                    }}
+                    import={{ onRows: handleImportRows }}
+                  />
                   <IconButton label="Refresh" onClick={handleRefresh}>
                     <RefreshCw className="h-4 w-4" />
-                  </IconButton>
-                  <IconButton label="Export" onClick={handleExport}>
-                    <Download className="h-4 w-4" />
-                  </IconButton>
-                  <IconButton label="Import" onClick={() => importInputRef.current?.click()}>
-                    <Upload className="h-4 w-4" />
                   </IconButton>
                 </div>
               </TooltipProvider>

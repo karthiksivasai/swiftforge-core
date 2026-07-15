@@ -1,10 +1,9 @@
 /**
- * Statements hub — CourierWala Report Type dropdown over Phase 5 FINANCIAL pack.
+ * Statements hub — CourierWala Report Type dropdown → per-report filters.
  */
 import { createFileRoute } from "@tanstack/react-router";
 
-import { ReportHubShell } from "@/components/reports/report-hub-shell";
-import { FINANCIAL_REPORT_KEYS } from "@/lib/reports";
+import { StatementsReportPage } from "@/components/reports/statements/statements-report-page";
 
 export const Route = createFileRoute("/reports/statements")({
   head: () => ({
@@ -20,11 +19,5 @@ export const Route = createFileRoute("/reports/statements")({
 });
 
 function StatementsReportsPage() {
-  return (
-    <ReportHubShell
-      hubLabel="Statements"
-      hubs={["FINANCIAL"]}
-      allowedKeys={FINANCIAL_REPORT_KEYS}
-    />
-  );
+  return <StatementsReportPage />;
 }

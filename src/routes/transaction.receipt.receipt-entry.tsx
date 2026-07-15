@@ -43,6 +43,7 @@ import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
+import { parseTabularFile } from "@/lib/io/tableIo";
 import { listReceipts, postReceipt, saveReceipt } from "@/lib/transactions/resources/finance";
 import { dbReceiptToUi, receiptFormToFields } from "@/lib/transactions/financeUiMap";
 import { canPostReceipt, canUpdateReceipt } from "@/lib/transactions/schemas/finance";
@@ -468,6 +469,22 @@ function ReceiptEntryPage() {
 
   const handleImport = () => importInputRef.current?.click();
 
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const parsed = await parseTabularFile(file);
+      if (parsed.rows.length === 0) {
+        toast.error("File is empty");
+        return;
+      }
+      toast.info("Import will be enabled with backend wiring");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
+  };
+
   const openReport = () => {
     setReportForm(emptyReportForm());
     setReportOpen(true);
@@ -778,7 +795,7 @@ function ReceiptEntryPage() {
         type="file"
         accept=".csv,.xlsx,.xls"
         className="hidden"
-        onChange={() => toast.info("Import will be enabled with backend wiring")}
+        onChange={(e) => void handleImportFile(e)}
       />
 
       <Dialog open={reportOpen} onOpenChange={(open) => !open && closeReport()}>

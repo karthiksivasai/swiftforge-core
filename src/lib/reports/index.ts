@@ -46,6 +46,10 @@ export {
   type AuditReportKey,
 } from "@/lib/reports/auditKeys";
 
+export { AWB_HUB_KEY_MAP } from "@/lib/reports/awbKeys";
+
+export { SCAN_HUB_KEY_MAP } from "@/lib/reports/scanKeys";
+
 export type {
   ReportExportFormat,
   ReportJobDetail,

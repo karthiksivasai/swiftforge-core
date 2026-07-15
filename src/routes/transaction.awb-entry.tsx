@@ -45,13 +45,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import {
   FieldWrapper,
   IconButton,
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
@@ -1868,40 +1868,6 @@ function AwbEntryPage() {
     setDemoRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
     toast.success(`Deleted AWB ${deleteTarget.awbNo}`);
     setDeleteTarget(null);
-  };
-
-  const handleExport = () => {
-    downloadCsv(
-      "awb-entries.csv",
-      [
-        "AWB No",
-        "Book Date",
-        "Shipper Name",
-        "Customer Code",
-        "Customer Name",
-        "Consignee Name",
-        "Destination",
-        "Product",
-        "Vendor",
-        "Weight",
-      ],
-      filtered.map((r) => {
-        const d = listFromRow(r);
-        return [
-          d.awbNo,
-          d.bookDate,
-          d.shipperName,
-          d.customerCode,
-          d.customerName,
-          d.consigneeName,
-          d.destination,
-          d.product,
-          d.vendor,
-          d.weight,
-        ];
-      }),
-    );
-    toast.success("Exported awb-entries.csv");
   };
 
   const clearColFilters = (silent = false) => {
@@ -3859,9 +3825,40 @@ function AwbEntryPage() {
             <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
               <TooltipProvider delayDuration={200}>
                 <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                  <IconButton label="Export" onClick={handleExport}>
-                    <Download className="h-4 w-4" />
-                  </IconButton>
+                  <DataIoToolbar
+                    export={{
+                      filename: "awb-entries",
+                      title: "AWB Entries",
+                      columns: [
+                        { key: "awbNo", header: "AWB No" },
+                        { key: "bookDate", header: "Book Date" },
+                        { key: "shipperName", header: "Shipper Name" },
+                        { key: "customerCode", header: "Customer Code" },
+                        { key: "customerName", header: "Customer Name" },
+                        { key: "consigneeName", header: "Consignee Name" },
+                        { key: "destination", header: "Destination" },
+                        { key: "product", header: "Product" },
+                        { key: "vendor", header: "Vendor" },
+                        { key: "weight", header: "Weight" },
+                      ],
+                      getRows: () =>
+                        filtered.map((r) => {
+                          const d = listFromRow(r);
+                          return {
+                            awbNo: d.awbNo,
+                            bookDate: d.bookDate,
+                            shipperName: d.shipperName,
+                            customerCode: d.customerCode,
+                            customerName: d.customerName,
+                            consigneeName: d.consigneeName,
+                            destination: d.destination,
+                            product: d.product,
+                            vendor: d.vendor,
+                            weight: d.weight,
+                          };
+                        }),
+                    }}
+                  />
                   <IconButton label="Filter" onClick={() => clearColFilters()}>
                     <Filter className="h-4 w-4" />
                   </IconButton>

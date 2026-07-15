@@ -1,8 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Download,
-  Upload,
   RefreshCw,
   Plus,
   Search,
@@ -54,7 +52,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   serviceCentersResource,
   fetchServiceCenterTerms,
@@ -66,6 +65,7 @@ import {
   serviceCenterUpdateSchema,
 } from "@/lib/masters/schemas/serviceCenters";
 import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type ServiceCentre = {
   id: string;
@@ -300,7 +300,6 @@ function ServiceCentrePage() {
   const [deleteTarget, setDeleteTarget] = useState<ServiceCentre | null>(null);
   const [branchDialogOpen, setBranchDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const rows: ServiceCentre[] = authed
     ? (live.rows as ServiceCenterDbRow[]).map(rowToView)
@@ -412,57 +411,45 @@ function ServiceCentrePage() {
     setDeleteTarget(null);
   }
 
-  function exportCsv() {
-    const headers = ["Code", "Name", "Branch"];
-    const lines = [headers.join(",")];
-    for (const r of rows) {
-      lines.push(
-        [r.code, r.name, r.branch].map((v) => `"${(v ?? "").replace(/"/g, '""')}"`).join(","),
-      );
+  async function handleImportRows(parsedRows: CsvRecord[]) {
+    if (authed) {
+      const importRows = mapCsvToImportRows(
+        parsedRows,
+        serviceCentersResource.importColumns,
+      ) as ImportRow[];
+      const res = await rc.commitImport.mutateAsync(importRows);
+      toast.success(importSummary(res));
+      return;
     }
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "service-centre.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Exported CSV");
+
+    const parsed: ServiceCentre[] = [];
+    let i = 0;
+    for (const rec of mapCsvToImportRows(parsedRows, ["code", "name", "branch"])) {
+      if (!rec.code?.trim()) continue;
+      parsed.push({
+        id: `sc-imp-${Date.now()}-${i++}`,
+        code: rec.code.trim(),
+        name: (rec.name || "").trim(),
+        branch: (rec.branch || "").trim(),
+      });
+    }
+    if (parsed.length === 0) {
+      toast.error("No valid rows found");
+      return;
+    }
+    setDemoRows((prev) => [...parsed, ...prev]);
+    toast.success(`Imported ${parsed.length} rows`);
   }
 
-  async function importFile(file: File) {
-    try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) return toast.error("File is empty");
-
-      if (authed) {
-        const importRows = mapCsvToImportRows(
-          parsed.rows,
-          serviceCentersResource.importColumns,
-        ) as ImportRow[];
-        const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
-        return;
-      }
-
-      const parsedRows: ServiceCentre[] = [];
-      let i = 0;
-      for (const rec of mapCsvToImportRows(parsed.rows, ["code", "name", "branch"])) {
-        if (!rec.code?.trim()) continue;
-        parsedRows.push({
-          id: `sc-imp-${Date.now()}-${i++}`,
-          code: rec.code.trim(),
-          name: (rec.name || "").trim(),
-          branch: (rec.branch || "").trim(),
-        });
-      }
-      if (parsedRows.length === 0) return toast.error("No valid rows found");
-      setDemoRows((prev) => [...parsedRows, ...prev]);
-      toast.success(`Imported ${parsedRows.length} rows`);
-    } catch (err) {
-      toast.error(toErrorMessage(err, "Failed to import file"));
-    }
+  function handleRefresh() {
+    setSearch("");
+    setPage(1);
+    if (authed)
+      queryClient.invalidateQueries({
+        queryKey: masterKeys.all(serviceCentersResource.key),
+      });
+    else setDemoRows(SEED);
+    toast.success("Refreshed");
   }
 
   const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
@@ -501,66 +488,34 @@ function ServiceCentrePage() {
 
       {view === "list" ? (
         <Card className="overflow-hidden p-0">
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) importFile(f);
-              e.target.value = "";
-            }}
-          />
           <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
             <TooltipProvider delayDuration={200}>
               <div className="flex items-center gap-1.5">
+                <DataIoToolbar
+                  export={{
+                    filename: "service-centre",
+                    title: "Service Centre",
+                    columns: [
+                      { key: "code", header: "Code" },
+                      { key: "name", header: "Name" },
+                      { key: "branch", header: "Branch" },
+                    ],
+                    getRows: () =>
+                      rows.map((r) => ({
+                        code: r.code,
+                        name: r.name,
+                        branch: r.branch,
+                      })),
+                  }}
+                  import={canAdd ? { onRows: handleImportRows } : null}
+                />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="outline"
                       size="icon"
                       className="h-9 w-9 bg-background"
-                      onClick={exportCsv}
-                      aria-label="Export"
-                    >
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Export</TooltipContent>
-                </Tooltip>
-                {canAdd ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 bg-background"
-                        onClick={() => importInputRef.current?.click()}
-                        aria-label="Import"
-                      >
-                        <Upload className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Import</TooltipContent>
-                  </Tooltip>
-                ) : null}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-9 w-9 bg-background"
-                      onClick={() => {
-                        setSearch("");
-                        setPage(1);
-                        if (authed)
-                          queryClient.invalidateQueries({
-                            queryKey: masterKeys.all(serviceCentersResource.key),
-                          });
-                        else setDemoRows(SEED);
-                        toast.success("Refreshed");
-                      }}
+                      onClick={handleRefresh}
                       aria-label="Refresh"
                     >
                       <RefreshCw className="h-4 w-4" />

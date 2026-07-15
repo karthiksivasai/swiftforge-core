@@ -13,9 +13,12 @@ describe("financial report keys", () => {
     expect(FINANCIAL_REPORT_KEYS).toHaveLength(8);
   });
 
-  it("maps known statements-hub demos and defers profit", () => {
+  it("maps all statements hub ids to engine keys", () => {
     expect(STATEMENTS_HUB_KEY_MAP["cash-collection"]).toBe("cash-collection-report");
-    expect(STATEMENTS_HUB_KEY_MAP["customer-register-profit"]).toBeNull();
+    expect(STATEMENTS_HUB_KEY_MAP["customer-register-profit"]).toBe("customer-register-profit");
+    expect(STATEMENTS_HUB_KEY_MAP["daily-report"]).toBe("daily-report");
+    expect(STATEMENTS_HUB_KEY_MAP["vendor-profit"]).toBe("vendor-profit-report");
+    expect(Object.values(STATEMENTS_HUB_KEY_MAP).every((v) => v != null)).toBe(true);
   });
 
   it("type-guards report keys", () => {

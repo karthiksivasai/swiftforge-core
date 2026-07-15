@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth";
@@ -26,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { IconButton, MasterBreadcrumb, PAGE_SIZE, TablePager } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type Mode = "User" | "Group";
 type Status = "Active" | "In-Active";
@@ -383,9 +384,32 @@ function UserSetupPage() {
       <Card className="overflow-hidden p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
-            <IconButton label="Export" onClick={() => toast.success("Export queued")}>
-              <Download className="h-4 w-4" />
-            </IconButton>
+            <DataIoToolbar
+              disabled={filtered.length === 0}
+              export={{
+                filename: tab === "User" ? "users" : "groups",
+                title: tab === "User" ? "Users" : "Groups",
+                columns: [
+                  { key: "type", header: "Type" },
+                  { key: "name", header: "Name" },
+                  { key: "group", header: "Group" },
+                  { key: "company", header: "Company" },
+                  { key: "applicationType", header: "Application Type" },
+                  { key: "serviceCenter", header: "Service Center" },
+                  { key: "status", header: "Status" },
+                ],
+                getRows: () =>
+                  filtered.map((row) => ({
+                    type: row.type,
+                    name: row.name,
+                    group: row.group,
+                    company: row.company,
+                    applicationType: row.applicationType,
+                    serviceCenter: row.serviceCenter,
+                    status: row.status,
+                  })),
+              }}
+            />
             <TabButton
               active={tab === "User"}
               onClick={() => {

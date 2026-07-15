@@ -1,8 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import {
-  Download,
-  Upload,
   RefreshCw,
   Plus,
   Search,
@@ -72,6 +70,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { useQueryClient } from "@tanstack/react-query";
 import { MasterLookupDialog, type LookupReturn } from "@/components/master-lookup-dialog";
 import type { LookupKey } from "@/lib/master-lookups";
@@ -79,7 +78,8 @@ import type { LookupKey } from "@/lib/master-lookups";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   customersResource,
   fetchCustomerChildren,
@@ -546,8 +546,6 @@ function CustomerPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<CustomerRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
-
   const rows: CustomerRow[] = authed
     ? (live.rows as CustomerDbRow[]).map((r) => dbCustomerToUi(r) as unknown as CustomerRow)
     : demoRows;
@@ -721,60 +719,11 @@ function CustomerPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    const header = [
-      "Customer Code",
-      "Branch",
-      "Service Centre",
-      "Name",
-      "Contact",
-      "Phone",
-      "Email",
-      "Status",
-      "Contract Head",
-    ];
-    const csv = [
-      header.join(","),
-      ...rows.map((r) =>
-        [
-          r.code,
-          r.branch,
-          r.serviceCentre,
-          r.name,
-          r.contact,
-          r.phone,
-          r.email,
-          r.status,
-          r.contractHead,
-        ]
-          .map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`)
-          .join(","),
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "customers.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast.success("Exported customers.csv");
-  };
-
-  const handleImport = () => importInputRef.current?.click();
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const handleImportRows = async (parsedRows: CsvRecord[], file: File) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) return toast.error("File is empty");
       if (authed) {
         const importRows = mapCsvToImportRows(
-          parsed.rows,
+          parsedRows,
           customersResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
@@ -839,23 +788,39 @@ function CustomerPage() {
       </div>
 
       <Card className="overflow-hidden p-0">
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={handleImportFile}
-        />
-
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}>
-                <Download className="h-4 w-4" />
-              </IconButton>
-              <IconButton label="Import" onClick={handleImport}>
-                <Upload className="h-4 w-4" />
-              </IconButton>
+              <DataIoToolbar
+                export={{
+                  filename: "customers",
+                  title: "Customers",
+                  columns: [
+                    { key: "code", header: "Customer Code" },
+                    { key: "branch", header: "Branch" },
+                    { key: "serviceCentre", header: "Service Centre" },
+                    { key: "name", header: "Name" },
+                    { key: "contact", header: "Contact" },
+                    { key: "phone", header: "Phone" },
+                    { key: "email", header: "Email" },
+                    { key: "status", header: "Status" },
+                    { key: "contractHead", header: "Contract Head" },
+                  ],
+                  getRows: () =>
+                    rows.map((r) => ({
+                      code: r.code,
+                      branch: r.branch,
+                      serviceCentre: r.serviceCentre,
+                      name: r.name,
+                      contact: r.contact,
+                      phone: r.phone,
+                      email: r.email,
+                      status: r.status,
+                      contractHead: r.contractHead,
+                    })),
+                }}
+                import={{ onRows: handleImportRows }}
+              />
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>

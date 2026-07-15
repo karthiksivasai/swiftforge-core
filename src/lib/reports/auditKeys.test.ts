@@ -11,7 +11,7 @@ describe("audit report keys", () => {
 
   it("maps known hub demos", () => {
     expect(AUDIT_HUB_KEY_MAP["login-log"]).toBe("login-log");
-    expect(AUDIT_HUB_KEY_MAP["user-entry-log"]).toBeNull();
+    expect(AUDIT_HUB_KEY_MAP["user-entry-log"]).toBe("user-entry-log-report");
   });
 
   it("type-guards keys", () => {

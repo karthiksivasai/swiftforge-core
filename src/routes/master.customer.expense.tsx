@@ -1,8 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Download,
-  Upload,
   RefreshCw,
   Plus,
   Search,
@@ -54,8 +52,9 @@ import {
   PAGE_SIZE,
   StatusPill,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 
 type Status = "Active" | "In-Active";
 type ExpenseType = "Direct" | "Indirect" | "Operational" | "Administrative";
@@ -97,7 +96,6 @@ function ExpensePage() {
   const [editing, setEditing] = useState<ExpenseRow | null>(null);
   const [form, setForm] = useState<Omit<ExpenseRow, "id">>(emptyRow());
   const [deleteTarget, setDeleteTarget] = useState<ExpenseRow | null>(null);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -148,55 +146,36 @@ function ExpensePage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "expenses.csv",
-      ["Code", "Name", "Expense Type", "Ledger", "GL Account", "Tax %", "Status"],
-      rows.map((r) => [r.code, r.name, r.expenseType, r.ledger, r.glAccount, r.taxPct, r.status]),
-    );
-    toast.success("Exported expenses.csv");
-  };
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length < 2) return toast.error("File is empty");
-      const parseRow = (line: string) => {
-        const out: string[] = [];
-        let cur = "", inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (inQ) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQ = false;
-            else cur += c;
-          } else {
-            if (c === '"') inQ = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-          }
-        }
-        out.push(cur);
-        return out;
-      };
       const imported: ExpenseRow[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const c = parseRow(lines[i]);
-        if (!c[0]?.trim()) continue;
-        const et = EXPENSE_TYPES.find((t) => t.toLowerCase() === (c[2] || "").trim().toLowerCase()) ?? "Operational";
-        const status = (c[6] || "").trim().toLowerCase() === "in-active" ? "In-Active" : "Active";
+      for (const rec of parsedRows) {
+        const code = (rec["Code"] ?? rec["code"] ?? "").trim();
+        if (!code) continue;
+        const et =
+          EXPENSE_TYPES.find(
+            (t) =>
+              t.toLowerCase() === (rec["Expense Type"] ?? rec["expense_type"] ?? "").trim().toLowerCase(),
+          ) ?? "Operational";
+        const status =
+          (rec["Status"] ?? rec["status"] ?? "").trim().toLowerCase() === "in-active"
+            ? "In-Active"
+            : "Active";
         imported.push({
           id: crypto.randomUUID(),
-          code: c[0].trim(), name: (c[1] || "").trim(), expenseType: et,
-          ledger: (c[3] || "").trim(), glAccount: (c[4] || "").trim(),
-          taxPct: (c[5] || "0").trim(), status: status as Status,
+          code,
+          name: (rec["Name"] ?? rec["name"] ?? "").trim(),
+          expenseType: et,
+          ledger: (rec["Ledger"] ?? rec["ledger"] ?? "").trim(),
+          glAccount: (rec["GL Account"] ?? rec["gl_account"] ?? "").trim(),
+          taxPct: (rec["Tax %"] ?? rec["tax_pct"] ?? "0").trim(),
+          status: status as Status,
         });
       }
-      if (imported.length === 0) return toast.error("No valid rows found");
+      if (imported.length === 0) {
+        toast.error("No valid rows found");
+        return;
+      }
       setRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
     } catch {
@@ -223,12 +202,35 @@ function ExpensePage() {
       </div>
 
       <Card className="overflow-hidden p-0">
-        <input ref={importInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFile} />
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}><Download className="h-4 w-4" /></IconButton>
-              <IconButton label="Import" onClick={() => importInputRef.current?.click()}><Upload className="h-4 w-4" /></IconButton>
+              <DataIoToolbar
+                export={{
+                  filename: "expenses",
+                  title: "Expenses",
+                  columns: [
+                    { key: "code", header: "Code" },
+                    { key: "name", header: "Name" },
+                    { key: "expenseType", header: "Expense Type" },
+                    { key: "ledger", header: "Ledger" },
+                    { key: "glAccount", header: "GL Account" },
+                    { key: "taxPct", header: "Tax %" },
+                    { key: "status", header: "Status" },
+                  ],
+                  getRows: () =>
+                    rows.map((r) => ({
+                      code: r.code,
+                      name: r.name,
+                      expenseType: r.expenseType,
+                      ledger: r.ledger,
+                      glAccount: r.glAccount,
+                      taxPct: r.taxPct,
+                      status: r.status,
+                    })),
+                }}
+                import={{ onRows: handleImportRows }}
+              />
               <IconButton label="Refresh" onClick={handleRefresh}><RefreshCw className="h-4 w-4" /></IconButton>
             </div>
           </TooltipProvider>

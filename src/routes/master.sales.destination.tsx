@@ -1,8 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Download,
-  Upload,
   RefreshCw,
   Plus,
   Search,
@@ -60,7 +58,8 @@ import { INTERNATIONAL_DESTINATIONS } from "@/lib/destinations-international-dat
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   destinationsResource,
   type DestinationRow as DestinationDbRow,
@@ -96,6 +95,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type DestinationType = "Domestic" | "International" | "Local";
 type Status = "Active" | "In-Active";
@@ -332,7 +332,6 @@ function DestinationPage() {
   const [deleteTarget, setDeleteTarget] = useState<Destination | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const scoped = useMemo(() => rows.filter((r) => r.type === type), [rows, type]);
 
@@ -492,82 +491,38 @@ function DestinationPage() {
     });
   };
 
-  const handleExport = () => {
-    const header = [
-      "Destination Code",
-      "Destination Name",
-      "Country",
-      "State",
-      "Service Type",
-      "Status",
-    ];
-    const csv = [
-      header.join(","),
-      ...scoped.map((r) =>
-        [r.code, r.name, r.country, r.state, r.serviceType, r.status]
-          .map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`)
-          .join(","),
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `destinations-${type.toLowerCase()}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast.success(`Exported destinations-${type.toLowerCase()}.csv`);
-  };
-
-  const handleImport = () => importInputRef.current?.click();
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) {
-        toast.error("File is empty");
-        return;
-      }
-      if (authed) {
-        const importRows = mapCsvToImportRows(
-          parsed.rows,
-          destinationsResource.importColumns,
-        ) as ImportRow[];
-        const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
-        return;
-      }
-      const imported: Destination[] = [];
-      for (const rec of parsed.rows) {
-        const code = (rec["Destination Code"] ?? rec["code"] ?? "").trim();
-        if (!code) continue;
-        const status = (rec["Status"] ?? rec["status"] ?? "").trim();
-        imported.push({
-          id: crypto.randomUUID(),
-          type,
-          code,
-          name: (rec["Destination Name"] ?? rec["name"] ?? "").trim(),
-          country: (rec["Country"] ?? rec["country_code"] ?? "").trim(),
-          state: (rec["State"] ?? rec["state_code"] ?? "").trim(),
-          serviceType: (rec["Service Type"] ?? rec["service_type"] ?? "").trim(),
-          status: status === "In-Active" ? "In-Active" : "Active",
-        });
-      }
-      if (imported.length === 0) {
-        toast.error("No valid rows found");
-        return;
-      }
-      setRows((prev) => [...imported, ...prev]);
-      toast.success(`Imported ${imported.length} destination${imported.length === 1 ? "" : "s"}`);
-    } catch (err) {
-      toast.error(toErrorMessage(err, "Failed to import file"));
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    if (authed) {
+      const importRows = mapCsvToImportRows(
+        parsedRows,
+        destinationsResource.importColumns,
+      ) as ImportRow[];
+      const res = await rc.commitImport.mutateAsync(importRows);
+      toast.success(importSummary(res));
+      return;
     }
+    const imported: Destination[] = [];
+    for (const rec of parsedRows) {
+      const code = (rec["Destination Code"] ?? rec["code"] ?? "").trim();
+      if (!code) continue;
+      const status = (rec["Status"] ?? rec["status"] ?? "").trim();
+      imported.push({
+        id: crypto.randomUUID(),
+        type,
+        code,
+        name: (rec["Destination Name"] ?? rec["name"] ?? "").trim(),
+        country: (rec["Country"] ?? rec["country_code"] ?? "").trim(),
+        state: (rec["State"] ?? rec["state_code"] ?? "").trim(),
+        serviceType: (rec["Service Type"] ?? rec["service_type"] ?? "").trim(),
+        status: status === "In-Active" ? "In-Active" : "Active",
+      });
+    }
+    if (imported.length === 0) {
+      toast.error("No valid rows found");
+      return;
+    }
+    setRows((prev) => [...imported, ...prev]);
+    toast.success(`Imported ${imported.length} destination${imported.length === 1 ? "" : "s"}`);
   };
 
   const handleRefresh = () => {
@@ -632,24 +587,33 @@ function DestinationPage() {
       </div>
 
       <Card className="overflow-hidden p-0">
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={handleImportFile}
-        />
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}>
-                <Download className="h-4 w-4" />
-              </IconButton>
-              {canAdd ? (
-                <IconButton label="Import" onClick={handleImport}>
-                  <Upload className="h-4 w-4" />
-                </IconButton>
-              ) : null}
+              <DataIoToolbar
+                export={{
+                  filename: `destinations-${type.toLowerCase()}`,
+                  title: `Destinations (${type})`,
+                  columns: [
+                    { key: "code", header: "Destination Code" },
+                    { key: "name", header: "Destination Name" },
+                    { key: "country", header: "Country" },
+                    { key: "state", header: "State" },
+                    { key: "serviceType", header: "Service Type" },
+                    { key: "status", header: "Status" },
+                  ],
+                  getRows: () =>
+                    scoped.map((r) => ({
+                      code: r.code,
+                      name: r.name,
+                      country: r.country,
+                      state: r.state,
+                      serviceType: r.serviceType,
+                      status: r.status,
+                    })),
+                }}
+                import={canAdd ? { onRows: handleImportRows } : null}
+              />
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>

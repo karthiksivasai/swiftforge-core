@@ -211,7 +211,7 @@ export const NAVIGATION: NavSection[] = [
       { label: "Statements", slug: "statements" },
       { label: "AWB", slug: "awb" },
       { label: "Scan", slug: "scan" },
-      { label: "AR Report", slug: "ar-report" },
+      { label: "Accounts", slug: "ar-report" },
     ]),
   },
   {

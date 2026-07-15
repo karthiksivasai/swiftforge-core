@@ -46,3 +46,37 @@ export const productsResource: MasterResource<ProductRow, ProductCreate, Product
   createSchema: productCreateSchema,
   updateSchema: productUpdateSchema,
 };
+
+/** UI / CourierWala export headers → import column keys. */
+export const PRODUCT_IMPORT_HEADER_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  code: ["Product Code"],
+  name: ["Product Name"],
+  product_type_code: ["Product Type"],
+  service: ["Product Service"],
+  fuel_charge: ["Fuel Charge"],
+  gst_reverse: ["GST Reverse"],
+  shipment_type: ["Shipment Type", "Type"],
+  status: ["Status"],
+  group_type: ["Group Type"],
+};
+
+/** Canonical CourierWala product types (code ↔ display name). */
+export const CANONICAL_PRODUCT_TYPES = [
+  { code: "D", name: "Domestic" },
+  { code: "I", name: "International" },
+  { code: "L", name: "Local" },
+  { code: "P", name: "Import" },
+] as const;
+
+export type CanonicalProductTypeName = (typeof CANONICAL_PRODUCT_TYPES)[number]["name"];
+
+/** Map Domestic/International/Local/Import (or D/I/L/P) to product_types.code. */
+export function toProductTypeCode(value: string | null | undefined): string {
+  const raw = (value ?? "").trim();
+  if (!raw) return "";
+  const upper = raw.toUpperCase();
+  const byCode = CANONICAL_PRODUCT_TYPES.find((t) => t.code === upper);
+  if (byCode) return byCode.code;
+  const byName = CANONICAL_PRODUCT_TYPES.find((t) => t.name.toLowerCase() === raw.toLowerCase());
+  return byName?.code ?? raw;
+}

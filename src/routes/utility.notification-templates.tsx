@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Eye, Pencil, Plus, Trash2, Zap } from "lucide-react";
+import { Eye, Pencil, Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { IconButton, MasterBreadcrumb } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
 import {
@@ -394,15 +395,30 @@ function NotificationTemplatesPage() {
       ) : null}
       <Card className="min-w-0 overflow-hidden border p-4 md:p-6">
         <div className="mb-4 flex items-center justify-between gap-4">
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => toast.success("Export queued")}
-            aria-label="Export templates"
-          >
-            <Download className="h-4 w-4" />
-          </Button>
+          <DataIoToolbar
+            disabled={filtered.length === 0}
+            export={{
+              filename: "notification-templates",
+              title: "Notification Templates",
+              columns: [
+                { key: "code", header: "Code" },
+                { key: "name", header: "Name" },
+                { key: "notification_type", header: "Type" },
+                { key: "channel", header: "Channel" },
+                { key: "subject", header: "Subject" },
+                { key: "status", header: "Status" },
+              ],
+              getRows: () =>
+                filtered.map((row) => ({
+                  code: row.code,
+                  name: row.name,
+                  notification_type: row.notification_type,
+                  channel: row.channel,
+                  subject: row.subject,
+                  status: row.status,
+                })),
+            }}
+          />
           <div className="flex items-end gap-2">
             <Input
               value={search}

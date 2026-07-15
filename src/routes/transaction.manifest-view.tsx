@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Eye, FileSpreadsheet, Plus, Printer, Search } from "lucide-react";
+import { Eye, Plus, Printer, Search } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +33,7 @@ import {
   PAGE_SIZE,
   TablePager,
 } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
 
@@ -659,7 +660,41 @@ function ManifestViewPage() {
       {appliedFilter ? (
         <Card className="min-w-0 overflow-hidden border p-0">
           <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <DataIoToolbar
+                disabled={filtered.length === 0}
+                export={{
+                  filename: "manifest-view",
+                  title: "Manifest View",
+                  columns: [
+                    { key: "manifestNo", header: "Manifest No" },
+                    { key: "manifestDate", header: "Date" },
+                    { key: "masterAwbNo", header: "MAWB No" },
+                    { key: "flightNo", header: "Flight No" },
+                    { key: "origin", header: "Origin" },
+                    { key: "destination", header: "Destination" },
+                    { key: "vendorCode", header: "Vendor" },
+                    { key: "location", header: "Location" },
+                    { key: "shipment", header: "Shipment" },
+                    { key: "weight", header: "Weight" },
+                    { key: "manifestTo", header: "Manifest To" },
+                  ],
+                  getRows: () =>
+                    filtered.map((row) => ({
+                      manifestNo: row.manifestNo,
+                      manifestDate: formatDisplayDate(row.manifestDate),
+                      masterAwbNo: row.masterAwbNo,
+                      flightNo: row.flightNo,
+                      origin: row.origin,
+                      destination: row.destination,
+                      vendorCode: row.vendorCode,
+                      location: row.location,
+                      shipment: row.shipment,
+                      weight: formatWeight(row.weight),
+                      manifestTo: row.manifestTo,
+                    })),
+                }}
+              />
               <span className="shrink-0 text-sm text-muted-foreground">Search:</span>
               <Input
                 value={tableSearch}
@@ -748,17 +783,6 @@ function ManifestViewPage() {
                             }
                           >
                             <Printer className="h-3.5 w-3.5" />
-                          </IconButton>
-                          <IconButton
-                            label="Export"
-                            variant="ghost"
-                            size="row"
-                            className="text-sky-600"
-                            onClick={() =>
-                              toast.info(`Export manifest ${row.manifestNo} will be enabled with backend wiring`)
-                            }
-                          >
-                            <FileSpreadsheet className="h-3.5 w-3.5" />
                           </IconButton>
                           <IconButton
                             label="Add Progress"

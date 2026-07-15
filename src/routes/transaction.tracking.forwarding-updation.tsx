@@ -3,6 +3,9 @@ import { useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 
+import { toErrorMessage } from "@/lib/masters/screen";
+import { parseTabularFile } from "@/lib/io/tableIo";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -149,6 +152,22 @@ function ForwardingUpdationPage() {
 
   const handleImport = () => importInputRef.current?.click();
 
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const parsed = await parseTabularFile(file);
+      if (parsed.rows.length === 0) {
+        toast.error("File is empty");
+        return;
+      }
+      toast.info("Import will be enabled with backend wiring");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
+  };
+
   return (
     <div className="flex min-w-0 flex-col gap-4 p-4 md:p-6">
       <MasterBreadcrumb trail={["Transaction", "Tracking / Delivery", "Forwarding Updation"]} />
@@ -269,7 +288,7 @@ function ForwardingUpdationPage() {
             type="file"
             accept=".csv,.xlsx,.xls"
             className="hidden"
-            onChange={() => toast.info("Import will be enabled with backend wiring")}
+            onChange={(e) => void handleImportFile(e)}
           />
         </div>
 

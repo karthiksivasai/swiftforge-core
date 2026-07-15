@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { IconButton, MasterBreadcrumb } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
 import {
@@ -400,15 +401,30 @@ function NotificationPage() {
 
       <Card className="min-w-0 overflow-hidden border p-4 md:p-6">
         <div className="mb-4 flex items-center justify-between gap-4">
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => toast.success("Export queued")}
-            aria-label="Export notifications"
-          >
-            <Download className="h-4 w-4" />
-          </Button>
+          <DataIoToolbar
+            disabled={filteredRows.length === 0}
+            export={{
+              filename: "notifications",
+              title: "User Notifications",
+              columns: [
+                { key: "date", header: "Date" },
+                { key: "time", header: "Time" },
+                { key: "type", header: "Type" },
+                { key: "notification", header: "Notification" },
+                { key: "userId", header: "UserID" },
+                { key: "status", header: "Status" },
+              ],
+              getRows: () =>
+                filteredRows.map((row) => ({
+                  date: row.date,
+                  time: row.time,
+                  type: row.type,
+                  notification: row.notification,
+                  userId: row.userId,
+                  status: row.status,
+                })),
+            }}
+          />
 
           <div className="flex items-end gap-2">
             <label className="flex flex-col gap-1 text-xs text-foreground">

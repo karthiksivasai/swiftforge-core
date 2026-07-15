@@ -1,8 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Download,
-  Upload,
   RefreshCw,
   Plus,
   Search,
@@ -65,10 +63,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import { banksResource, type BankRow as BankDbRow } from "@/lib/masters/resources/banks";
 import { bankCreateSchema, bankUpdateSchema } from "@/lib/masters/schemas/banks";
 import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type BankStatus = "Active" | "In-Active";
 type BankRow = {
@@ -144,8 +144,6 @@ function BankMasterPage() {
   const [form, setForm] = useState<Omit<BankRow, "id">>(emptyRow());
   const [deleteTarget, setDeleteTarget] = useState<BankRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
-
   const rows: BankRow[] = authed ? (live.rows as BankDbRow[]).map(rowToView) : demoRows;
 
   const canAdd = !authed || rc.perms.canAdd;
@@ -246,42 +244,11 @@ function BankMasterPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    const header = ["Bank Code", "Bank Name", "Status"];
-    const csv = [
-      header.join(","),
-      ...rows.map((r) =>
-        [r.code, r.name, r.status].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "banks.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast.success("Exported banks.csv");
-  };
-
-  const handleImport = () => importInputRef.current?.click();
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) {
-        toast.error("File is empty");
-        return;
-      }
       if (authed) {
         const importRows = mapCsvToImportRows(
-          parsed.rows,
+          parsedRows,
           banksResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
@@ -289,7 +256,7 @@ function BankMasterPage() {
         return;
       }
       const imported: BankRow[] = [];
-      for (const rec of mapCsvToImportRows(parsed.rows, banksResource.importColumns)) {
+      for (const rec of mapCsvToImportRows(parsedRows, banksResource.importColumns)) {
         if (!rec.code?.trim()) continue;
         const st = (rec.status || "").trim().toUpperCase();
         imported.push({
@@ -350,24 +317,27 @@ function BankMasterPage() {
       </div>
 
       <Card className="overflow-hidden p-0">
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={handleImportFile}
-        />
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}>
-                <Download className="h-4 w-4" />
-              </IconButton>
-              {canAdd ? (
-                <IconButton label="Import" onClick={handleImport}>
-                  <Upload className="h-4 w-4" />
-                </IconButton>
-              ) : null}
+              <DataIoToolbar
+                export={{
+                  filename: "banks",
+                  title: "Bank Master",
+                  columns: [
+                    { key: "code", header: "Bank Code" },
+                    { key: "name", header: "Bank Name" },
+                    { key: "status", header: "Status" },
+                  ],
+                  getRows: () =>
+                    rows.map((r) => ({
+                      code: r.code,
+                      name: r.name,
+                      status: r.status,
+                    })),
+                }}
+                import={canAdd ? { onRows: handleImportRows } : null}
+              />
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>

@@ -67,6 +67,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import {
   FieldWrapper,
   IconButton,
@@ -750,18 +751,6 @@ function ManifestScanPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "manifest-scans.csv",
-      ["Manifest No", "Master AWBNo", "Date", "Location", "Service Centre", "Connect Station", "Vendor"],
-      filtered.map((r) => {
-        const d = listDisplay(r);
-        return [d.manifestNo, d.masterAwbNo, d.date, d.location, d.serviceCentre, d.connectStation, d.vendor];
-      }),
-    );
-    toast.success("Exported manifest-scans.csv");
-  };
-
   const exportManifestRowCsv = (row: ManifestRow, linesOverride?: ManifestLine[]) => {
     const d = listDisplay(row);
     const safeName = row.manifestNo.replace(/\//g, "-");
@@ -1350,7 +1339,34 @@ function ManifestScanPage() {
                 <Input value={reportFilters.pdfType} onChange={(e) => setReportFilters((f) => ({ ...f, pdfType: e.target.value }))} placeholder="PDF Type" />
               </FieldWrapper>
               <div className="flex flex-wrap items-end gap-2">
-                <Button variant="outline" onClick={handleExport}>Download</Button>
+                <DataIoToolbar
+                  export={{
+                    filename: "manifest-scans",
+                    title: "Manifest Scans",
+                    columns: [
+                      { key: "manifestNo", header: "Manifest No" },
+                      { key: "masterAwbNo", header: "Master AWBNo" },
+                      { key: "date", header: "Date" },
+                      { key: "location", header: "Location" },
+                      { key: "serviceCentre", header: "Service Centre" },
+                      { key: "connectStation", header: "Connect Station" },
+                      { key: "vendor", header: "Vendor" },
+                    ],
+                    getRows: () =>
+                      filtered.map((r) => {
+                        const d = listDisplay(r);
+                        return {
+                          manifestNo: d.manifestNo,
+                          masterAwbNo: d.masterAwbNo,
+                          date: d.date,
+                          location: d.location,
+                          serviceCentre: d.serviceCentre,
+                          connectStation: d.connectStation,
+                          vendor: d.vendor,
+                        };
+                      }),
+                  }}
+                />
                 <Button className="bg-emerald-600 text-white hover:bg-emerald-600/90" onClick={() => toast.info("Print will be enabled with backend wiring")}>Print</Button>
                 <div className="flex items-center gap-2 pb-2">
                   <Checkbox id="excelExport" checked={reportFilters.excel} onCheckedChange={(c) => setReportFilters((f) => ({ ...f, excel: c === true }))} />
@@ -1364,7 +1380,34 @@ function ManifestScanPage() {
             <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
                 <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                   <IconButton label="Generate" onClick={openGenerate}><Pencil className="h-4 w-4" /></IconButton>
-                  <IconButton label="Export" onClick={handleExport}><Download className="h-4 w-4" /></IconButton>
+                  <DataIoToolbar
+                    export={{
+                      filename: "manifest-scans",
+                      title: "Manifest Scans",
+                      columns: [
+                        { key: "manifestNo", header: "Manifest No" },
+                        { key: "masterAwbNo", header: "Master AWBNo" },
+                        { key: "date", header: "Date" },
+                        { key: "location", header: "Location" },
+                        { key: "serviceCentre", header: "Service Centre" },
+                        { key: "connectStation", header: "Connect Station" },
+                        { key: "vendor", header: "Vendor" },
+                      ],
+                      getRows: () =>
+                        filtered.map((r) => {
+                          const d = listDisplay(r);
+                          return {
+                            manifestNo: d.manifestNo,
+                            masterAwbNo: d.masterAwbNo,
+                            date: d.date,
+                            location: d.location,
+                            serviceCentre: d.serviceCentre,
+                            connectStation: d.connectStation,
+                            vendor: d.vendor,
+                          };
+                        }),
+                    }}
+                  />
                   <IconButton label="Filter" onClick={() => clearColFilters()}><Filter className="h-4 w-4" /></IconButton>
                   <IconButton label="Refresh" onClick={handleRefresh}><RefreshCw className="h-4 w-4" /></IconButton>
                   <IconButton label="Print CRN" onClick={() => openCrnDialog()}><Printer className="h-4 w-4" /></IconButton>

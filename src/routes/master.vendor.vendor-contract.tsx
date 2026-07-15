@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Upload,
   Plus,
   Search,
   Pencil,
@@ -57,13 +56,15 @@ import {
   PAGE_SIZE,
   TablePager,
 } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import type { LookupKey, LookupOption } from "@/lib/master-lookups";
 
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   fetchVendorContractList,
   fetchVendorContractSlabs,
@@ -183,7 +184,6 @@ function VendorContractPage() {
   const [increaseRateOpen, setIncreaseRateOpen] = useState(false);
   const [increaseForm, setIncreaseForm] = useState<IncreaseRateForm>(emptyIncreaseForm());
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const liveQuery = useQuery({
     queryKey: masterKeys.list(vendorContractsResource.key, {
@@ -449,17 +449,11 @@ function VendorContractPage() {
     setIncreaseRateOpen(false);
   };
 
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) return toast.error("File is empty");
       if (authed) {
         const importRows = mapCsvToImportRows(
-          parsed.rows,
+          parsedRows,
           vendorContractsResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
@@ -481,13 +475,42 @@ function VendorContractPage() {
       <MasterBreadcrumb trail={["Master", "Vendor", "Vendor Contract"]} />
 
       <Card className="overflow-hidden border p-0">
-        <input ref={importInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFile} />
-
         <div className="p-4 md:p-6">
           <div className="mb-3 flex items-start justify-between gap-3">
             <TooltipProvider delayDuration={200}>
               <div className="flex items-center gap-1.5">
-                <IconButton label="Import" onClick={() => importInputRef.current?.click()}><Upload className="h-4 w-4" /></IconButton>
+                <DataIoToolbar
+                  export={{
+                    filename: "vendor-contracts",
+                    title: "Vendor Contracts",
+                    columns: [
+                      { key: "fromDate", header: "From Date" },
+                      { key: "vendor", header: "Vendor" },
+                      { key: "product", header: "Product" },
+                      { key: "service", header: "Service" },
+                      { key: "origin", header: "Origin" },
+                      { key: "destination", header: "Destination" },
+                      { key: "zone", header: "Zone" },
+                      { key: "rateType", header: "Rate Type" },
+                      { key: "weight", header: "Weight" },
+                      { key: "rate", header: "Rate" },
+                    ],
+                    getRows: () =>
+                      filtered.map((r) => ({
+                        fromDate: r.fromDate,
+                        vendor: `${r.vendorCode} — ${r.vendorName}`,
+                        product: r.productName || r.productCode,
+                        service: r.service,
+                        origin: r.originName || r.originCode,
+                        destination: r.destinationName || r.destinationCode,
+                        zone: r.zoneName || r.zoneCode,
+                        rateType: r.rateType,
+                        weight: r.weight,
+                        rate: r.rate,
+                      })),
+                  }}
+                  import={{ onRows: handleImportRows }}
+                />
                 <IconButton label="IncreaseRate" onClick={openIncreaseRate}><Plus className="h-4 w-4" /></IconButton>
               </div>
             </TooltipProvider>

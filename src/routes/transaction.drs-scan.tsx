@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Download,
   RefreshCw,
   Filter,
   Settings,
@@ -32,6 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import {
   FieldWrapper,
   IconButton,
@@ -850,18 +850,6 @@ function DrsScanPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "drs-scan.csv",
-      ["DRS No", "Date", "Area", "Service Center", "Field Executive", "Status"],
-      rows.map((r) => {
-        const d = rowDisplay(r);
-        return [d.drsNo, d.date, d.area, d.serviceCenter, d.fieldExecutive, r.status ?? ""];
-      }),
-    );
-    toast.success("Exported drs-scan.csv");
-  };
-
   const exportDrsRowExcel = (row: DrsRow) => {
     const d = rowDisplay(row);
     const safeName = row.drsNo.replace(/\//g, "-");
@@ -1343,9 +1331,32 @@ function DrsScanPage() {
       <Card className="min-w-0 overflow-hidden border p-0">
         <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-1.5">
-            <IconButton label="Export" onClick={handleExport}>
-              <Download className="h-4 w-4" />
-            </IconButton>
+            <DataIoToolbar
+              export={{
+                filename: "drs-scan",
+                title: "DRS Scan",
+                columns: [
+                  { key: "drsNo", header: "DRS No" },
+                  { key: "date", header: "Date" },
+                  { key: "area", header: "Area" },
+                  { key: "serviceCenter", header: "Service Center" },
+                  { key: "fieldExecutive", header: "Field Executive" },
+                  { key: "status", header: "Status" },
+                ],
+                getRows: () =>
+                  rows.map((r) => {
+                    const d = rowDisplay(r);
+                    return {
+                      drsNo: d.drsNo,
+                      date: d.date,
+                      area: d.area,
+                      serviceCenter: d.serviceCenter,
+                      fieldExecutive: d.fieldExecutive,
+                      status: r.status ?? "",
+                    };
+                  }),
+              }}
+            />
             <IconButton label="Refresh" onClick={handleRefresh}>
               <RefreshCw className="h-4 w-4" />
             </IconButton>

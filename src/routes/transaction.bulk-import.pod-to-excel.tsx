@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Download } from "lucide-react";
 import { toast } from "sonner";
 
@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FieldWrapper, MasterBreadcrumb, downloadCsv } from "@/components/master-table-kit";
 import { useAuth } from "@/lib/auth";
+import { parseTabularFile } from "@/lib/io/tableIo";
 import { toErrorMessage } from "@/lib/masters/screen";
 import { ConflictError } from "@/lib/masters/core/baseCrud";
 import { cancelPod, getPodByAwb, savePod, updatePod } from "@/lib/transactions/resources/pod";
@@ -99,7 +100,7 @@ function PodExcelViewPage() {
   const [entry, setEntry] = useState<PodEntryForm>(emptyPodEntryForm);
   const [saving, setSaving] = useState(false);
 
-  const actions = podActionsEnabled(entry);
+  const excelFileRef = useRef<File | null>(null);
 
   const handleDownloadTemplate = () => {
     downloadCsv(
@@ -113,12 +114,25 @@ function PodExcelViewPage() {
     toast.success("POD Excel template downloaded");
   };
 
+  const actions = podActionsEnabled(entry);
+
   const handleImport = async () => {
-    toast.message("Excel POD import is a placeholder — use View tab to save POD records.");
+    const file = excelFileRef.current;
+    if (!file) return toast.error("Choose a file first");
+    try {
+      const parsed = await parseTabularFile(file);
+      if (parsed.rows.length === 0) return toast.error("File is empty");
+      toast.message(
+        `Excel POD import is a placeholder (${parsed.rows.length} rows parsed) — use View tab to save POD records.`,
+      );
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
   };
 
   const resetExcel = () => {
     setFileName("");
+    excelFileRef.current = null;
     setFileInputKey((k) => k + 1);
   };
 
@@ -416,7 +430,11 @@ function PodExcelViewPage() {
                 accept=".csv,.xlsx,.xls"
                 className="hidden"
                 id="pod-excel-file"
-                onChange={(e) => setFileName(e.target.files?.[0]?.name ?? "")}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  excelFileRef.current = file;
+                  setFileName(file?.name ?? "");
+                }}
               />
               <Button
                 type="button"

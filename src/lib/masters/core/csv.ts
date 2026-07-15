@@ -129,17 +129,39 @@ export function toCsv(
  * unknown columns and filling absent ones with "". Header matching is
  * case-insensitive and ignores spaces/underscores so "Zone Code", "zone_code",
  * and "ZONECODE" all map to the `zone_code` import key.
+ *
+ * Optional `aliases` map alternate header labels onto an import column
+ * (e.g. `{ code: ["Product Code"] }` so exported UI CSVs re-import cleanly).
  */
 export function mapCsvToImportRows(
   rows: ReadonlyArray<CsvRecord>,
   importColumns: readonly string[],
+  opts?: { aliases?: Readonly<Record<string, readonly string[]>> },
 ): CsvRecord[] {
   const normalize = (s: string) => s.toLowerCase().replace(/[\s_]+/g, "");
+  const aliasKeys = new Map<string, string[]>();
+  for (const col of importColumns) {
+    const keys = [normalize(col)];
+    for (const a of opts?.aliases?.[col] ?? []) {
+      const n = normalize(a);
+      if (n && !keys.includes(n)) keys.push(n);
+    }
+    aliasKeys.set(col, keys);
+  }
   return rows.map((rec) => {
     const byNormalized = new Map<string, string>();
     for (const [k, v] of Object.entries(rec)) byNormalized.set(normalize(k), v);
     const out: CsvRecord = {};
-    for (const col of importColumns) out[col] = byNormalized.get(normalize(col)) ?? "";
+    for (const col of importColumns) {
+      let value = "";
+      for (const key of aliasKeys.get(col) ?? [normalize(col)]) {
+        if (byNormalized.has(key)) {
+          value = byNormalized.get(key) ?? "";
+          break;
+        }
+      }
+      out[col] = value;
+    }
     return out;
   });
 }

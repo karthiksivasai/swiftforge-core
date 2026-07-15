@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { Upload, Download, RefreshCw, Filter, Printer, Plus, Pencil, Trash2 } from "lucide-react";
+import { RefreshCw, Filter, Printer, Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -25,13 +25,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import {
   FieldWrapper,
   IconButton,
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
@@ -354,7 +354,6 @@ export const Route = createFileRoute("/transaction/receipt/expense-entry")({
 function ExpenseEntryPage() {
   const { isAuthenticated: authed } = useAuth();
   const queryClient = useQueryClient();
-  const importInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<PageView>("list");
   const [demoRows, setDemoRows] = useState<ExpenseRow[]>(buildSeedRows);
@@ -529,37 +528,8 @@ function ExpenseEntryPage() {
     toast.success("Filters cleared");
   };
 
-  const handleImport = () => importInputRef.current?.click();
-
-  const handleExport = () => {
-    downloadCsv(
-      "expense-entry.csv",
-      [
-        "Entry No",
-        "Branch Name",
-        "Expense Date",
-        "Expense Name",
-        "Bank / Cash",
-        "AWB No.",
-        "Description",
-        "Debit/Credit",
-        "Authorized",
-        "Amount",
-      ],
-      filtered.map((row) => [
-        row.entryNo,
-        row.branchName,
-        row.expenseDate,
-        row.expenseName,
-        row.bankCash,
-        row.awbNo,
-        row.description,
-        row.debitCredit,
-        row.authorized,
-        row.amount,
-      ]),
-    );
-    toast.success("Exported expense-entry.csv");
+  const handleImportStub = async () => {
+    toast.info("Import will be enabled with backend wiring");
   };
 
   const printRow = (row: ExpenseRow) => {
@@ -730,18 +700,38 @@ function ExpenseEntryPage() {
       <Card className="min-w-0 overflow-hidden border p-0">
         <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-1.5">
-            <IconButton label="Import" onClick={handleImport}>
-              <Upload className="h-4 w-4" />
-            </IconButton>
-            <IconButton label="Refresh" onClick={handleRefresh}>
-              <RefreshCw className="h-4 w-4" />
-            </IconButton>
-            <IconButton label="Clear filters" onClick={clearFilters}>
-              <Filter className="h-4 w-4" />
-            </IconButton>
-            <IconButton label="Export" onClick={handleExport}>
-              <Download className="h-4 w-4" />
-            </IconButton>
+            <DataIoToolbar
+              export={{
+                filename: "expense-entry",
+                title: "Expense Entry",
+                columns: [
+                  { key: "entryNo", header: "Entry No" },
+                  { key: "branchName", header: "Branch Name" },
+                  { key: "expenseDate", header: "Expense Date" },
+                  { key: "expenseName", header: "Expense Name" },
+                  { key: "bankCash", header: "Bank / Cash" },
+                  { key: "awbNo", header: "AWB No." },
+                  { key: "description", header: "Description" },
+                  { key: "debitCredit", header: "Debit/Credit" },
+                  { key: "authorized", header: "Authorized" },
+                  { key: "amount", header: "Amount" },
+                ],
+                getRows: () =>
+                  filtered.map((row) => ({
+                    entryNo: row.entryNo,
+                    branchName: row.branchName,
+                    expenseDate: row.expenseDate,
+                    expenseName: row.expenseName,
+                    bankCash: row.bankCash,
+                    awbNo: row.awbNo,
+                    description: row.description,
+                    debitCredit: row.debitCredit,
+                    authorized: row.authorized,
+                    amount: row.amount,
+                  })),
+              }}
+              import={{ onRows: handleImportStub }}
+            />
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3 lg:justify-end">
             <span className="shrink-0 text-sm text-muted-foreground">Search:</span>
@@ -910,14 +900,6 @@ function ExpenseEntryPage() {
           />
         </div>
       </Card>
-
-      <input
-        ref={importInputRef}
-        type="file"
-        accept=".csv,.xlsx,.xls"
-        className="hidden"
-        onChange={() => toast.info("Import will be enabled with backend wiring")}
-      />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>

@@ -60,6 +60,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import {
   FieldWrapper,
   IconButton,
@@ -760,26 +761,6 @@ function BaggingPage() {
     toast.success("Filters cleared");
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "bagging.csv",
-      ["Manifest No", "Master AWBNo", "Date", "Origin", "From", "To", "Destination", "Vendor", "Shipment", "Weight"],
-      filtered.map((r) => [
-        r.manifestNo,
-        r.masterAwbNo,
-        formatDisplayDate(r.date),
-        r.origin,
-        r.from,
-        r.to,
-        r.destination,
-        r.vendorName,
-        String(r.shipment),
-        r.weight,
-      ]),
-    );
-    toast.success("Exported bagging.csv");
-  };
-
   const exportBaggingRowCsv = (row: BaggingRow, linesOverride?: BaggingAwbLine[]) => {
     const safeName = row.manifestNo.replace(/\//g, "-");
     const lines = linesOverride ?? row.form.awbLines;
@@ -1473,9 +1454,37 @@ function BaggingPage() {
       <Card className="min-w-0 overflow-hidden border p-0">
         <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-1.5">
-            <IconButton label="Export" onClick={handleExport}>
-              <Download className="h-4 w-4" />
-            </IconButton>
+            <DataIoToolbar
+              export={{
+                filename: "bagging",
+                title: "Bagging",
+                columns: [
+                  { key: "manifestNo", header: "Manifest No" },
+                  { key: "masterAwbNo", header: "Master AWBNo" },
+                  { key: "date", header: "Date" },
+                  { key: "origin", header: "Origin" },
+                  { key: "from", header: "From" },
+                  { key: "to", header: "To" },
+                  { key: "destination", header: "Destination" },
+                  { key: "vendor", header: "Vendor" },
+                  { key: "shipment", header: "Shipment" },
+                  { key: "weight", header: "Weight" },
+                ],
+                getRows: () =>
+                  filtered.map((r) => ({
+                    manifestNo: r.manifestNo,
+                    masterAwbNo: r.masterAwbNo,
+                    date: formatDisplayDate(r.date),
+                    origin: r.origin,
+                    from: r.from,
+                    to: r.to,
+                    destination: r.destination,
+                    vendor: r.vendorName,
+                    shipment: String(r.shipment),
+                    weight: r.weight,
+                  })),
+              }}
+            />
             <IconButton label="Refresh" onClick={handleRefresh}>
               <RefreshCw className="h-4 w-4" />
             </IconButton>

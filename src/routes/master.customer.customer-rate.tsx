@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {
-  Download,
   RefreshCw,
   Plus,
   Search,
@@ -54,8 +53,8 @@ import {
   PAGE_SIZE,
   StatusPill,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import type { LookupKey } from "@/lib/master-lookups";
 
@@ -157,15 +156,6 @@ function CustomerRatePage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "customer-rates.csv",
-      ["Customer", "Product", "Service", "Origin", "Destination", "Zone", "From Date", "To Date", "Min Weight", "Rate/Kg", "Fuel %", "Other Charges", "Status"],
-      rows.map((r) => [r.customer, r.product, r.service, r.origin, r.destination, r.zone, r.fromDate, r.toDate, r.minWeight, r.ratePerKg, r.fuelPct, r.otherCharges, r.status]),
-    );
-    toast.success("Exported customer-rates.csv");
-  };
-
   const handleRefresh = () => {
     setSearch("");
     setColFilters({ customer: "", product: "", service: "", destination: "", status: "" });
@@ -188,7 +178,43 @@ function CustomerRatePage() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}><Download className="h-4 w-4" /></IconButton>
+              <DataIoToolbar
+                export={{
+                  filename: "customer-rates",
+                  title: "Customer Rates",
+                  columns: [
+                    { key: "customer", header: "Customer" },
+                    { key: "product", header: "Product" },
+                    { key: "service", header: "Service" },
+                    { key: "origin", header: "Origin" },
+                    { key: "destination", header: "Destination" },
+                    { key: "zone", header: "Zone" },
+                    { key: "fromDate", header: "From Date" },
+                    { key: "toDate", header: "To Date" },
+                    { key: "minWeight", header: "Min Weight" },
+                    { key: "ratePerKg", header: "Rate/Kg" },
+                    { key: "fuelPct", header: "Fuel %" },
+                    { key: "otherCharges", header: "Other Charges" },
+                    { key: "status", header: "Status" },
+                  ],
+                  getRows: () =>
+                    rows.map((r) => ({
+                      customer: r.customer,
+                      product: r.product,
+                      service: r.service,
+                      origin: r.origin,
+                      destination: r.destination,
+                      zone: r.zone,
+                      fromDate: r.fromDate,
+                      toDate: r.toDate,
+                      minWeight: r.minWeight,
+                      ratePerKg: r.ratePerKg,
+                      fuelPct: r.fuelPct,
+                      otherCharges: r.otherCharges,
+                      status: r.status,
+                    })),
+                }}
+              />
               <IconButton label="Refresh" onClick={handleRefresh}><RefreshCw className="h-4 w-4" /></IconButton>
             </div>
           </TooltipProvider>

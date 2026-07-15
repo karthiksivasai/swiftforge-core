@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
-import { Download, Upload, RefreshCw, Plus, Search, Pencil, Trash2, Filter } from "lucide-react";
+import { useMemo, useState } from "react";
+import { RefreshCw, Plus, Search, Pencil, Trash2, Filter } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -33,8 +33,8 @@ import {
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { cn } from "@/lib/utils";
 import type { LookupKey, LookupOption } from "@/lib/master-lookups";
@@ -42,7 +42,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   pincodesResource,
   type PincodeRow as PincodeDbRow,
@@ -213,7 +214,6 @@ function PinCodePage() {
   const [editing, setEditing] = useState<PinCodeRow | null>(null);
   const [form, setForm] = useState<PinCodeForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<PinCodeRow | null>(null);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -372,54 +372,11 @@ function PinCodePage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "pin-codes.csv",
-      [
-        "Pin Code",
-        "Pin Name",
-        "Vendor",
-        "Service Centre",
-        "Destination",
-        "Zone Code",
-        "Zone Name",
-        "State Code",
-        "State Name",
-        "Serviceable",
-        "Pickup Availability",
-        "KM",
-        "ODA",
-      ],
-      rows.map((r) => [
-        r.pinCode,
-        r.pinName,
-        r.vendor,
-        r.serviceCentre,
-        r.destination,
-        r.zoneCode,
-        r.zoneName,
-        r.stateCode,
-        r.stateName,
-        yesNoLabel(r.serviceable),
-        yesNoLabel(r.pickupAvailability),
-        r.km,
-        yesNoLabel(r.oda),
-      ]),
-    );
-    toast.success("Exported pin-codes.csv");
-  };
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) return toast.error("File is empty");
       if (authed) {
         const importRows = mapCsvToImportRows(
-          parsed.rows,
+          parsedRows,
           pincodesResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
@@ -432,7 +389,7 @@ function PinCodePage() {
         return s === "yes" || s === "true" || s === "1";
       };
       const imported: PinCodeRow[] = [];
-      for (const r of parsed.rows) {
+      for (const r of parsedRows) {
         const pinCode = (r["Pin Code"] ?? r["pin_code"] ?? "").trim();
         if (!pinCode) continue;
         imported.push({
@@ -452,7 +409,10 @@ function PinCodePage() {
           oda: yes(r["ODA"] ?? r["is_oda"]),
         });
       }
-      if (imported.length === 0) return toast.error("No valid rows found");
+      if (imported.length === 0) {
+        toast.error("No valid rows found");
+        return;
+      }
       setRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
     } catch (err) {
@@ -660,24 +620,47 @@ function PinCodePage() {
           </div>
 
           <Card className="overflow-hidden p-0">
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={handleImportFile}
-            />
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
               <TooltipProvider delayDuration={200}>
                 <div className="flex items-center gap-1.5">
-                  <IconButton label="Export" onClick={handleExport}>
-                    <Download className="h-4 w-4" />
-                  </IconButton>
-                  {canAdd ? (
-                    <IconButton label="Import" onClick={() => importInputRef.current?.click()}>
-                      <Upload className="h-4 w-4" />
-                    </IconButton>
-                  ) : null}
+                  <DataIoToolbar
+                    export={{
+                      filename: "pin-codes",
+                      title: "Pin Codes",
+                      columns: [
+                        { key: "pinCode", header: "Pin Code" },
+                        { key: "pinName", header: "Pin Name" },
+                        { key: "vendor", header: "Vendor" },
+                        { key: "serviceCentre", header: "Service Centre" },
+                        { key: "destination", header: "Destination" },
+                        { key: "zoneCode", header: "Zone Code" },
+                        { key: "zoneName", header: "Zone Name" },
+                        { key: "stateCode", header: "State Code" },
+                        { key: "stateName", header: "State Name" },
+                        { key: "serviceable", header: "Serviceable" },
+                        { key: "pickupAvailability", header: "Pickup Availability" },
+                        { key: "km", header: "KM" },
+                        { key: "oda", header: "ODA" },
+                      ],
+                      getRows: () =>
+                        rows.map((r) => ({
+                          pinCode: r.pinCode,
+                          pinName: r.pinName,
+                          vendor: r.vendor,
+                          serviceCentre: r.serviceCentre,
+                          destination: r.destination,
+                          zoneCode: r.zoneCode,
+                          zoneName: r.zoneName,
+                          stateCode: r.stateCode,
+                          stateName: r.stateName,
+                          serviceable: yesNoLabel(r.serviceable),
+                          pickupAvailability: yesNoLabel(r.pickupAvailability),
+                          km: r.km,
+                          oda: yesNoLabel(r.oda),
+                        })),
+                    }}
+                    import={canAdd ? { onRows: handleImportRows } : null}
+                  />
                   <IconButton label="Filter" onClick={() => clearColFilters()}>
                     <Filter className="h-4 w-4" />
                   </IconButton>

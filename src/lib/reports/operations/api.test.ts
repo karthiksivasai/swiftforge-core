@@ -28,7 +28,8 @@ describe("operations reports API", () => {
     expect(getOperationsReport("action-log")?.engineKey).toBe("action-log");
     expect(getOperationsReport("login-log")?.engineKey).toBe("login-log");
     expect(getOperationsReport("user-analysis")?.engineKey).toBe("user-activity-report");
-    expect(getOperationsReport("awb-printing")?.engineKey).toBeNull();
+    expect(getOperationsReport("awb-printing")?.engineKey).toBe("awb-printing-report");
+    expect(getOperationsReport("user-entry-log")?.engineKey).toBe("user-entry-log-report");
   });
 
   it("enforces 31-day period", () => {

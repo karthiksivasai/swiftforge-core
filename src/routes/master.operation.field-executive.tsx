@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
-import { Download, Upload, RefreshCw, Plus, Search, Pencil, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { RefreshCw, Plus, Search, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -41,15 +41,16 @@ import {
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
 
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   fieldExecutivesResource,
   type FieldExecutiveRow as FieldExecutiveDbRow,
@@ -309,7 +310,6 @@ function FieldExecutivePage() {
   const [form, setForm] = useState<FieldExecutiveForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<FieldExecutiveRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const rows: FieldExecutiveRow[] = authed
     ? (live.rows as (FieldExecutiveDbRow & Record<string, unknown>)[]).map(rowToView)
@@ -459,93 +459,54 @@ function FieldExecutivePage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "field-executives.csv",
-      [
-        "Code",
-        "Name",
-        "Mobile",
-        "Pickup Charge",
-        "Delivery Charge",
-        "Service Center",
-        "Destination Code",
-        "Destination Name",
-        "TLD Batch No",
-        "In-Active",
-      ],
-      rows.map((r) => [
-        r.code,
-        r.name,
-        r.mobile,
-        r.pickupCharge,
-        r.deliveryCharge,
-        r.serviceCenter,
-        r.destinationCode,
-        r.destinationName,
-        r.tldBatchNo,
-        inActiveLabel(r.inActive),
-      ]),
-    );
-    toast.success("Exported field-executives.csv");
-  };
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) return toast.error("File is empty");
-
-      if (authed) {
-        const importRows = mapCsvToImportRows(
-          parsed.rows,
-          fieldExecutivesResource.importColumns,
-        ) as ImportRow[];
-        const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
-        return;
-      }
-
-      const imported: FieldExecutiveRow[] = [];
-      for (const rec of mapCsvToImportRows(parsed.rows, [
-        "code",
-        "name",
-        "mobile",
-        "pickup_charge",
-        "delivery_charge",
-        "service_center_code",
-        "destination_code",
-        "destination_name",
-        "tld_batch_no",
-        "in_active",
-      ])) {
-        if (!rec.code?.trim()) continue;
-        imported.push({
-          id: crypto.randomUUID(),
-          code: rec.code.trim().toUpperCase(),
-          name: (rec.name || "").trim(),
-          mobile: (rec.mobile || "").trim(),
-          pickupCharge: (rec.pickup_charge || "0").trim(),
-          deliveryCharge: (rec.delivery_charge || "0").trim(),
-          serviceCenterId: "",
-          serviceCenter: (rec.service_center_code || "HYD").trim(),
-          serviceCenterName: (rec.service_center_code || "HYD").trim(),
-          destinationId: "",
-          destinationCode: (rec.destination_code || "").trim(),
-          destinationName: (rec.destination_name || "").trim(),
-          tldBatchNo: (rec.tld_batch_no || "").trim(),
-          inActive: /^(yes|true|1)$/i.test((rec.in_active || "").trim()),
-        });
-      }
-      if (imported.length === 0) return toast.error("No valid rows found");
-      setDemoRows((prev) => [...imported, ...prev]);
-      toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch (err) {
-      toast.error(toErrorMessage(err, "Failed to import file"));
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    if (authed) {
+      const importRows = mapCsvToImportRows(
+        parsedRows,
+        fieldExecutivesResource.importColumns,
+      ) as ImportRow[];
+      const res = await rc.commitImport.mutateAsync(importRows);
+      toast.success(importSummary(res));
+      return;
     }
+
+    const imported: FieldExecutiveRow[] = [];
+    for (const rec of mapCsvToImportRows(parsedRows, [
+      "code",
+      "name",
+      "mobile",
+      "pickup_charge",
+      "delivery_charge",
+      "service_center_code",
+      "destination_code",
+      "destination_name",
+      "tld_batch_no",
+      "in_active",
+    ])) {
+      if (!rec.code?.trim()) continue;
+      imported.push({
+        id: crypto.randomUUID(),
+        code: rec.code.trim().toUpperCase(),
+        name: (rec.name || "").trim(),
+        mobile: (rec.mobile || "").trim(),
+        pickupCharge: (rec.pickup_charge || "0").trim(),
+        deliveryCharge: (rec.delivery_charge || "0").trim(),
+        serviceCenterId: "",
+        serviceCenter: (rec.service_center_code || "HYD").trim(),
+        serviceCenterName: (rec.service_center_code || "HYD").trim(),
+        destinationId: "",
+        destinationCode: (rec.destination_code || "").trim(),
+        destinationName: (rec.destination_name || "").trim(),
+        tldBatchNo: (rec.tld_batch_no || "").trim(),
+        inActive: /^(yes|true|1)$/i.test((rec.in_active || "").trim()),
+      });
+    }
+    if (imported.length === 0) {
+      toast.error("No valid rows found");
+      return;
+    }
+    setDemoRows((prev) => [...imported, ...prev]);
+    toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
   };
 
   const handleRefresh = () => {
@@ -714,24 +675,41 @@ function FieldExecutivePage() {
           </div>
 
           <Card className="overflow-hidden p-0">
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={handleImportFile}
-            />
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
               <TooltipProvider delayDuration={200}>
                 <div className="flex items-center gap-1.5">
-                  <IconButton label="Export" onClick={handleExport}>
-                    <Download className="h-4 w-4" />
-                  </IconButton>
-                  {canAdd ? (
-                    <IconButton label="Import" onClick={() => importInputRef.current?.click()}>
-                      <Upload className="h-4 w-4" />
-                    </IconButton>
-                  ) : null}
+                  <DataIoToolbar
+                    export={{
+                      filename: "field-executives",
+                      title: "Field Executives",
+                      columns: [
+                        { key: "code", header: "Code" },
+                        { key: "name", header: "Name" },
+                        { key: "mobile", header: "Mobile" },
+                        { key: "pickupCharge", header: "Pickup Charge" },
+                        { key: "deliveryCharge", header: "Delivery Charge" },
+                        { key: "serviceCenter", header: "Service Center" },
+                        { key: "destinationCode", header: "Destination Code" },
+                        { key: "destinationName", header: "Destination Name" },
+                        { key: "tldBatchNo", header: "TLD Batch No" },
+                        { key: "inActive", header: "In-Active" },
+                      ],
+                      getRows: () =>
+                        rows.map((r) => ({
+                          code: r.code,
+                          name: r.name,
+                          mobile: r.mobile,
+                          pickupCharge: r.pickupCharge,
+                          deliveryCharge: r.deliveryCharge,
+                          serviceCenter: r.serviceCenter,
+                          destinationCode: r.destinationCode,
+                          destinationName: r.destinationName,
+                          tldBatchNo: r.tldBatchNo,
+                          inActive: inActiveLabel(r.inActive),
+                        })),
+                    }}
+                    import={canAdd ? { onRows: handleImportRows } : null}
+                  />
                   <IconButton label="Refresh" onClick={handleRefresh}>
                     <RefreshCw className="h-4 w-4" />
                   </IconButton>

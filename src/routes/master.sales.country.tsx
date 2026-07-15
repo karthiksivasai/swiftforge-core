@@ -1,8 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Download,
-  Upload,
   RefreshCw,
   Plus,
   Search,
@@ -65,10 +63,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import { countriesResource, type CountryRow } from "@/lib/masters/resources/countries";
 import { countryCreateSchema, countryUpdateSchema } from "@/lib/masters/schemas/countries";
 import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type WeightUnit = "Kgs" | "Lbs";
 
@@ -576,7 +576,6 @@ function CountryPage() {
   const [form, setForm] = useState<Omit<Country, "id">>(emptyCountry());
   const [deleteTarget, setDeleteTarget] = useState<Country | null>(null);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const rows: Country[] = authed ? (live.rows as CountryRow[]).map(rowToView) : demoRows;
 
@@ -673,72 +672,35 @@ function CountryPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    const header = ["Country Code", "Country Name", "Weight Unit", "Currency", "ISD Code"];
-    const csv = [
-      header.join(","),
-      ...rows.map((r) =>
-        [r.code, r.name, r.weightUnit, r.currency, r.isdCode]
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-          .join(","),
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "countries.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast.success("Exported countries.csv");
-  };
-
-  const handleImport = () => importInputRef.current?.click();
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) {
-        toast.error("File is empty");
-        return;
-      }
-      if (authed) {
-        const importRows = mapCsvToImportRows(
-          parsed.rows,
-          countriesResource.importColumns,
-        ) as ImportRow[];
-        const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
-        return;
-      }
-      const imported: Country[] = [];
-      for (const rec of mapCsvToImportRows(parsed.rows, countriesResource.importColumns)) {
-        if (!rec.code?.trim()) continue;
-        const wu = rec.weight_unit?.trim().toUpperCase();
-        imported.push({
-          id: crypto.randomUUID(),
-          code: rec.code.trim(),
-          name: (rec.name || "").trim(),
-          weightUnit: wu === "KGS" ? "Kgs" : wu === "LBS" ? "Lbs" : "",
-          currency: (rec.currency || "").trim(),
-          isdCode: (rec.isd_code || "").trim(),
-        });
-      }
-      if (imported.length === 0) {
-        toast.error("No valid rows found");
-        return;
-      }
-      setDemoRows((prev) => [...imported, ...prev]);
-      toast.success(`Imported ${imported.length} countr${imported.length === 1 ? "y" : "ies"}`);
-    } catch (err) {
-      toast.error(toErrorMessage(err, "Failed to import file"));
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    if (authed) {
+      const importRows = mapCsvToImportRows(
+        parsedRows,
+        countriesResource.importColumns,
+      ) as ImportRow[];
+      const res = await rc.commitImport.mutateAsync(importRows);
+      toast.success(importSummary(res));
+      return;
     }
+    const imported: Country[] = [];
+    for (const rec of mapCsvToImportRows(parsedRows, countriesResource.importColumns)) {
+      if (!rec.code?.trim()) continue;
+      const wu = rec.weight_unit?.trim().toUpperCase();
+      imported.push({
+        id: crypto.randomUUID(),
+        code: rec.code.trim(),
+        name: (rec.name || "").trim(),
+        weightUnit: wu === "KGS" ? "Kgs" : wu === "LBS" ? "Lbs" : "",
+        currency: (rec.currency || "").trim(),
+        isdCode: (rec.isd_code || "").trim(),
+      });
+    }
+    if (imported.length === 0) {
+      toast.error("No valid rows found");
+      return;
+    }
+    setDemoRows((prev) => [...imported, ...prev]);
+    toast.success(`Imported ${imported.length} countr${imported.length === 1 ? "y" : "ies"}`);
   };
 
   const handleRefresh = () => {
@@ -780,24 +742,31 @@ function CountryPage() {
       </div>
 
       <Card className="overflow-hidden p-0">
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={handleImportFile}
-        />
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}>
-                <Download className="h-4 w-4" />
-              </IconButton>
-              {canAdd ? (
-                <IconButton label="Import" onClick={handleImport}>
-                  <Upload className="h-4 w-4" />
-                </IconButton>
-              ) : null}
+              <DataIoToolbar
+                export={{
+                  filename: "countries",
+                  title: "Countries",
+                  columns: [
+                    { key: "code", header: "Country Code" },
+                    { key: "name", header: "Country Name" },
+                    { key: "weightUnit", header: "Weight Unit" },
+                    { key: "currency", header: "Currency" },
+                    { key: "isdCode", header: "ISD Code" },
+                  ],
+                  getRows: () =>
+                    rows.map((r) => ({
+                      code: r.code,
+                      name: r.name,
+                      weightUnit: r.weightUnit,
+                      currency: r.currency,
+                      isdCode: r.isdCode,
+                    })),
+                }}
+                import={canAdd ? { onRows: handleImportRows } : null}
+              />
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>

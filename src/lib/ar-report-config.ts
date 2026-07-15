@@ -60,7 +60,9 @@ export const AR_FIELD_LABELS: Record<ArFieldKey, string> = {
   withZero: "With Zero",
 };
 
-export const AR_LOOKUP_FIELDS: Partial<Record<ArFieldKey, "customer" | "serviceCentre" | "salesExecutive" | "fieldExecutive">> = {
+export const AR_LOOKUP_FIELDS: Partial<
+  Record<ArFieldKey, "customer" | "serviceCentre" | "salesExecutive" | "fieldExecutive">
+> = {
   customer: "customer",
   serviceCenter: "serviceCentre",
   salesExecutive: "salesExecutive",
@@ -68,6 +70,13 @@ export const AR_LOOKUP_FIELDS: Partial<Record<ArFieldKey, "customer" | "serviceC
 };
 
 export const arHasDateRange = (definition: ArReportDefinition) => {
-  const fields = [...definition.fields, ...(definition.secondRowFields ?? [])];
+  const fields = [
+    ...definition.fields,
+    ...(definition.secondRowFields ?? []),
+    ...(definition.extraRows?.flat() ?? []),
+  ];
   return fields.includes("fromDate");
 };
+
+export const arShowsUnbilledAmount = (definition: ArReportDefinition) =>
+  definition.id === "ledger-details";

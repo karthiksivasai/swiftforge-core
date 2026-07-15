@@ -1,8 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Download,
-  Upload,
   RefreshCw,
   Plus,
   Search,
@@ -58,10 +56,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import { zonesResource, type ZoneRow } from "@/lib/masters/resources/zones";
 import { zoneCreateSchema, zoneUpdateSchema } from "@/lib/masters/schemas/zones";
 import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type Zone = {
   id: string;
@@ -143,8 +143,6 @@ function ZonePage() {
   const [form, setForm] = useState<Omit<Zone, "id">>(emptyZone());
   const [deleteTarget, setDeleteTarget] = useState<Zone | null>(null);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
-
   const rows: Zone[] = authed ? (live.rows as ZoneRow[]).map(rowToView) : demoRows;
 
   const canAdd = !authed || rc.perms.canAdd;
@@ -236,42 +234,11 @@ function ZonePage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    const header = ["Zone Code", "Zone Name"];
-    const csv = [
-      header.join(","),
-      ...rows.map((r) =>
-        [r.code, r.name].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "zones.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast.success("Exported zones.csv");
-  };
-
-  const handleImport = () => importInputRef.current?.click();
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) {
-        toast.error("File is empty");
-        return;
-      }
       if (authed) {
         const importRows = mapCsvToImportRows(
-          parsed.rows,
+          parsedRows,
           zonesResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
@@ -279,7 +246,7 @@ function ZonePage() {
         return;
       }
       const imported: Zone[] = [];
-      for (const rec of mapCsvToImportRows(parsed.rows, zonesResource.importColumns)) {
+      for (const rec of mapCsvToImportRows(parsedRows, zonesResource.importColumns)) {
         if (!rec.code?.trim()) continue;
         imported.push({
           id: crypto.randomUUID(),
@@ -337,24 +304,25 @@ function ZonePage() {
       </div>
 
       <Card className="overflow-hidden p-0">
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={handleImportFile}
-        />
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}>
-                <Download className="h-4 w-4" />
-              </IconButton>
-              {canAdd ? (
-                <IconButton label="Import" onClick={handleImport}>
-                  <Upload className="h-4 w-4" />
-                </IconButton>
-              ) : null}
+              <DataIoToolbar
+                export={{
+                  filename: "zones",
+                  title: "Zones",
+                  columns: [
+                    { key: "code", header: "Zone Code" },
+                    { key: "name", header: "Zone Name" },
+                  ],
+                  getRows: () =>
+                    rows.map((r) => ({
+                      code: r.code,
+                      name: r.name,
+                    })),
+                }}
+                import={canAdd ? { onRows: handleImportRows } : null}
+              />
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>

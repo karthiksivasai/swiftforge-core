@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Download,
   RefreshCw,
   Plus,
   Search,
@@ -49,13 +48,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import {
   FieldWrapper,
   IconButton,
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
@@ -482,41 +481,6 @@ function PickupPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "pickups.csv",
-      [
-        "Pickup No",
-        "Date",
-        "Time",
-        "Pickup From Code",
-        "Pickup From",
-        "Pickup For",
-        "Service Centre",
-        "Field Executive",
-        "Area",
-        "Reason",
-        "Passed",
-        "AWB No",
-      ],
-      filtered.map((r) => [
-        r.pickupNo,
-        formatDisplayDate(r.pickupDate),
-        formatDisplayTime(r.pickupTime),
-        r.customer.code,
-        r.customer.name,
-        r.shipper.name,
-        r.serviceCenter,
-        r.fieldExecutive.name,
-        r.area.name,
-        r.reason,
-        r.passed,
-        r.awbNo,
-      ]),
-    );
-    toast.success("Exported pickups.csv");
-  };
-
   const clearColFilters = (silent = false) => {
     setColFilters(emptyColFilters());
     setPage(1);
@@ -851,7 +815,41 @@ function PickupPage() {
                   <IconButton label="Pickup Register" onClick={openRegister}><ClipboardList className="h-4 w-4" /></IconButton>
                   <IconButton label="Generate" onClick={openGenerateSheet}><Pencil className="h-4 w-4" /></IconButton>
                   <IconButton label="Transfer" onClick={openTransfer}><ArrowLeftRight className="h-4 w-4" /></IconButton>
-                  <IconButton label="Export" onClick={handleExport}><Download className="h-4 w-4" /></IconButton>
+                  <DataIoToolbar
+                    export={{
+                      filename: "pickups",
+                      title: "Pickups",
+                      columns: [
+                        { key: "pickupNo", header: "Pickup No" },
+                        { key: "date", header: "Date" },
+                        { key: "time", header: "Time" },
+                        { key: "pickupFromCode", header: "Pickup From Code" },
+                        { key: "pickupFrom", header: "Pickup From" },
+                        { key: "pickupFor", header: "Pickup For" },
+                        { key: "serviceCentre", header: "Service Centre" },
+                        { key: "fieldExecutive", header: "Field Executive" },
+                        { key: "area", header: "Area" },
+                        { key: "reason", header: "Reason" },
+                        { key: "passed", header: "Passed" },
+                        { key: "awbNo", header: "AWB No" },
+                      ],
+                      getRows: () =>
+                        filtered.map((r) => ({
+                          pickupNo: r.pickupNo,
+                          date: formatDisplayDate(r.pickupDate),
+                          time: formatDisplayTime(r.pickupTime),
+                          pickupFromCode: r.customer.code,
+                          pickupFrom: r.customer.name,
+                          pickupFor: r.shipper.name,
+                          serviceCentre: r.serviceCenter,
+                          fieldExecutive: r.fieldExecutive.name,
+                          area: r.area.name,
+                          reason: r.reason,
+                          passed: r.passed,
+                          awbNo: r.awbNo,
+                        })),
+                    }}
+                  />
                 </div>
               </TooltipProvider>
               <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3 lg:justify-end">

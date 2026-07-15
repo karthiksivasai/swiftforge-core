@@ -1,5 +1,6 @@
 /**
  * Shared helpers to wire existing Excel Import screens to import_excel.
+ * Accepts CSV and Excel (.xlsx/.xls); rows still land in `import_excel` RPC.
  */
 import { toast } from "sonner";
 
@@ -8,7 +9,8 @@ import {
   importExcelChunked,
   type ExcelImportType,
 } from "@/lib/imports/excelImport";
-import { csvTemplate, mapCsvToImportRows, parseCsv } from "@/lib/masters/core/csv";
+import { parseTabularFile, exportTable } from "@/lib/io/tableIo";
+import { csvTemplate, mapCsvToImportRows } from "@/lib/masters/core/csv";
 import type { ImportRow } from "@/lib/masters/core/import";
 import { importSummary, toErrorMessage } from "@/lib/masters/screen";
 
@@ -23,14 +25,25 @@ export function downloadExcelTemplate(importType: ExcelImportType, filename: str
   URL.revokeObjectURL(url);
 }
 
+/** Download a real .xlsx template for excel-import screens. */
+export async function downloadExcelXlsxTemplate(importType: ExcelImportType, filename: string) {
+  const cols = EXCEL_IMPORT_COLUMNS[importType];
+  await exportTable({
+    format: "excel",
+    filename: filename.replace(/\.(csv|xlsx)$/i, ""),
+    title: importType,
+    columns: cols.map((c) => ({ key: c, header: c })),
+    rows: [],
+  });
+}
+
 export async function runExcelImportFromFile(args: {
   file: File;
   importType: ExcelImportType;
   mode: "VALIDATE" | "COMMIT";
   params?: Record<string, unknown>;
 }): Promise<void> {
-  const text = await args.file.text();
-  const parsed = parseCsv(text);
+  const parsed = await parseTabularFile(args.file);
   if (parsed.rows.length === 0) {
     toast.error("File is empty");
     return;

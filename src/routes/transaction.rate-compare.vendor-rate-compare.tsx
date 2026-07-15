@@ -14,7 +14,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { PcsDetailsDialog, type PiecesLine } from "@/components/pcs-details-dialog";
-import { FieldWrapper, MasterBreadcrumb, downloadCsv } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
+import { FieldWrapper, MasterBreadcrumb } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
 
@@ -166,25 +167,6 @@ function VendorRateComparePage() {
       })),
     );
     toast.success(`Rate comparison loaded for ${activeDestination || "selected route"}`);
-  };
-
-  const handleExcel = () => {
-    if (results.length === 0 && !validate()) return;
-    const rows = (results.length > 0 ? results : DEMO_RATES).map((row) => [
-      row.vendor,
-      row.product,
-      row.service,
-      row.baseRate,
-      row.fuel,
-      row.other,
-      row.total,
-    ]);
-    downloadCsv(
-      "vendor-rate-compare.csv",
-      ["Vendor", "Product", "Service", "Base Rate", "Fuel", "Other", "Total"],
-      rows,
-    );
-    toast.success("Vendor rate compare exported");
   };
 
   const handleReset = () => {
@@ -388,9 +370,34 @@ function VendorRateComparePage() {
           <Button onClick={handleView} className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90">
             View
           </Button>
-          <Button onClick={handleExcel} className="min-w-24 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
-            Excel
-          </Button>
+          <DataIoToolbar
+            export={{
+              filename: "vendor-rate-compare",
+              title: "Vendor Rate Compare",
+              columns: [
+                { key: "vendor", header: "Vendor" },
+                { key: "product", header: "Product" },
+                { key: "service", header: "Service" },
+                { key: "baseRate", header: "Base Rate" },
+                { key: "fuel", header: "Fuel" },
+                { key: "other", header: "Other" },
+                { key: "total", header: "Total" },
+              ],
+              getRows: () => {
+                const source = results.length > 0 ? results : DEMO_RATES;
+                return source.map((row) => ({
+                  vendor: row.vendor,
+                  product: row.product,
+                  service: row.service,
+                  baseRate: row.baseRate,
+                  fuel: row.fuel,
+                  other: row.other,
+                  total: row.total,
+                }));
+              },
+            }}
+            disabled={results.length === 0}
+          />
           <Button variant="destructive" onClick={handleReset} className="min-w-24">
             Reset
           </Button>

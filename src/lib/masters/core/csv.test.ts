@@ -96,6 +96,23 @@ describe("mapCsvToImportRows", () => {
     const rows = mapCsvToImportRows([{ name: "North", junk: "x" }], cols);
     expect(rows).toEqual([{ zone_code: "", name: "North" }]);
   });
+
+  it("maps optional header aliases onto import columns", () => {
+    const rows = mapCsvToImportRows(
+      [{ "Product Code": "DOX", "Product Type": "Domestic", Name: "Documents" }],
+      ["code", "name", "product_type_code"],
+      {
+        aliases: {
+          code: ["Product Code"],
+          name: ["Product Name"],
+          product_type_code: ["Product Type"],
+        },
+      },
+    );
+    expect(rows).toEqual([
+      { code: "DOX", name: "Documents", product_type_code: "Domestic" },
+    ]);
+  });
 });
 
 describe("csvTemplate", () => {

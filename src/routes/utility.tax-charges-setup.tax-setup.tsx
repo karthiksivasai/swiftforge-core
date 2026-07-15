@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Pencil, Plus, RefreshCw, Search, Trash2, Upload } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -23,10 +23,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { IconButton, MasterBreadcrumb, PAGE_SIZE, TablePager } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { useAuth } from "@/lib/auth";
-import { parseCsv, mapCsvToImportRows } from "@/lib/masters/core";
+import { mapCsvToImportRows } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import { importSummary, toErrorMessage } from "@/lib/masters/screen";
 import type { LookupKey, LookupOption } from "@/lib/master-lookups";
 import { canDo, UTILITY_TAX_FUEL_PERMISSIONS } from "@/lib/permissions";
@@ -133,7 +135,6 @@ export const Route = createFileRoute("/utility/tax-charges-setup/tax-setup")({
 function TaxSetupPage() {
   const { isAuthenticated: authed, permissions } = useAuth();
   const queryClient = useQueryClient();
-  const importRef = useRef<HTMLInputElement | null>(null);
 
   const [demoRows, setDemoRows] = useState<TaxRow[]>(seedRows);
   const [screen, setScreen] = useState<"list" | "form">("list");
@@ -319,11 +320,9 @@ function TaxSetupPage() {
     toast.success("Deleted");
   };
 
-  const handleImport = async (file: File) => {
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      const importRows = mapCsvToImportRows(parsed.rows, [...TAX_IMPORT_COLUMNS]);
+      const importRows = mapCsvToImportRows(parsedRows, [...TAX_IMPORT_COLUMNS]);
       if (!importRows.length) return toast.error("No rows to import");
       if (!authed) {
         toast.success(`Demo import preview: ${importRows.length} rows`);
@@ -453,21 +452,44 @@ function TaxSetupPage() {
       <Card className="overflow-hidden p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <div className="flex items-center gap-1.5">
-            <IconButton label="Export" onClick={() => toast.success("Export queued")}>
-              <Download className="h-4 w-4" />
-            </IconButton>
-            <IconButton
-              label="Import"
-              onClick={() => {
-                if (authed && !canAdd) {
-                  toast.error("Permission denied");
-                  return;
-                }
-                importRef.current?.click();
+            <DataIoToolbar
+              export={{
+                filename: "tax-setup",
+                title: "Tax Setup",
+                columns: [
+                  { key: "customer", header: "Customer" },
+                  { key: "product", header: "Product" },
+                  { key: "fromDate", header: "From Date" },
+                  { key: "toDate", header: "To Date" },
+                  { key: "igst", header: "IGST" },
+                  { key: "cgst", header: "CGST" },
+                  { key: "sgst", header: "SGST" },
+                ],
+                getRows: () =>
+                  filtered.map((row) => ({
+                    customer: row.customer.name,
+                    product: row.product.name,
+                    fromDate: row.fromDate,
+                    toDate: row.toDate,
+                    igst: row.igst,
+                    cgst: row.cgst,
+                    sgst: row.sgst,
+                  })),
               }}
-            >
-              <Upload className="h-4 w-4" />
-            </IconButton>
+              import={
+                canAdd
+                  ? {
+                      onRows: (rows) => {
+                        if (authed && !canAdd) {
+                          toast.error("Permission denied");
+                          return;
+                        }
+                        return handleImportRows(rows);
+                      },
+                    }
+                  : null
+              }
+            />
             <IconButton
               label="Refresh"
               onClick={() => {
@@ -488,17 +510,6 @@ function TaxSetupPage() {
             >
               <RefreshCw className="h-4 w-4" />
             </IconButton>
-            <input
-              ref={importRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void handleImport(file);
-                event.target.value = "";
-              }}
-            />
           </div>
           <div className="flex items-end gap-2">
             <label className="flex flex-col gap-1 text-xs text-foreground">

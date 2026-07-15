@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState, type ReactNode } from "react";
 import {
-  Download,
   RefreshCw,
   Filter,
   Plus,
@@ -47,13 +46,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import {
   FieldWrapper,
   IconButton,
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
@@ -412,15 +411,6 @@ function ObcEntryPage() {
     if (!masterEwayBillNo.trim()) return toast.error("Master EWay Bill No is required");
     toast.success(`Report prepared for EWay Bill ${masterEwayBillNo.trim()}`);
     closeReport();
-  };
-
-  const handleExport = () => {
-    downloadCsv(
-      "obc-entry.csv",
-      ["Manifest No.", "Desp. Date", "Origin", "Destination"],
-      filtered.map((r) => [r.manifestNo, formatDisplayDate(r.despDate), r.origin, r.destination]),
-    );
-    toast.success("Exported obc-entry.csv");
   };
 
   const handleRefresh = () => {
@@ -942,9 +932,25 @@ function ObcEntryPage() {
       <Card className="min-w-0 overflow-hidden border p-0">
         <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-1.5">
-            <IconButton label="Export" onClick={handleExport}>
-              <Download className="h-4 w-4" />
-            </IconButton>
+            <DataIoToolbar
+              export={{
+                filename: "obc-entry",
+                title: "OBC Entry",
+                columns: [
+                  { key: "manifestNo", header: "Manifest No." },
+                  { key: "despDate", header: "Desp. Date" },
+                  { key: "origin", header: "Origin" },
+                  { key: "destination", header: "Destination" },
+                ],
+                getRows: () =>
+                  filtered.map((r) => ({
+                    manifestNo: r.manifestNo,
+                    despDate: formatDisplayDate(r.despDate),
+                    origin: r.origin,
+                    destination: r.destination,
+                  })),
+              }}
+            />
             <IconButton label="Refresh" onClick={handleRefresh}>
               <RefreshCw className="h-4 w-4" />
             </IconButton>
@@ -968,9 +974,6 @@ function ObcEntryPage() {
               }}
               className="h-9 w-full min-w-[10rem] sm:w-48"
             />
-            <IconButton label="Export" onClick={handleExport} className="h-9 w-9">
-              <Download className="h-4 w-4" />
-            </IconButton>
           </div>
         </div>
 

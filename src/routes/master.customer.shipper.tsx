@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
-import { Download, Upload, RefreshCw, Plus, Search, Pencil, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { RefreshCw, Plus, Search, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -47,8 +47,8 @@ import {
   PAGE_SIZE,
   StatusPill,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import type { LookupKey } from "@/lib/master-lookups";
 import { LookupCombobox } from "@/components/masters/lookup-combobox";
@@ -56,7 +56,8 @@ import { LookupCombobox } from "@/components/masters/lookup-combobox";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   shippersResource,
   type ShipperRow as ShipperDbRow,
@@ -184,7 +185,6 @@ function ShipperPage() {
   const [form, setForm] = useState<ShipperForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<ShipperRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const rows: ShipperRow[] = authed ? (live.rows as ShipperDbRow[]).map(rowToView) : demoRows;
 
@@ -294,50 +294,11 @@ function ShipperPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "shippers.csv",
-      [
-        "Code",
-        "Name",
-        "Customer",
-        "Mobile",
-        "Email",
-        "Address",
-        "PinCode",
-        "City",
-        "State",
-        "Country",
-        "Status",
-      ],
-      rows.map((r) => [
-        r.code,
-        r.name,
-        r.customer,
-        r.mobile,
-        r.email,
-        r.address,
-        r.pinCode,
-        r.city,
-        r.state,
-        r.country,
-        r.status,
-      ]),
-    );
-    toast.success("Exported shippers.csv");
-  };
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) return toast.error("File is empty");
       if (authed) {
         const importRows = mapCsvToImportRows(
-          parsed.rows,
+          parsedRows,
           shippersResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
@@ -345,7 +306,7 @@ function ShipperPage() {
         return;
       }
       const imported: ShipperRow[] = [];
-      for (const rec of mapCsvToImportRows(parsed.rows, shippersResource.importColumns)) {
+      for (const rec of mapCsvToImportRows(parsedRows, shippersResource.importColumns)) {
         if (!rec.code?.trim()) continue;
         const status =
           (rec.status || "").trim().toLowerCase() === "in-active" ? "In-Active" : "Active";
@@ -367,7 +328,10 @@ function ShipperPage() {
           countryId: "",
         });
       }
-      if (imported.length === 0) return toast.error("No valid rows found");
+      if (imported.length === 0) {
+        toast.error("No valid rows found");
+        return;
+      }
       setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
     } catch (err) {
@@ -397,22 +361,43 @@ function ShipperPage() {
       </div>
 
       <Card className="overflow-hidden p-0">
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={handleImportFile}
-        />
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}>
-                <Download className="h-4 w-4" />
-              </IconButton>
-              <IconButton label="Import" onClick={() => importInputRef.current?.click()}>
-                <Upload className="h-4 w-4" />
-              </IconButton>
+              <DataIoToolbar
+                export={{
+                  filename: "shippers",
+                  title: "Shippers",
+                  columns: [
+                    { key: "code", header: "Code" },
+                    { key: "name", header: "Name" },
+                    { key: "customer", header: "Customer" },
+                    { key: "mobile", header: "Mobile" },
+                    { key: "email", header: "Email" },
+                    { key: "address", header: "Address" },
+                    { key: "pinCode", header: "PinCode" },
+                    { key: "city", header: "City" },
+                    { key: "state", header: "State" },
+                    { key: "country", header: "Country" },
+                    { key: "status", header: "Status" },
+                  ],
+                  getRows: () =>
+                    rows.map((r) => ({
+                      code: r.code,
+                      name: r.name,
+                      customer: r.customer,
+                      mobile: r.mobile,
+                      email: r.email,
+                      address: r.address,
+                      pinCode: r.pinCode,
+                      city: r.city,
+                      state: r.state,
+                      country: r.country,
+                      status: r.status,
+                    })),
+                }}
+                import={{ onRows: handleImportRows }}
+              />
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>

@@ -17,6 +17,8 @@ describe("operational report keys", () => {
     expect(OPERATIONS_HUB_KEY_MAP["drs-report"]).toBe("drs-register");
     expect(OPERATIONS_HUB_KEY_MAP["ok-delivery"]).toBe("delivery-report");
     expect(OPERATIONS_HUB_KEY_MAP["login-log"]).toBeNull();
+    expect(OPERATIONS_HUB_KEY_MAP["awb-printing"]).toBe("awb-printing-report");
+    expect(OPERATIONS_HUB_KEY_MAP["unassigned-drs"]).toBe("unassigned-drs-report");
   });
 
   it("type-guards report keys", () => {

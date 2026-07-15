@@ -1,8 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Download,
-  Upload,
   RefreshCw,
   Plus,
   Search,
@@ -64,18 +62,25 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   productsResource,
+  PRODUCT_IMPORT_HEADER_ALIASES,
+  CANONICAL_PRODUCT_TYPES,
+  toProductTypeCode,
   type ProductRow as ProductDbRow,
+  type CanonicalProductTypeName,
 } from "@/lib/masters/resources/products";
+import { productTypesResource } from "@/lib/masters/resources/productTypes";
 import { productCreateSchema, productUpdateSchema } from "@/lib/masters/schemas/products";
 import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
-import { LookupCombobox } from "@/components/masters/lookup-combobox";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 
-type ProductType = "Domestic" | "International" | "Local" | "Import";
+type ProductType = CanonicalProductTypeName;
 type GroupType = "Air" | "Surface" | "Train" | "All";
 type Status = "Active" | "In-Active";
 type ShipmentType = "DOX" | "NDOX";
@@ -266,7 +271,7 @@ const SEED: Product[] = [
   },
 ];
 
-const PRODUCT_TYPES: ProductType[] = ["Domestic", "International", "Local", "Import"];
+const PRODUCT_TYPES: ProductType[] = CANONICAL_PRODUCT_TYPES.map((t) => t.name);
 const GROUP_TYPES: GroupType[] = ["Air", "Surface", "Train", "All"];
 const STATUSES: Status[] = ["Active", "In-Active"];
 
@@ -349,10 +354,12 @@ function toRaw(form: Omit<Product, "id">) {
 function ProductPage() {
   const { isAuthenticated: authed } = useAuth();
   const rc = useMasterResource(productsResource);
+  const rcTypes = useMasterResource(productTypesResource);
   const live = useMasterList(productsResource, {
     enabled: authed,
     labelRefs: [{ idField: "product_type_id", table: "product_types", as: "product_type" }],
   });
+  const productTypesLive = useMasterList(productTypesResource, { enabled: authed });
   const queryClient = useQueryClient();
 
   const [demoRows, setDemoRows] = useState<Product[]>(SEED);
@@ -363,7 +370,61 @@ function ProductPage() {
   const [form, setForm] = useState<Omit<Product, "id">>(emptyProduct());
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const seededTypesRef = useRef(false);
+
+  useEffect(() => {
+    if (!authed || productTypesLive.isLoading || seededTypesRef.current) return;
+    let cancelled = false;
+    void (async () => {
+      const { error } = await supabase.rpc("ensure_canonical_product_types");
+      if (cancelled) return;
+      if (!error) {
+        seededTypesRef.current = true;
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(productTypesResource.key) });
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(productsResource.key) });
+        return;
+      }
+
+      const existing = productTypesLive.rows as unknown as { code: string }[];
+      const have = new Set(existing.map((r) => r.code.toUpperCase()));
+      const missing = CANONICAL_PRODUCT_TYPES.filter((t) => !have.has(t.code));
+      if (missing.length === 0) {
+        seededTypesRef.current = true;
+        return;
+      }
+      for (const t of missing) {
+        try {
+          await rcTypes.create.mutateAsync({ code: t.code, name: t.name });
+        } catch {
+          // Race / already exists — ignore; list refresh reconciles.
+        }
+      }
+      if (!cancelled) {
+        seededTypesRef.current = true;
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(productTypesResource.key) });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    authed,
+    productTypesLive.isLoading,
+    productTypesLive.rows,
+    queryClient,
+    rcTypes.create,
+  ]);
+
+  const typeIdByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of CANONICAL_PRODUCT_TYPES) {
+      const row = (productTypesLive.rows as unknown as { id: string; code: string; name: string }[]).find(
+        (r) => r.code === t.code || r.name.toLowerCase() === t.name.toLowerCase(),
+      );
+      if (row) map.set(t.name, row.id);
+    }
+    return map;
+  }, [productTypesLive.rows]);
 
   const rows: Product[] = authed
     ? (live.rows as (ProductDbRow & Record<string, unknown>)[]).map(rowToView)
@@ -401,8 +462,17 @@ function ProductPage() {
   };
 
   const handleSave = async () => {
-    const raw = toRaw(form);
+    const typeName = form.type.trim();
+    const resolvedTypeId =
+      form.productTypeId ||
+      (typeName ? typeIdByName.get(typeName) : undefined) ||
+      "";
+    const raw = toRaw({ ...form, productTypeId: resolvedTypeId, type: typeName });
     if (authed) {
+      if (typeName && !resolvedTypeId) {
+        toast.error("Product type is not available yet. Refresh and try again.");
+        return;
+      }
       setSaving(true);
       try {
         if (editing) {
@@ -460,101 +530,79 @@ function ProductPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    const header = [
-      "Product Code",
-      "Product Name",
-      "Product Type",
-      "Product Service",
-      "Fuel Charge",
-      "GST Reverse",
-      "Shipment Type",
-      "Status",
-      "Group Type",
-    ];
-    const csv = [
-      header.join(","),
-      ...rows.map((r) =>
-        [
-          r.code,
-          r.name,
-          r.type,
-          r.service,
-          r.fuelCharge ? "Yes" : "No",
-          r.gstReverse ? "Yes" : "No",
-          r.shipmentType,
-          r.status,
-          r.groupType,
-        ]
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-          .join(","),
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "products.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast.success("Exported products.csv");
-  };
-
-  const handleImport = () => importInputRef.current?.click();
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) {
-        toast.error("File is empty");
-        return;
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    if (authed) {
+      await supabase.rpc("ensure_canonical_product_types");
+      const importRows = mapCsvToImportRows(parsedRows, productsResource.importColumns, {
+        aliases: PRODUCT_IMPORT_HEADER_ALIASES,
+      }).map((rec) => {
+        const groupRaw = (rec.group_type || "").trim();
+        const statusRaw = (rec.status || "").trim();
+        return {
+          ...rec,
+          product_type_code: toProductTypeCode(rec.product_type_code),
+          status: statusRaw
+            ? statusRaw.toUpperCase().replace(/IN-ACTIVE/gi, "INACTIVE").replace(/-/g, "")
+            : "ACTIVE",
+          group_type: groupRaw ? groupRaw.toUpperCase() : "",
+          shipment_type: (rec.shipment_type || "").trim().toUpperCase() || "DOX",
+        };
+      }) as ImportRow[];
+      const res = await rc.commitImport.mutateAsync(importRows);
+      const summary = importSummary(res);
+      if (res.error_count > 0) {
+        const sample = res.errors
+          .slice(0, 3)
+          .map((err) => `Row ${err.row_no}: ${err.message}`)
+          .join("; ");
+        toast.error(sample ? `${summary} — ${sample}` : summary);
+      } else {
+        toast.success(summary);
       }
-      if (authed) {
-        const importRows = mapCsvToImportRows(
-          parsed.rows,
-          productsResource.importColumns,
-        ) as ImportRow[];
-        const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
-        return;
-      }
-      const imported: Product[] = [];
-      for (const rec of mapCsvToImportRows(parsed.rows, productsResource.importColumns)) {
-        if (!rec.code?.trim()) continue;
-        const typeVal = (rec.product_type_code || "").trim();
-        const groupVal = (rec.group_type || "").trim();
-        imported.push({
-          id: crypto.randomUUID(),
-          code: rec.code.trim(),
-          name: (rec.name || "").trim(),
-          type: PRODUCT_TYPES.includes(typeVal as ProductType) ? typeVal : "",
-          productTypeId: "",
-          service: (rec.service || "").trim(),
-          fuelCharge: /^(yes|true|1)$/i.test((rec.fuel_charge || "").trim()),
-          gstReverse: /^(yes|true|1)$/i.test((rec.gst_reverse || "").trim()),
-          shipmentType: (rec.shipment_type || "").trim().toUpperCase() === "NDOX" ? "NDOX" : "DOX",
-          status:
-            (rec.status || "").trim().toUpperCase().replace(/-/g, "") === "INACTIVE"
-              ? "In-Active"
-              : "Active",
-          groupType: GROUP_TYPES.includes(groupVal as GroupType) ? (groupVal as GroupType) : "",
-        });
-      }
-      if (imported.length === 0) {
-        toast.error("No valid rows found");
-        return;
-      }
-      setDemoRows((prev) => [...imported, ...prev]);
-      toast.success(`Imported ${imported.length} product${imported.length === 1 ? "" : "s"}`);
-    } catch (err) {
-      toast.error(toErrorMessage(err, "Failed to import file"));
+      void queryClient.invalidateQueries({ queryKey: masterKeys.all(productsResource.key) });
+      return;
     }
+    const imported: Product[] = [];
+    for (const rec of mapCsvToImportRows(parsedRows, productsResource.importColumns, {
+      aliases: PRODUCT_IMPORT_HEADER_ALIASES,
+    })) {
+      if (!rec.code?.trim()) continue;
+      const typeCode = toProductTypeCode(rec.product_type_code);
+      const typeName =
+        CANONICAL_PRODUCT_TYPES.find((t) => t.code === typeCode)?.name ??
+        (PRODUCT_TYPES.includes(rec.product_type_code as ProductType)
+          ? rec.product_type_code
+          : "");
+      const groupVal = (rec.group_type || "").trim();
+      const groupNormalized =
+        groupVal.charAt(0).toUpperCase() + groupVal.slice(1).toLowerCase();
+      imported.push({
+        id: crypto.randomUUID(),
+        code: rec.code.trim(),
+        name: (rec.name || "").trim(),
+        type: typeName,
+        productTypeId: "",
+        service: (rec.service || "").trim(),
+        fuelCharge: /^(yes|true|1)$/i.test((rec.fuel_charge || "").trim()),
+        gstReverse: /^(yes|true|1)$/i.test((rec.gst_reverse || "").trim()),
+        shipmentType: (rec.shipment_type || "").trim().toUpperCase() === "NDOX" ? "NDOX" : "DOX",
+        status:
+          (rec.status || "").trim().toUpperCase().replace(/-/g, "") === "INACTIVE"
+            ? "In-Active"
+            : "Active",
+        groupType: GROUP_TYPES.includes(groupNormalized as GroupType)
+          ? (groupNormalized as GroupType)
+          : GROUP_TYPES.includes(groupVal as GroupType)
+            ? (groupVal as GroupType)
+            : "",
+      });
+    }
+    if (imported.length === 0) {
+      toast.error("No valid rows found");
+      return;
+    }
+    setDemoRows((prev) => [...imported, ...prev]);
+    toast.success(`Imported ${imported.length} product${imported.length === 1 ? "" : "s"}`);
   };
 
   const handleRefresh = () => {
@@ -596,24 +644,39 @@ function ProductPage() {
       </div>
 
       <Card className="overflow-hidden p-0">
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={handleImportFile}
-        />
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}>
-                <Download className="h-4 w-4" />
-              </IconButton>
-              {canAdd ? (
-                <IconButton label="Import" onClick={handleImport}>
-                  <Upload className="h-4 w-4" />
-                </IconButton>
-              ) : null}
+              <DataIoToolbar
+                export={{
+                  filename: "products",
+                  title: "Products",
+                  columns: [
+                    { key: "code", header: "Product Code" },
+                    { key: "name", header: "Product Name" },
+                    { key: "type", header: "Product Type" },
+                    { key: "service", header: "Product Service" },
+                    { key: "fuelCharge", header: "Fuel Charge" },
+                    { key: "gstReverse", header: "GST Reverse" },
+                    { key: "shipmentType", header: "Shipment Type" },
+                    { key: "status", header: "Status" },
+                    { key: "groupType", header: "Group Type" },
+                  ],
+                  getRows: () =>
+                    rows.map((r) => ({
+                      code: r.code,
+                      name: r.name,
+                      type: r.type,
+                      service: r.service,
+                      fuelCharge: r.fuelCharge ? "Yes" : "No",
+                      gstReverse: r.gstReverse ? "Yes" : "No",
+                      shipmentType: r.shipmentType,
+                      status: r.status,
+                      groupType: r.groupType,
+                    })),
+                }}
+                import={canAdd ? { onRows: handleImportRows } : null}
+              />
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>
@@ -779,33 +842,27 @@ function ProductPage() {
             </FieldWrapper>
 
             <FieldWrapper label="Product Type">
-              {authed ? (
-                <LookupCombobox
-                  lookupKey="product-type"
-                  value={form.productTypeId ?? ""}
-                  valueLabel={form.type}
-                  onChange={(id, item) =>
-                    setForm((f) => ({ ...f, productTypeId: id, type: item?.name ?? "" }))
-                  }
-                  placeholder="Select Product Type"
-                />
-              ) : (
-                <Select
-                  value={form.type || undefined}
-                  onValueChange={(v) => setForm((f) => ({ ...f, type: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Product Type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PRODUCT_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {t}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
+              <Select
+                value={form.type || undefined}
+                onValueChange={(v) =>
+                  setForm((f) => ({
+                    ...f,
+                    type: v,
+                    productTypeId: typeIdByName.get(v) ?? "",
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Product Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRODUCT_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </FieldWrapper>
 
             <FieldWrapper label="Product Service">

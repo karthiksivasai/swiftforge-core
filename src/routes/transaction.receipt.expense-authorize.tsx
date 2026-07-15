@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Download, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -15,13 +15,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import {
   FieldWrapper,
   IconButton,
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
@@ -250,23 +250,6 @@ function ExpenseAuthorizePage() {
   const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const endIdx = Math.min(currentPage * PAGE_SIZE, filtered.length);
 
-  const handleExport = () => {
-    downloadCsv(
-      "expense-authorize.csv",
-      ["Srno.", "Tran_Date", "Name", "Bank_Cash", "Description", "Amount", "Status"],
-      filtered.map((row) => [
-        String(row.srno),
-        row.tranDate,
-        row.name,
-        row.bankCash,
-        row.description,
-        row.amount,
-        row.status,
-      ]),
-    );
-    toast.success("Exported expense-authorize.csv");
-  };
-
   const handleRefresh = async () => {
     setSearch("");
     setColFilters(emptyColFilters());
@@ -366,9 +349,31 @@ function ExpenseAuthorizePage() {
       <Card className="min-w-0 overflow-hidden border p-0">
         <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-1.5">
-            <IconButton label="Export" onClick={handleExport}>
-              <Download className="h-4 w-4" />
-            </IconButton>
+            <DataIoToolbar
+              export={{
+                filename: "expense-authorize",
+                title: "Expense Authorize",
+                columns: [
+                  { key: "srno", header: "Srno." },
+                  { key: "tranDate", header: "Tran_Date" },
+                  { key: "name", header: "Name" },
+                  { key: "bankCash", header: "Bank_Cash" },
+                  { key: "description", header: "Description" },
+                  { key: "amount", header: "Amount" },
+                  { key: "status", header: "Status" },
+                ],
+                getRows: () =>
+                  filtered.map((row) => ({
+                    srno: String(row.srno),
+                    tranDate: row.tranDate,
+                    name: row.name,
+                    bankCash: row.bankCash,
+                    description: row.description,
+                    amount: row.amount,
+                    status: row.status,
+                  })),
+              }}
+            />
             <IconButton label="Refresh" onClick={handleRefresh}>
               <RefreshCw className="h-4 w-4" />
             </IconButton>

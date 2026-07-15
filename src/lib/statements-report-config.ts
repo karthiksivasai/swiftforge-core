@@ -32,7 +32,8 @@ export type StatementReportDefinition = {
   secondRowFields?: StatementFieldKey[];
   extraRows?: StatementFieldKey[][];
   colSpans?: Partial<Record<StatementFieldKey, number>>;
-  typeMode?: "detailsSummary";
+  /** Details/Summary, or Report/Details/Summary (CourierWala Destination Summary / OBC). */
+  typeMode?: "detailsSummary" | "reportDetailsSummary";
   customerTypeOptions?: readonly string[];
   businessChannelOptions?: readonly string[];
   productTypeOptions?: readonly string[];
@@ -133,7 +134,7 @@ export const STATEMENT_DEFINITIONS: StatementReportDefinition[] = [
     label: "Destination Summary Report",
     fields: ["fromDate", "toDate", "origin"],
     secondRowFields: ["serviceCenter", "type"],
-    typeMode: "detailsSummary",
+    typeMode: "reportDetailsSummary",
   },
   {
     id: "location-summary",
@@ -150,7 +151,7 @@ export const STATEMENT_DEFINITIONS: StatementReportDefinition[] = [
       ["paymentType", "filterType", "type", "obcReport"],
       ["branchType", "productType", "vendorType", "flightType"],
     ],
-    typeMode: "detailsSummary",
+    typeMode: "reportDetailsSummary",
     filterTypeOptions: OBC_FILTER_TYPES,
     branchTypeOptions: OBC_BRANCH_TYPES,
     productTypeOptions: OBC_PRODUCT_TYPES,

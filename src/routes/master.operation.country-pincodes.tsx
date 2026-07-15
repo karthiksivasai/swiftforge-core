@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
-import { Download, Upload, RefreshCw, Plus, Search, Pencil, Trash2, Filter } from "lucide-react";
+import { useMemo, useState } from "react";
+import { RefreshCw, Plus, Search, Pencil, Trash2, Filter } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -32,15 +32,16 @@ import {
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
-  downloadCsv,
 } from "@/components/master-table-kit";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   countryPincodesResource,
   type CountryPincodeRow as CountryPincodeDbRow,
@@ -257,7 +258,6 @@ function CountryPincodesPage() {
   const [form, setForm] = useState<CountryPincodeForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<CountryPincodeRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const rows: CountryPincodeRow[] = authed
     ? (live.rows as (CountryPincodeDbRow & Record<string, unknown>)[]).map(rowToView)
@@ -403,26 +403,11 @@ function CountryPincodesPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    downloadCsv(
-      "country-pincodes.csv",
-      ["Pincode", "City Name", "State Name", "Country Name"],
-      rows.map((r) => [r.pinCode, r.cityName, r.stateName, r.countryName]),
-    );
-    toast.success("Exported country-pincodes.csv");
-  };
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) return toast.error("File is empty");
       if (authed) {
         const importRows = mapCsvToImportRows(
-          parsed.rows,
+          parsedRows,
           countryPincodesResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
@@ -430,7 +415,7 @@ function CountryPincodesPage() {
         return;
       }
       const imported: CountryPincodeRow[] = [];
-      for (const rec of parsed.rows) {
+      for (const rec of parsedRows) {
         const pinCode = (rec["Pincode"] ?? rec["pin_code"] ?? "").trim();
         if (!pinCode) continue;
         imported.push({
@@ -441,7 +426,10 @@ function CountryPincodesPage() {
           countryName: (rec["Country Name"] ?? rec["country_name"] ?? "").trim(),
         });
       }
-      if (imported.length === 0) return toast.error("No valid rows found");
+      if (imported.length === 0) {
+        toast.error("No valid rows found");
+        return;
+      }
       setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
     } catch (err) {
@@ -541,24 +529,29 @@ function CountryPincodesPage() {
           </div>
 
           <Card className="overflow-hidden p-0">
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={handleImportFile}
-            />
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
               <TooltipProvider delayDuration={200}>
                 <div className="flex items-center gap-1.5">
-                  <IconButton label="Export" onClick={handleExport}>
-                    <Download className="h-4 w-4" />
-                  </IconButton>
-                  {canAdd ? (
-                    <IconButton label="Import" onClick={() => importInputRef.current?.click()}>
-                      <Upload className="h-4 w-4" />
-                    </IconButton>
-                  ) : null}
+                  <DataIoToolbar
+                    export={{
+                      filename: "country-pincodes",
+                      title: "Country Pincodes",
+                      columns: [
+                        { key: "pinCode", header: "Pincode" },
+                        { key: "cityName", header: "City Name" },
+                        { key: "stateName", header: "State Name" },
+                        { key: "countryName", header: "Country Name" },
+                      ],
+                      getRows: () =>
+                        rows.map((r) => ({
+                          pinCode: r.pinCode,
+                          cityName: r.cityName,
+                          stateName: r.stateName,
+                          countryName: r.countryName,
+                        })),
+                    }}
+                    import={canAdd ? { onRows: handleImportRows } : null}
+                  />
                   <IconButton label="Filter" onClick={() => clearColFilters()}>
                     <Filter className="h-4 w-4" />
                   </IconButton>

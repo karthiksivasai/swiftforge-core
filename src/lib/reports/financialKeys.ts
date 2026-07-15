@@ -18,11 +18,19 @@ export function isFinancialReportKey(key: string): key is FinancialReportKey {
   return (FINANCIAL_REPORT_KEYS as readonly string[]).includes(key);
 }
 
-/** Map legacy statements-hub demo ids → engine report_key (when 1:1). */
-export const STATEMENTS_HUB_KEY_MAP: Record<string, FinancialReportKey | null> = {
+/** Map CourierWala Statements hub ids → Phase 5 engine report_key. */
+export const STATEMENTS_HUB_KEY_MAP: Record<string, string | null> = {
   "cash-collection": "cash-collection-report",
-  "customer-register-profit": null, // deferred — insufficient profit model
-  "customer-summary": null,
-  "daily-report": null,
-  "vendor-profit": null, // deferred
+  "customer-awb-stock": "customer-awb-stock-report",
+  "customer-register-profit": "customer-register-profit",
+  "customer-summary": "customer-summary-report",
+  "daily-report": "daily-report",
+  "destination-summary": "destination-summary-report",
+  "location-summary": "location-summary-report",
+  "obc-report-checklist": "obc-report-checklist",
+  "product-summary": "product-summary-report",
+  "sales-executive-wise-sales": "sales-executive-sales-report",
+  "tariff-rate": "tariff-rate-report",
+  "tax-report": "tax-report",
+  "vendor-profit": "vendor-profit-report",
 };

@@ -23,8 +23,8 @@ export function isOperationalReportKey(key: string): key is OperationalReportKey
   return (OPERATIONAL_REPORT_KEYS as readonly string[]).includes(key);
 }
 
-/** Map legacy operations-hub demo ids → engine report_key (when 1:1). */
-export const OPERATIONS_HUB_KEY_MAP: Record<string, OperationalReportKey | null> = {
+/** Map CourierWala Operations hub ids → Phase 5 engine report_key. */
+export const OPERATIONS_HUB_KEY_MAP: Record<string, string | null> = {
   "drs-report": "drs-register",
   "manifest-report": "manifest-register",
   "manifest-pod": "pod-report",
@@ -32,14 +32,14 @@ export const OPERATIONS_HUB_KEY_MAP: Record<string, OperationalReportKey | null>
   "ok-delivery": "delivery-report",
   "scan-report": "scan-reconciliation-report",
   undelivery: "undelivered-report",
-  "login-log": null, // audit hub / 5E
-  "action-log": null, // audit hub / 5E
-  "awb-printing": null,
-  "comment-view": null,
-  "forwarding-no-missing": null,
-  "unassigned-drs": null,
-  "unassigned-manifest": null,
-  "unassigned-obc": null,
-  "user-analysis": null, // audit hub
-  "user-entry-log": null,
+  "login-log": null, // resolved via AUDIT_HUB_KEY_MAP
+  "action-log": null, // resolved via AUDIT_HUB_KEY_MAP
+  "awb-printing": "awb-printing-report",
+  "comment-view": "comment-view-report",
+  "forwarding-no-missing": "forwarding-no-missing-report",
+  "unassigned-drs": "unassigned-drs-report",
+  "unassigned-manifest": "unassigned-manifest-report",
+  "unassigned-obc": "unassigned-obc-report",
+  "user-analysis": null, // resolved via AUDIT_HUB_KEY_MAP
+  "user-entry-log": null, // resolved via AUDIT_HUB_KEY_MAP
 };

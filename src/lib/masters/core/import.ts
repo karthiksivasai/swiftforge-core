@@ -42,7 +42,7 @@ export type ImportMaster =
   // party simple (0022)
   | "consignees"
   | "shippers"
-  // party aggregate (0023)
+  // party aggregate (0023+)
   | "customers"
   | "local_branches"
   | "service_mappings"

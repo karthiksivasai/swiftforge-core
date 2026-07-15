@@ -1,8 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Download,
-  Upload,
   RefreshCw,
   Plus,
   Search,
@@ -69,7 +67,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { parseCsv, mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   chargesResource,
   fetchChargeDependencies,
@@ -84,6 +83,7 @@ import {
   CALC_BASES,
 } from "@/lib/masters/schemas/charges";
 import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type ChargeType = (typeof CHARGE_TYPES)[number];
 
@@ -500,7 +500,6 @@ function ChargesMasterPage() {
   const [form, setForm] = useState<Omit<ChargeRow, "id">>(emptyRow());
   const [deleteTarget, setDeleteTarget] = useState<ChargeRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const rows: ChargeRow[] = authed ? (live.rows as ChargeDbRow[]).map(rowToView) : demoRows;
 
@@ -634,92 +633,54 @@ function ChargesMasterPage() {
     setDeleteTarget(null);
   };
 
-  const handleExport = () => {
-    const header = ["Code", "Name", "Base On", "Apply Fuel", "Apply Tax On Fuel", "Apply Tax"];
-    const yn = (b: boolean) => (b ? "Yes" : "No");
-    const csv = [
-      header.join(","),
-      ...rows.map((r) =>
-        [r.code, r.name, r.baseOn, yn(r.applyFuel), yn(r.applyTaxOnFuel), yn(r.applyTax)]
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-          .join(","),
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "charges.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast.success("Exported charges.csv");
-  };
-
-  const handleImport = () => importInputRef.current?.click();
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.rows.length === 0) {
-        toast.error("File is empty");
-        return;
-      }
-      if (authed) {
-        const importRows = mapCsvToImportRows(
-          parsed.rows,
-          chargesResource.importColumns,
-        ) as ImportRow[];
-        const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
-        return;
-      }
-      const yesNo = (v?: string) => /^(yes|true|1)$/i.test((v || "").trim());
-      const imported: ChargeRow[] = [];
-      for (const rec of mapCsvToImportRows(parsed.rows, [
-        "code",
-        "name",
-        "base_on",
-        "apply_fuel",
-        "apply_tax_on_fuel",
-        "apply_tax",
-      ])) {
-        if (!rec.code?.trim()) continue;
-        const af = yesNo(rec.apply_fuel);
-        const atof = yesNo(rec.apply_tax_on_fuel);
-        const at = yesNo(rec.apply_tax);
-        imported.push({
-          id: crypto.randomUUID(),
-          code: rec.code.trim(),
-          name: (rec.name || "").trim(),
-          baseOn: (rec.base_on || "FLAT").trim(),
-          applyFuel: af,
-          applyTaxOnFuel: atof,
-          applyTax: at,
-          chargeType: "AIRWAYBILL",
-          chargeRate: 0,
-          fuel: af,
-          taxOnFuel: atof,
-          tax: at,
-          hsnCode: "",
-          sequence: 0,
-          multipleCharges: [],
-        });
-      }
-      if (imported.length === 0) {
-        toast.error("No valid rows found");
-        return;
-      }
-      setDemoRows((prev) => [...imported, ...prev]);
-      toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch (err) {
-      toast.error(toErrorMessage(err, "Failed to import file"));
+  const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    if (authed) {
+      const importRows = mapCsvToImportRows(
+        parsedRows,
+        chargesResource.importColumns,
+      ) as ImportRow[];
+      const res = await rc.commitImport.mutateAsync(importRows);
+      toast.success(importSummary(res));
+      return;
     }
+    const yesNo = (v?: string) => /^(yes|true|1)$/i.test((v || "").trim());
+    const imported: ChargeRow[] = [];
+    for (const rec of mapCsvToImportRows(parsedRows, [
+      "code",
+      "name",
+      "base_on",
+      "apply_fuel",
+      "apply_tax_on_fuel",
+      "apply_tax",
+    ])) {
+      if (!rec.code?.trim()) continue;
+      const af = yesNo(rec.apply_fuel);
+      const atof = yesNo(rec.apply_tax_on_fuel);
+      const at = yesNo(rec.apply_tax);
+      imported.push({
+        id: crypto.randomUUID(),
+        code: rec.code.trim(),
+        name: (rec.name || "").trim(),
+        baseOn: (rec.base_on || "FLAT").trim(),
+        applyFuel: af,
+        applyTaxOnFuel: atof,
+        applyTax: at,
+        chargeType: "AIRWAYBILL",
+        chargeRate: 0,
+        fuel: af,
+        taxOnFuel: atof,
+        tax: at,
+        hsnCode: "",
+        sequence: 0,
+        multipleCharges: [],
+      });
+    }
+    if (imported.length === 0) {
+      toast.error("No valid rows found");
+      return;
+    }
+    setDemoRows((prev) => [...imported, ...prev]);
+    toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
   };
 
   const handleRefresh = () => {
@@ -769,24 +730,33 @@ function ChargesMasterPage() {
       </div>
 
       <Card className="overflow-hidden p-0">
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={handleImportFile}
-        />
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Export" onClick={handleExport}>
-                <Download className="h-4 w-4" />
-              </IconButton>
-              {canAdd ? (
-                <IconButton label="Import" onClick={handleImport}>
-                  <Upload className="h-4 w-4" />
-                </IconButton>
-              ) : null}
+              <DataIoToolbar
+                export={{
+                  filename: "charges",
+                  title: "Charges Master",
+                  columns: [
+                    { key: "code", header: "Code" },
+                    { key: "name", header: "Name" },
+                    { key: "baseOn", header: "Base On" },
+                    { key: "applyFuel", header: "Apply Fuel" },
+                    { key: "applyTaxOnFuel", header: "Apply Tax On Fuel" },
+                    { key: "applyTax", header: "Apply Tax" },
+                  ],
+                  getRows: () =>
+                    rows.map((r) => ({
+                      code: r.code,
+                      name: r.name,
+                      baseOn: r.baseOn,
+                      applyFuel: r.applyFuel ? "Yes" : "No",
+                      applyTaxOnFuel: r.applyTaxOnFuel ? "Yes" : "No",
+                      applyTax: r.applyTax ? "Yes" : "No",
+                    })),
+                }}
+                import={canAdd ? { onRows: handleImportRows } : null}
+              />
               <IconButton label="Refresh" onClick={handleRefresh}>
                 <RefreshCw className="h-4 w-4" />
               </IconButton>
