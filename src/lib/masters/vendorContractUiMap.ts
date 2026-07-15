@@ -84,8 +84,23 @@ export function unitToUi(unit: string): string {
   return unit;
 }
 
+export type VendorContractLabels = {
+  vendor_code?: string | null;
+  vendor_name?: string | null;
+  product_code?: string | null;
+  product_name?: string | null;
+  zone_code?: string | null;
+  zone_name?: string | null;
+  country_code?: string | null;
+  country_name?: string | null;
+  origin_code?: string | null;
+  origin_name?: string | null;
+  destination_code?: string | null;
+  destination_name?: string | null;
+};
+
 export function dbVendorContractToUi(
-  root: VendorContractRow & Record<string, unknown>,
+  root: VendorContractRow & VendorContractLabels,
   slab: VendorContractSlabRow,
 ): UiVendorContractRow {
   return {
