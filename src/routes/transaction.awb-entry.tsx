@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useBlocker } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -14,6 +14,9 @@ import {
   Info,
   List,
   Copy,
+  Cloud,
+  Loader2,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -61,6 +64,18 @@ import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
 import { rememberPartiesAfterAwbSave } from "@/lib/transactions/resources/partyContacts";
 import { listVendorServices } from "@/lib/transactions/resources/vendorServices";
+import {
+  AWB_DRAFT_AUTOSAVE_MS,
+  AWB_DRAFT_VERSION,
+  clearAwbDraft,
+  draftUserKey,
+  formatDraftSavedAt,
+  isAwbDraftWorthKeeping,
+  loadAwbDraft,
+  persistAwbDraft,
+  readLocalAwbDraft,
+  type AwbEntryDraftPayload,
+} from "@/lib/transactions/awbDraftStorage";
 import {
   cancelShipment,
   confirmBooking,
@@ -277,7 +292,10 @@ type ColFilterKey =
   | "destination"
   | "product"
   | "vendor"
-  | "weight";
+  | "actualWeight"
+  | "chargeWeight"
+  | "pieces"
+  | "deliveryVendor";
 
 type PiecesDraft = {
   measurementUnit: string;
@@ -848,6 +866,11 @@ const calcChargeWeight = (draft: PiecesDraft) => {
   return Math.max(vol, act).toFixed(2);
 };
 
+const formatListWeightDisplay = (value: string): string => {
+  const n = Number.parseFloat(value);
+  return Number.isFinite(n) ? n.toFixed(3) : value || "";
+};
+
 const listFromRow = (r: AwbRow) => ({
   awbNo: r.awbNo,
   bookDate: formatDisplayDate(r.bookDate),
@@ -858,7 +881,10 @@ const listFromRow = (r: AwbRow) => ({
   destination: r.consignee.origin.name || r.consignee.origin.code,
   product: r.product.code,
   vendor: r.vendor.code,
-  weight: r.chargeWeight || r.actualWeight,
+  actualWeight: formatListWeightDisplay(r.actualWeight),
+  chargeWeight: formatListWeightDisplay(r.chargeWeight),
+  pieces: r.pieces,
+  deliveryVendor: r.deliveryNo || r.forwarding?.deliveryVendor?.code || "",
 });
 
 const seedFromSummary = (s: {
@@ -871,7 +897,10 @@ const seedFromSummary = (s: {
   destination: string;
   product: string;
   vendor: string;
-  weight: string;
+  actualWeight: string;
+  chargeWeight: string;
+  pieces: string;
+  deliveryVendor: string;
   forwardingNo: string;
   deliveryNo: string;
   referenceNo: string;
@@ -895,8 +924,9 @@ const seedFromSummary = (s: {
   },
   product: { code: s.product, name: s.product },
   vendor: { code: s.vendor, name: s.vendor },
-  actualWeight: s.weight,
-  chargeWeight: s.weight,
+  pieces: s.pieces,
+  actualWeight: s.actualWeight,
+  chargeWeight: s.chargeWeight,
   forwardingNo: s.forwardingNo,
   deliveryNo: s.deliveryNo,
   forwarding: {
@@ -904,7 +934,7 @@ const seedFromSummary = (s: {
     deliveryAwb: s.deliveryNo,
     forwardingAwb: s.forwardingNo,
     deliveryProduct: { code: s.product, name: s.product },
-    deliveryVendor: { code: s.vendor, name: s.vendor },
+    deliveryVendor: { code: s.deliveryVendor, name: s.deliveryVendor },
   },
   kyc: emptyKyc(),
 });
@@ -920,9 +950,12 @@ const SEED_SUMMARIES = [
     destination: "AUSTRALIA",
     product: "SPX",
     vendor: "DTAU",
-    weight: "36.0",
+    actualWeight: "36.000",
+    chargeWeight: "36.000",
+    pieces: "1",
+    deliveryVendor: "1228523166",
     forwardingNo: "FWD30403918",
-    deliveryNo: "DLV30403918",
+    deliveryNo: "1228523166",
     referenceNo: "REF30403918",
   },
   {
@@ -935,9 +968,12 @@ const SEED_SUMMARIES = [
     destination: "USA",
     product: "SPX",
     vendor: "UPS",
-    weight: "26.8",
+    actualWeight: "26.800",
+    chargeWeight: "26.800",
+    pieces: "2",
+    deliveryVendor: "CW8932",
     forwardingNo: "FWD30403919",
-    deliveryNo: "DLV30403919",
+    deliveryNo: "CW8932",
     referenceNo: "REF30403919",
   },
   {
@@ -950,9 +986,12 @@ const SEED_SUMMARIES = [
     destination: "AUSTRALIA",
     product: "SPX",
     vendor: "DHE",
-    weight: "18.5",
+    actualWeight: "18.500",
+    chargeWeight: "18.500",
+    pieces: "1",
+    deliveryVendor: "1779469271",
     forwardingNo: "FWD30403920",
-    deliveryNo: "DLV30403920",
+    deliveryNo: "1779469271",
     referenceNo: "REF30403920",
   },
   {
@@ -965,9 +1004,12 @@ const SEED_SUMMARIES = [
     destination: "USA",
     product: "SPX",
     vendor: "DHL1",
-    weight: "42.3",
+    actualWeight: "42.300",
+    chargeWeight: "42.300",
+    pieces: "3",
+    deliveryVendor: "788982753426",
     forwardingNo: "FWD30403921",
-    deliveryNo: "DLV30403921",
+    deliveryNo: "788982753426",
     referenceNo: "REF30403921",
   },
   {
@@ -980,9 +1022,12 @@ const SEED_SUMMARIES = [
     destination: "AUSTRALIA",
     product: "SPX",
     vendor: "DTAU",
-    weight: "15.2",
+    actualWeight: "15.200",
+    chargeWeight: "15.200",
+    pieces: "1",
+    deliveryVendor: "",
     forwardingNo: "FWD30403922",
-    deliveryNo: "DLV30403922",
+    deliveryNo: "",
     referenceNo: "REF30403922",
   },
   {
@@ -995,9 +1040,12 @@ const SEED_SUMMARIES = [
     destination: "USA",
     product: "SPX",
     vendor: "UPS",
-    weight: "31.0",
+    actualWeight: "31.000",
+    chargeWeight: "31.000",
+    pieces: "1",
+    deliveryVendor: "1Z999AA10123456784",
     forwardingNo: "FWD30403923",
-    deliveryNo: "DLV30403923",
+    deliveryNo: "1Z999AA10123456784",
     referenceNo: "REF30403923",
   },
   {
@@ -1010,9 +1058,12 @@ const SEED_SUMMARIES = [
     destination: "AUSTRALIA",
     product: "SPX",
     vendor: "DHE",
-    weight: "22.7",
+    actualWeight: "22.700",
+    chargeWeight: "22.700",
+    pieces: "2",
+    deliveryVendor: "CW9104",
     forwardingNo: "FWD30403924",
-    deliveryNo: "DLV30403924",
+    deliveryNo: "CW9104",
     referenceNo: "REF30403924",
   },
   {
@@ -1025,9 +1076,12 @@ const SEED_SUMMARIES = [
     destination: "USA",
     product: "SPX",
     vendor: "DHL1",
-    weight: "19.4",
+    actualWeight: "19.400",
+    chargeWeight: "19.400",
+    pieces: "1",
+    deliveryVendor: "4551203891",
     forwardingNo: "FWD30403925",
-    deliveryNo: "DLV30403925",
+    deliveryNo: "4551203891",
     referenceNo: "REF30403925",
   },
   {
@@ -1040,9 +1094,12 @@ const SEED_SUMMARIES = [
     destination: "AUSTRALIA",
     product: "SPX",
     vendor: "DTAU",
-    weight: "28.6",
+    actualWeight: "28.600",
+    chargeWeight: "28.600",
+    pieces: "1",
+    deliveryVendor: "3990011223",
     forwardingNo: "FWD30403926",
-    deliveryNo: "DLV30403926",
+    deliveryNo: "3990011223",
     referenceNo: "REF30403926",
   },
   {
@@ -1055,9 +1112,12 @@ const SEED_SUMMARIES = [
     destination: "USA",
     product: "SPX",
     vendor: "UPS",
-    weight: "33.1",
+    actualWeight: "33.100",
+    chargeWeight: "33.100",
+    pieces: "4",
+    deliveryVendor: "8822100455",
     forwardingNo: "FWD30403927",
-    deliveryNo: "DLV30403927",
+    deliveryNo: "8822100455",
     referenceNo: "REF30403927",
   },
 ];
@@ -1075,11 +1135,19 @@ const emptyColFilters = (): Record<ColFilterKey, string> => ({
   destination: "",
   product: "",
   vendor: "",
-  weight: "",
+  actualWeight: "",
+  chargeWeight: "",
+  pieces: "",
+  deliveryVendor: "",
 });
 
 const awbCol = {
-  awbNo: "min-w-[112px] whitespace-nowrap",
+  awbNo:
+    "sticky left-0 z-20 min-w-[112px] whitespace-nowrap bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]",
+  awbNoHead:
+    "sticky left-0 z-30 min-w-[112px] whitespace-nowrap bg-sidebar shadow-[2px_0_4px_-2px_rgba(0,0,0,0.18)]",
+  awbNoFilter:
+    "sticky left-0 z-30 min-w-[112px] whitespace-nowrap bg-muted shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]",
   bookDate: "min-w-[112px] whitespace-nowrap",
   shipperName: "min-w-[160px] whitespace-nowrap",
   customerCode: "min-w-[132px] whitespace-nowrap",
@@ -1088,9 +1156,16 @@ const awbCol = {
   destination: "min-w-[128px] whitespace-nowrap",
   product: "min-w-[88px] whitespace-nowrap",
   vendor: "min-w-[88px] whitespace-nowrap",
-  weight: "min-w-[88px] whitespace-nowrap",
-  action: "min-w-[72px] whitespace-nowrap text-center",
-  actionCell: "min-w-[72px] whitespace-nowrap text-center",
+  actualWeight: "min-w-[112px] whitespace-nowrap",
+  chargeWeight: "min-w-[112px] whitespace-nowrap",
+  pieces: "min-w-[80px] whitespace-nowrap",
+  deliveryVendor: "min-w-[140px] whitespace-nowrap",
+  action:
+    "sticky right-0 z-30 min-w-[72px] whitespace-nowrap bg-sidebar text-center shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.18)]",
+  actionFilter:
+    "sticky right-0 z-30 min-w-[72px] whitespace-nowrap bg-muted text-center shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.12)]",
+  actionCell:
+    "sticky right-0 z-20 min-w-[72px] whitespace-nowrap bg-background text-center shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.12)]",
   filter: "h-8 w-full min-w-0",
 } as const;
 
@@ -1105,8 +1180,9 @@ export const Route = createFileRoute("/transaction/awb-entry")({
 });
 
 function AwbEntryPage() {
-  const { isAuthenticated: authed } = useAuth();
+  const { isAuthenticated: authed, profile } = useAuth();
   const queryClient = useQueryClient();
+  const userKey = draftUserKey(profile?.id, profile?.auth_user_id);
   const [demoRows, setDemoRows] = useState<AwbRow[]>(seedRows);
   const [colFilters, setColFilters] = useState(emptyColFilters());
   const [page, setPage] = useState(1);
@@ -1146,10 +1222,35 @@ function AwbEntryPage() {
   const [bookingErrors, setBookingErrors] = useState<string[]>([]);
   const [cancelShipmentTarget, setCancelShipmentTarget] = useState<AwbRow | null>(null);
 
+  type DraftUiStatus = "idle" | "saving" | "saved" | "error";
+  const [draftUiStatus, setDraftUiStatus] = useState<DraftUiStatus>("idle");
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+  const [restoreDraft, setRestoreDraft] = useState<AwbEntryDraftPayload | null>(null);
+  const [leavePromptOpen, setLeavePromptOpen] = useState(false);
+  const [leaveSource, setLeaveSource] = useState<"nav" | "close">("nav");
+  const allowLeaveRef = useRef(false);
+  const draftHydratedRef = useRef(false);
+  const skipNextAutosaveRef = useRef(false);
+  const lastDraftSnapshotRef = useRef<string>("");
+
   const formStatus = editing?.status ?? (showForm && !editing ? "DRAFT" : undefined);
   const isReadOnly = Boolean(formStatus && formStatus !== "DRAFT");
   const canBook = Boolean(formStatus === "DRAFT" || (!editing && showForm));
   const canCancelShipment = Boolean(editing && (formStatus === "DRAFT" || formStatus === "BOOKED"));
+  const hasUnfinishedDraft =
+    showForm && !isReadOnly && isAwbDraftWorthKeeping(form);
+
+  const navBlocker = useBlocker({
+    shouldBlockFn: () => {
+      if (allowLeaveRef.current) {
+        allowLeaveRef.current = false;
+        return false;
+      }
+      return showForm && !isReadOnly && isAwbDraftWorthKeeping(form);
+    },
+    enableBeforeUnload: hasUnfinishedDraft,
+    withResolver: true,
+  });
 
   const liveQuery = useQuery({
     queryKey: ["shipments", "list", appliedSearch?.field, appliedSearch?.query],
@@ -1195,9 +1296,20 @@ function AwbEntryPage() {
           },
           product: { code: list.product, name: list.product },
           vendor: { code: list.vendor, name: list.vendor },
-          chargeWeight: list.weight,
+          pieces: list.pieces,
+          actualWeight: list.actualWeight,
+          chargeWeight: list.chargeWeight,
           forwardingNo: list.forwardingNo,
           deliveryNo: list.deliveryNo,
+          forwarding: {
+            ...emptyForwarding(),
+            deliveryAwb: list.deliveryNo,
+            forwardingAwb: list.forwardingNo,
+            deliveryVendor: {
+              code: list.deliveryVendor,
+              name: list.deliveryVendor,
+            },
+          },
           carrierProviderCode: list.carrierProviderCode,
           carrierBookingRef: list.carrierBookingRef,
           carrierTrackingNo: list.carrierTrackingNo,
@@ -1437,7 +1549,146 @@ function AwbEntryPage() {
     closeEntry();
   };
 
+  const buildCurrentDraft = (): AwbEntryDraftPayload => ({
+    version: AWB_DRAFT_VERSION,
+    savedAt: new Date().toISOString(),
+    userKey,
+    form,
+    editing: editing
+      ? { id: editing.id, rowVersion: editing.rowVersion, status: editing.status }
+      : null,
+    activeTab,
+    piecesDraft,
+    chargeDraft,
+    proformaDraft,
+    vendorChargeDraft,
+  });
+
+  const applyDraftPayload = (draft: AwbEntryDraftPayload) => {
+    skipNextAutosaveRef.current = true;
+    const restoredForm = normalizeForm({
+      ...emptyForm(),
+      ...(draft.form as Partial<AwbFullForm>),
+    } as AwbFullForm);
+    setForm(restoredForm);
+    if (draft.editing?.id) {
+      setEditing({
+        ...restoredForm,
+        id: draft.editing.id,
+        rowVersion: draft.editing.rowVersion,
+        status: draft.editing.status ?? "DRAFT",
+      } as AwbRow);
+    } else {
+      setEditing(null);
+    }
+    setActiveTab(draft.activeTab || "awb");
+    setPiecesDraft((draft.piecesDraft as PiecesDraft) ?? emptyPiecesDraft());
+    setChargeDraft((draft.chargeDraft as ChargeDraft) ?? emptyChargeDraft());
+    setProformaDraft((draft.proformaDraft as ProformaDraft) ?? emptyProformaDraft());
+    setVendorChargeDraft(
+      (draft.vendorChargeDraft as VendorChargeDraft) ?? emptyVendorChargeDraft(),
+    );
+    setRatingSummary(null);
+    setBookingErrors([]);
+    setKycSearchInput("");
+    lastDraftSnapshotRef.current = JSON.stringify({
+      form: draft.form,
+      editing: draft.editing,
+      activeTab: draft.activeTab,
+      piecesDraft: draft.piecesDraft,
+      chargeDraft: draft.chargeDraft,
+      proformaDraft: draft.proformaDraft,
+      vendorChargeDraft: draft.vendorChargeDraft,
+    });
+    setDraftSavedAt(draft.savedAt);
+    setDraftUiStatus("saved");
+    setShowForm(true);
+  };
+
+  const clearDraftState = async () => {
+    await clearAwbDraft({ userKey, syncRemote: authed });
+    lastDraftSnapshotRef.current = "";
+    setDraftUiStatus("idle");
+    setDraftSavedAt(null);
+  };
+
+  useEffect(() => {
+    if (draftHydratedRef.current) return;
+    let cancelled = false;
+    void (async () => {
+      const draft = await loadAwbDraft({ userKey, syncRemote: authed });
+      if (cancelled) return;
+      draftHydratedRef.current = true;
+      if (draft) setRestoreDraft(draft);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userKey, authed]);
+
+  useEffect(() => {
+    if (!showForm || isReadOnly) return;
+    if (skipNextAutosaveRef.current) {
+      skipNextAutosaveRef.current = false;
+      return;
+    }
+    if (!isAwbDraftWorthKeeping(form)) return;
+
+    setDraftUiStatus("saving");
+    const timer = window.setTimeout(() => {
+      const draft = buildCurrentDraft();
+      const snapshot = JSON.stringify({
+        form: draft.form,
+        editing: draft.editing,
+        activeTab: draft.activeTab,
+        piecesDraft: draft.piecesDraft,
+        chargeDraft: draft.chargeDraft,
+        proformaDraft: draft.proformaDraft,
+        vendorChargeDraft: draft.vendorChargeDraft,
+      });
+      if (snapshot === lastDraftSnapshotRef.current) {
+        setDraftUiStatus(draftSavedAt ? "saved" : "idle");
+        return;
+      }
+      void persistAwbDraft({ draft, syncRemote: authed })
+        .then(() => {
+          lastDraftSnapshotRef.current = snapshot;
+          setDraftSavedAt(draft.savedAt);
+          setDraftUiStatus("saved");
+        })
+        .catch(() => setDraftUiStatus("error"));
+    }, AWB_DRAFT_AUTOSAVE_MS);
+
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- debounce on form chrome + payload only
+  }, [
+    form,
+    piecesDraft,
+    chargeDraft,
+    proformaDraft,
+    vendorChargeDraft,
+    activeTab,
+    editing?.id,
+    editing?.rowVersion,
+    showForm,
+    isReadOnly,
+    userKey,
+    authed,
+  ]);
+
+  useEffect(() => {
+    if (navBlocker.status === "blocked") {
+      setLeaveSource("nav");
+      setLeavePromptOpen(true);
+    }
+  }, [navBlocker.status]);
+
   const openAdd = () => {
+    const existing = restoreDraft ?? readLocalAwbDraft(userKey);
+    if (existing && isAwbDraftWorthKeeping(existing.form)) {
+      setRestoreDraft(existing);
+      return;
+    }
     setEditing(null);
     setForm(applyFormSetupRepeats(emptyForm()));
     setRatingSummary(null);
@@ -1448,10 +1699,13 @@ function AwbEntryPage() {
     setKycSearchInput("");
     setBookingErrors([]);
     setActiveTab("awb");
+    setDraftUiStatus("idle");
+    setDraftSavedAt(null);
     setShowForm(true);
   };
 
   const openEdit = async (row: AwbRow) => {
+    setRestoreDraft(null);
     if (authed) {
       try {
         const full = (liveQuery.data?.rows ?? []).find((r) => r.id === row.id);
@@ -1531,6 +1785,58 @@ function AwbEntryPage() {
     setRatingSummary(null);
     setBookingErrors([]);
     setActiveTab("awb");
+    setPiecesDraft(emptyPiecesDraft());
+    setChargeDraft(emptyChargeDraft());
+    setProformaDraft(emptyProformaDraft());
+    setVendorChargeDraft(emptyVendorChargeDraft());
+  };
+
+  const requestCloseForm = () => {
+    if (isReadOnly || !isAwbDraftWorthKeeping(form)) {
+      allowLeaveRef.current = true;
+      closeForm();
+      return;
+    }
+    setLeaveSource("close");
+    setLeavePromptOpen(true);
+  };
+
+  const finishLeavePrompt = async (mode: "continue" | "save" | "discard") => {
+    if (mode === "continue") {
+      setLeavePromptOpen(false);
+      if (leaveSource === "nav") navBlocker.reset?.();
+      return;
+    }
+
+    if (mode === "save") {
+      const draft = buildCurrentDraft();
+      if (isAwbDraftWorthKeeping(draft.form)) {
+        await persistAwbDraft({ draft, syncRemote: authed });
+        setDraftSavedAt(draft.savedAt);
+        setDraftUiStatus("saved");
+      }
+    } else {
+      await clearDraftState();
+    }
+
+    setLeavePromptOpen(false);
+    allowLeaveRef.current = true;
+    if (leaveSource === "nav") {
+      navBlocker.proceed?.();
+    } else {
+      closeForm();
+    }
+  };
+
+  const handleRestoreContinue = () => {
+    if (!restoreDraft) return;
+    applyDraftPayload(restoreDraft);
+    setRestoreDraft(null);
+  };
+
+  const handleRestoreStartNew = async () => {
+    await clearDraftState();
+    setRestoreDraft(null);
   };
 
   const handleSave = async () => {
@@ -1596,6 +1902,8 @@ function AwbEntryPage() {
         await refreshLive();
         toast.success(editing ? "AWB entry updated" : `AWB ${saved.awb_no} saved (DRAFT)`);
         setLastSavedForm({ ...payload, awbNo: saved.awb_no || payload.awbNo });
+        allowLeaveRef.current = true;
+        await clearDraftState();
         closeForm();
       } catch (e) {
         toast.error(toErrorMessage(e));
@@ -1621,6 +1929,8 @@ function AwbEntryPage() {
       toast.success("AWB entry saved");
     }
     setLastSavedForm(payload);
+    allowLeaveRef.current = true;
+    await clearDraftState();
     closeForm();
   };
 
@@ -1700,6 +2010,8 @@ function AwbEntryPage() {
         }
         await refreshLive();
         setLastSavedForm({ ...payload, awbNo: booked.awb_no || payload.awbNo });
+        allowLeaveRef.current = true;
+        await clearDraftState();
         closeForm();
       } catch (e) {
         const msg = toErrorMessage(e);
@@ -1727,6 +2039,8 @@ function AwbEntryPage() {
     }
     toast.success(`AWB ${payload.awbNo} booked`);
     setLastSavedForm(payload);
+    allowLeaveRef.current = true;
+    await clearDraftState();
     closeForm();
   };
 
@@ -2189,6 +2503,34 @@ function AwbEntryPage() {
               </TabsList>
               <TooltipProvider delayDuration={200}>
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  {!isReadOnly ? (
+                    <div
+                      className="mr-1 flex items-center gap-1.5 text-xs text-muted-foreground"
+                      aria-live="polite"
+                    >
+                      {draftUiStatus === "saving" ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : draftUiStatus === "saved" ? (
+                        <>
+                          <Check className="h-3.5 w-3.5 text-emerald-600" />
+                          <span className="text-emerald-700 dark:text-emerald-400">Draft Saved</span>
+                          {draftSavedAt ? (
+                            <span className="text-muted-foreground">
+                              · Last saved: {formatDraftSavedAt(draftSavedAt)}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : draftUiStatus === "error" ? (
+                        <>
+                          <Cloud className="h-3.5 w-3.5" />
+                          <span>Draft save failed (kept locally if possible)</span>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <IconButton label="Form Setup" onClick={openFormSetup}>
                     <Settings className="h-4 w-4" />
                   </IconButton>
@@ -2996,7 +3338,7 @@ function AwbEntryPage() {
                   onBook={handleBook}
                   onCancelShipment={() => editing && setCancelShipmentTarget(editing)}
                   onNext={goNextTab}
-                  onCancel={closeForm}
+                  onCancel={requestCloseForm}
                 />
               </div>
             </TabsContent>
@@ -3343,7 +3685,7 @@ function AwbEntryPage() {
                     onBook={handleBook}
                     onCancelShipment={() => editing && setCancelShipmentTarget(editing)}
                     onNext={goNextTab}
-                    onCancel={closeForm}
+                    onCancel={requestCloseForm}
                   />
                 </div>
               </div>
@@ -3636,7 +3978,7 @@ function AwbEntryPage() {
                     onBook={handleBook}
                     onCancelShipment={() => editing && setCancelShipmentTarget(editing)}
                     onNext={goNextTab}
-                    onCancel={closeForm}
+                    onCancel={requestCloseForm}
                   />
                 </div>
               </div>
@@ -3800,7 +4142,7 @@ function AwbEntryPage() {
                     onSave={handleSave}
                     onBook={handleBook}
                     onCancelShipment={() => editing && setCancelShipmentTarget(editing)}
-                    onCancel={closeForm}
+                    onCancel={requestCloseForm}
                   />
                 </div>
               </div>
@@ -3927,7 +4269,10 @@ function AwbEntryPage() {
                         { key: "destination", header: "Destination" },
                         { key: "product", header: "Product" },
                         { key: "vendor", header: "Vendor" },
-                        { key: "weight", header: "Weight" },
+                        { key: "actualWeight", header: "Actual Weight" },
+                        { key: "chargeWeight", header: "Charge Weight" },
+                        { key: "pieces", header: "Pieces" },
+                        { key: "deliveryVendor", header: "Delivery Vendor" },
                       ],
                       getRows: () =>
                         filtered.map((r) => {
@@ -3942,7 +4287,10 @@ function AwbEntryPage() {
                             destination: d.destination,
                             product: d.product,
                             vendor: d.vendor,
-                            weight: d.weight,
+                            actualWeight: d.actualWeight,
+                            chargeWeight: d.chargeWeight,
+                            pieces: d.pieces,
+                            deliveryVendor: d.deliveryVendor,
                           };
                         }),
                     }}
@@ -3996,7 +4344,7 @@ function AwbEntryPage() {
               <table className="w-max min-w-full caption-bottom text-sm">
                 <TableHeader>
                   <TableRow className="bg-sidebar hover:bg-sidebar">
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.awbNo)}>
+                    <TableHead className={cn("text-sidebar-foreground", awbCol.awbNoHead)}>
                       AWB No
                     </TableHead>
                     <TableHead className={cn("text-sidebar-foreground", awbCol.bookDate)}>
@@ -4023,8 +4371,17 @@ function AwbEntryPage() {
                     <TableHead className={cn("text-sidebar-foreground", awbCol.vendor)}>
                       Vendor
                     </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.weight)}>
-                      Weight
+                    <TableHead className={cn("text-sidebar-foreground", awbCol.actualWeight)}>
+                      Actual Weight
+                    </TableHead>
+                    <TableHead className={cn("text-sidebar-foreground", awbCol.chargeWeight)}>
+                      Charge Weight
+                    </TableHead>
+                    <TableHead className={cn("text-sidebar-foreground", awbCol.pieces)}>
+                      Pieces
+                    </TableHead>
+                    <TableHead className={cn("text-sidebar-foreground", awbCol.deliveryVendor)}>
+                      Delivery Vendor
                     </TableHead>
                     <TableHead className={cn("text-sidebar-foreground", awbCol.action)}>
                       Action
@@ -4033,7 +4390,7 @@ function AwbEntryPage() {
                   <TableRow className="bg-muted/20 hover:bg-muted/20">
                     {(
                       [
-                        ["awbNo", "AWB No", awbCol.awbNo],
+                        ["awbNo", "AWB No", awbCol.awbNoFilter],
                         ["bookDate", "Book Date", awbCol.bookDate],
                         ["shipperName", "Shipper Name", awbCol.shipperName],
                         ["customerCode", "Customer Code", awbCol.customerCode],
@@ -4042,7 +4399,10 @@ function AwbEntryPage() {
                         ["destination", "Destination", awbCol.destination],
                         ["product", "Product", awbCol.product],
                         ["vendor", "Vendor", awbCol.vendor],
-                        ["weight", "Weight", awbCol.weight],
+                        ["actualWeight", "Actual Weight", awbCol.actualWeight],
+                        ["chargeWeight", "Charge Weight", awbCol.chargeWeight],
+                        ["pieces", "Pieces", awbCol.pieces],
+                        ["deliveryVendor", "Delivery Vendor", awbCol.deliveryVendor],
                       ] as const
                     ).map(([key, placeholder, colClass]) => (
                       <TableHead key={key} className={cn("py-2", colClass)}>
@@ -4057,14 +4417,14 @@ function AwbEntryPage() {
                         />
                       </TableHead>
                     ))}
-                    <TableHead className={awbCol.action} />
+                    <TableHead className={awbCol.actionFilter} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pageRows.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={11}
+                        colSpan={14}
                         className="h-32 text-center text-sm text-muted-foreground"
                       >
                         No data available in table
@@ -4108,7 +4468,10 @@ function AwbEntryPage() {
                           <TableCell className={awbCol.destination}>{d.destination}</TableCell>
                           <TableCell className={awbCol.product}>{d.product}</TableCell>
                           <TableCell className={awbCol.vendor}>{d.vendor}</TableCell>
-                          <TableCell className={awbCol.weight}>{d.weight}</TableCell>
+                          <TableCell className={awbCol.actualWeight}>{d.actualWeight}</TableCell>
+                          <TableCell className={awbCol.chargeWeight}>{d.chargeWeight}</TableCell>
+                          <TableCell className={awbCol.pieces}>{d.pieces}</TableCell>
+                          <TableCell className={awbCol.deliveryVendor}>{d.deliveryVendor}</TableCell>
                           <TableCell className={awbCol.actionCell}>
                             <div className="flex justify-center">
                               <Button
@@ -4141,6 +4504,55 @@ function AwbEntryPage() {
           </Card>
         </>
       )}
+
+      <AlertDialog open={!!restoreDraft && !showForm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>An unsaved AWB draft was found.</AlertDialogTitle>
+            <AlertDialogDescription>
+              Continue editing to restore every field from your last unfinished entry, or start a
+              new entry and discard the draft.
+              {restoreDraft?.savedAt
+                ? ` Last saved ${formatDraftSavedAt(restoreDraft.savedAt)}.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button type="button" variant="outline" onClick={() => void handleRestoreStartNew()}>
+              Start New Entry
+            </Button>
+            <Button type="button" onClick={handleRestoreContinue}>
+              Continue Editing
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={leavePromptOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>You have an unfinished AWB entry.</AlertDialogTitle>
+            <AlertDialogDescription>
+              Choose how to handle your current AWB Entry before leaving.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => void finishLeavePrompt("continue")}>
+              Continue Editing
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void finishLeavePrompt("save")}>
+              Save Draft & Leave
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void finishLeavePrompt("discard")}
+            >
+              Discard Changes
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>

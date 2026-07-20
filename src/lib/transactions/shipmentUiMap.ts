@@ -119,7 +119,11 @@ export type UiShipmentListRow = {
   destination: string;
   product: string;
   vendor: string;
-  weight: string;
+  actualWeight: string;
+  chargeWeight: string;
+  pieces: string;
+  /** Delivery AWB / tracking id (CourierWala "Delivery Vendor" column), else vendor code. */
+  deliveryVendor: string;
   forwardingNo: string;
   deliveryNo: string;
   referenceNo: string;
@@ -129,6 +133,12 @@ export type UiShipmentListRow = {
   carrierBookingStatus?: string;
   carrierLabelFileId?: string;
 };
+
+function formatListWeight(value: number | string | null | undefined): string {
+  if (value == null || value === "") return "";
+  const n = typeof value === "number" ? value : Number.parseFloat(String(value));
+  return Number.isFinite(n) ? n.toFixed(3) : String(value);
+}
 
 function partyToJson(p: PartyDetails): Record<string, unknown> {
   return {
@@ -192,6 +202,12 @@ export function uiFormToShipmentPayload(form: AwbLiveForm): {
   charges: ShipmentChargeInput[];
 } {
   const piecesUnit = form.piecesUnit.trim().toUpperCase();
+  const forwarding = (form.forwarding ?? {}) as {
+    deliveryVendor?: LookupPair;
+    deliveryAwb?: string;
+    forwardingAwb?: string;
+  };
+  const deliveryVendor = forwarding.deliveryVendor ?? { code: "", name: "" };
   const fields: ShipmentFields = {
     customer_id: form.clientName.id || null,
     customer_code: form.clientName.code.trim() || null,
@@ -203,8 +219,8 @@ export function uiFormToShipmentPayload(form: AwbLiveForm): {
     destination_code: form.consignee.origin.code.trim() || null,
     vendor_id: form.vendor.id || null,
     vendor_code: form.vendor.code.trim() || null,
-    delivery_vendor_id: null,
-    delivery_vendor_code: null,
+    delivery_vendor_id: deliveryVendor.id || null,
+    delivery_vendor_code: deliveryVendor.code.trim() || null,
     field_executive_id: form.fieldExecutive.id || null,
     field_executive_code: form.fieldExecutive.code.trim() || null,
     branch_id: null,
@@ -235,8 +251,9 @@ export function uiFormToShipmentPayload(form: AwbLiveForm): {
     amount_received: form.amountReceived.trim() || null,
     balance_amount: form.balanceAmount.trim() || null,
     cash_receipt_date: form.cashReceiptDate.trim() || null,
-    forwarding_awb: form.forwardingNo.trim() || null,
-    delivery_awb: form.deliveryNo.trim() || null,
+    forwarding_awb:
+      form.forwardingNo.trim() || forwarding.forwardingAwb?.trim() || null,
+    delivery_awb: form.deliveryNo.trim() || forwarding.deliveryAwb?.trim() || null,
     return_awb: null,
     delivery_service: null,
     flight_no: form.flightNo.trim() || null,
@@ -284,6 +301,8 @@ export function uiFormToShipmentPayload(form: AwbLiveForm): {
 export function dbShipmentToListRow(row: ShipmentDbRow): UiShipmentListRow {
   const shipper = (row.shipper ?? {}) as Record<string, unknown>;
   const consignee = (row.consignee ?? {}) as Record<string, unknown>;
+  const deliveryVendorCode = row.delivery_vendor?.code?.trim() || "";
+  const deliveryAwb = row.delivery_awb?.trim() || "";
   return {
     id: row.id,
     rowVersion: row.row_version,
@@ -298,9 +317,12 @@ export function dbShipmentToListRow(row: ShipmentDbRow): UiShipmentListRow {
     destination: row.destination?.name ?? row.destination?.code ?? "",
     product: row.products?.code ?? "",
     vendor: row.vendors?.code ?? "",
-    weight: String(row.charge_weight ?? row.actual_weight ?? ""),
+    actualWeight: formatListWeight(row.actual_weight),
+    chargeWeight: formatListWeight(row.charge_weight),
+    pieces: String(row.pieces ?? ""),
+    deliveryVendor: deliveryAwb || deliveryVendorCode,
     forwardingNo: row.forwarding_awb ?? "",
-    deliveryNo: row.delivery_awb ?? "",
+    deliveryNo: deliveryAwb,
     referenceNo: row.reference_no ?? "",
     carrierProviderCode: row.carrier_provider_code ?? undefined,
     carrierBookingRef: row.carrier_booking_ref ?? undefined,
@@ -324,6 +346,10 @@ export function dbShipmentToFormPatch(
   carrierLabelFileId?: string;
 } {
   const extras = (row.wizard_extras ?? {}) as Record<string, unknown>;
+  const forwardingExtra =
+    extras.forwarding && typeof extras.forwarding === "object"
+      ? (extras.forwarding as Record<string, unknown>)
+      : {};
   return {
     id: row.id,
     rowVersion: row.row_version,
@@ -421,7 +447,16 @@ export function dbShipmentToFormPatch(
       chargesType: c.charges_type,
     })),
     proforma: extras.proforma,
-    forwarding: extras.forwarding,
+    forwarding: {
+      ...forwardingExtra,
+      deliveryAwb: row.delivery_awb ?? String(forwardingExtra.deliveryAwb ?? ""),
+      forwardingAwb: row.forwarding_awb ?? String(forwardingExtra.forwardingAwb ?? ""),
+      deliveryVendor: {
+        id: row.delivery_vendor_id ?? undefined,
+        code: row.delivery_vendor?.code ?? "",
+        name: row.delivery_vendor?.name ?? "",
+      },
+    },
     kyc: extras.kyc,
   };
 }
