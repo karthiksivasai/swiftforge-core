@@ -483,7 +483,7 @@ const KYC_TYPES = [
 
 const CUSTOMER_TYPES = ["Customer", "Vendor", "Agent"];
 const REGISTER_TYPES = ["B2B", "B2C"];
-const PAYMENT_TYPES = ["Credit", "Cash", "Cheque"];
+const PAYMENT_TYPES = ["Cash", "Cheque", "Credit", "To Pay"];
 const BILLING_TYPES = ["Select Billing Type", "Weekly", "Monthly", "Fortnightly"];
 const FIRMS = ["Select Firm", "Govt", "Non Govt"];
 const SHIPPER_TYPES = ["Select Lsp Type", "Individual", "Company"];

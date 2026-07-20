@@ -63,6 +63,11 @@ import type { LookupKey } from "@/lib/master-lookups";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
 import { rememberPartiesAfterAwbSave } from "@/lib/transactions/resources/partyContacts";
+import {
+  clientProfileToAwbHydrate,
+  loadClientProfile,
+  type ClientProfile,
+} from "@/lib/transactions/resources/clientProfile";
 import { listVendorServices } from "@/lib/transactions/resources/vendorServices";
 import {
   AWB_DRAFT_AUTOSAVE_MS,
@@ -627,6 +632,7 @@ const AWB_FORM_SETUP_COLUMNS = [
     { key: "destinationRepeat", label: "Destination Repeat" },
     { key: "shipperDetailsRepeat", label: "Shipper Details Repeat" },
     { key: "consigneeNotRequired", label: "Consignee Not Required" },
+    { key: "allowPaymentTypeOverride", label: "Allow Payment Type Override" },
   ],
 ] as const;
 
@@ -649,6 +655,7 @@ const defaultAwbFormSetup = (): AwbFormSetupSettings => ({
   destinationRepeat: false,
   shipperDetailsRepeat: false,
   consigneeNotRequired: false,
+  allowPaymentTypeOverride: true,
 });
 
 const ENTRY_TYPES = ["Duplicate Entry"] as const;
@@ -1221,6 +1228,9 @@ function AwbEntryPage() {
   const [saving, setSaving] = useState(false);
   const [bookingErrors, setBookingErrors] = useState<string[]>([]);
   const [cancelShipmentTarget, setCancelShipmentTarget] = useState<AwbRow | null>(null);
+  const [clientLoading, setClientLoading] = useState(false);
+  const [loadedClientProfile, setLoadedClientProfile] = useState<ClientProfile | null>(null);
+  const clientLoadSeqRef = useRef(0);
 
   type DraftUiStatus = "idle" | "saving" | "saved" | "error";
   const [draftUiStatus, setDraftUiStatus] = useState<DraftUiStatus>("idle");
@@ -1701,11 +1711,15 @@ function AwbEntryPage() {
     setActiveTab("awb");
     setDraftUiStatus("idle");
     setDraftSavedAt(null);
+    setLoadedClientProfile(null);
+    setClientLoading(false);
     setShowForm(true);
   };
 
   const openEdit = async (row: AwbRow) => {
     setRestoreDraft(null);
+    setLoadedClientProfile(null);
+    setClientLoading(false);
     if (authed) {
       try {
         const full = (liveQuery.data?.rows ?? []).find((r) => r.id === row.id);
@@ -1789,6 +1803,8 @@ function AwbEntryPage() {
     setChargeDraft(emptyChargeDraft());
     setProformaDraft(emptyProformaDraft());
     setVendorChargeDraft(emptyVendorChargeDraft());
+    setLoadedClientProfile(null);
+    setClientLoading(false);
   };
 
   const requestCloseForm = () => {
@@ -2478,6 +2494,69 @@ function AwbEntryPage() {
     setForm((f) => ({ ...f, [side]: { ...f[side], ...patch } }));
   };
 
+  const handleClientChange = async (v: LookupPair) => {
+    const cleared = !v.id && !v.code.trim() && !v.name.trim();
+    if (cleared) {
+      clientLoadSeqRef.current += 1;
+      setLoadedClientProfile(null);
+      setClientLoading(false);
+      setForm((f) => ({ ...f, clientName: emptyPair(), paymentType: "" }));
+      return;
+    }
+
+    setForm((f) => ({ ...f, clientName: v }));
+
+    if (!authed) return;
+
+    const seq = ++clientLoadSeqRef.current;
+    setClientLoading(true);
+    try {
+      const profile = await loadClientProfile({ id: v.id, code: v.code, name: v.name });
+      if (seq !== clientLoadSeqRef.current) return;
+      if (!profile) {
+        setLoadedClientProfile(null);
+        toast.error("Client profile not found");
+        return;
+      }
+
+      const hydrate = clientProfileToAwbHydrate(profile);
+      setLoadedClientProfile(profile);
+      setForm((f) => ({
+        ...f,
+        clientName: hydrate.clientName,
+        paymentType: hydrate.paymentType,
+        instruction: hydrate.instruction || f.instruction,
+        shipmentCurrency: profile.defaults.currency || f.shipmentCurrency,
+        fieldExecutive: hydrate.fieldExecutive.code
+          ? hydrate.fieldExecutive
+          : f.fieldExecutive,
+        shipper: {
+          ...f.shipper,
+          ...hydrate.shipper,
+          origin: f.shipper.origin.code.trim() ? f.shipper.origin : DEFAULT_SHIPPER_ORIGIN,
+        },
+        proforma: {
+          ...(f.proforma ?? emptyProforma()),
+          currency: profile.defaults.currency || f.proforma?.currency || "INR",
+        },
+      }));
+
+      if (hydrate.paymentTypeMissing) {
+        toast.warning("No default payment type configured for this client.");
+      }
+    } catch (e) {
+      if (seq !== clientLoadSeqRef.current) return;
+      toast.error(toErrorMessage(e, "Failed to load client profile"));
+    } finally {
+      if (seq === clientLoadSeqRef.current) setClientLoading(false);
+    }
+  };
+
+  const paymentTypeReadOnly =
+    !formSetupSettings.allowPaymentTypeOverride &&
+    Boolean(form.clientName.id || form.clientName.code.trim()) &&
+    Boolean(form.paymentType);
+
   return (
     <div className="flex w-full min-w-0 flex-col gap-5 px-4 py-6 md:px-8 md:py-8">
       <MasterBreadcrumb trail={["Transaction", showForm ? "AWB Entry" : "AWB Entry List"]} />
@@ -2636,11 +2715,21 @@ function AwbEntryPage() {
                       />
                     </FieldWrapper>
                     <FieldWrapper label="Client Name" required>
-                      <LookupPairInput
-                        lookup="customer"
-                        value={form.clientName}
-                        onChange={(v) => setForm((f) => ({ ...f, clientName: v }))}
-                      />
+                      <div className="space-y-1">
+                        <LookupPairInput
+                          lookup="customer"
+                          value={form.clientName}
+                          onChange={(v) => void handleClientChange(v)}
+                          disabled={clientLoading}
+                        />
+                        {clientLoading ? (
+                          <p className="text-xs text-muted-foreground">Loading client profile…</p>
+                        ) : loadedClientProfile?.paymentType ? (
+                          <p className="text-xs text-muted-foreground">
+                            Payment Type from Client Master: {loadedClientProfile.paymentType}
+                          </p>
+                        ) : null}
+                      </div>
                     </FieldWrapper>
                   </div>
 
@@ -3148,6 +3237,7 @@ function AwbEntryPage() {
                         <Select
                           value={form.paymentType || undefined}
                           onValueChange={(v) => setForm((f) => ({ ...f, paymentType: v }))}
+                          disabled={isReadOnly || paymentTypeReadOnly || clientLoading}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select" />
@@ -3160,6 +3250,12 @@ function AwbEntryPage() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {paymentTypeReadOnly ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Locked to Client Master. Enable “Allow Payment Type Override” in Form
+                            Setup to edit.
+                          </p>
+                        ) : null}
                       </FieldWrapper>
                       <FieldWrapper label="Content">
                         <Input
@@ -5043,10 +5139,14 @@ function LookupPairInput({
   value,
   onChange,
   lookup,
+  disabled,
 }: {
   value: LookupPair;
   onChange: (v: LookupPair) => void;
   lookup: LookupKey;
+  disabled?: boolean;
 }) {
-  return <SearchableLookupPair value={value} onChange={onChange} lookup={lookup} />;
+  return (
+    <SearchableLookupPair value={value} onChange={onChange} lookup={lookup} disabled={disabled} />
+  );
 }
