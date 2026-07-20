@@ -82,7 +82,7 @@ import {
   CHARGE_TYPES,
   CALC_BASES,
 } from "@/lib/masters/schemas/charges";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type ChargeType = (typeof CHARGE_TYPES)[number];
@@ -634,13 +634,17 @@ function ChargesMasterPage() {
   };
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    try {
     if (authed) {
       const importRows = mapCsvToImportRows(
         parsedRows,
         chargesResource.importColumns,
       ) as ImportRow[];
       const res = await rc.commitImport.mutateAsync(importRows);
-      toast.success(importSummary(res));
+      const toastRes = formatImportToast(res);
+      if (toastRes.ok) toast.success(toastRes.message);
+      else toast.error(toastRes.message);
+      void queryClient.invalidateQueries({ queryKey: masterKeys.all(chargesResource.key) });
       return;
     }
     const yesNo = (v?: string) => /^(yes|true|1)$/i.test((v || "").trim());
@@ -681,6 +685,9 @@ function ChargesMasterPage() {
     }
     setDemoRows((prev) => [...imported, ...prev]);
     toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
   };
 
   const handleRefresh = () => {

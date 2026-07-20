@@ -40,3 +40,5 @@ supabase/.env
 *.njsproj
 *.sln
 *.sw?
+.vercel
+.env*

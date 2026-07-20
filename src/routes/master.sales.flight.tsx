@@ -67,7 +67,7 @@ import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
 import type { CsvRecord } from "@/lib/masters/core/csv";
 import { flightsResource, type FlightRow as FlightDbRow } from "@/lib/masters/resources/flights";
 import { flightCreateSchema, flightUpdateSchema } from "@/lib/masters/schemas/flights";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type FlightType = "Prime" | "GCR";
@@ -274,7 +274,10 @@ function FlightPage() {
           flightsResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(flightsResource.key) });
         return;
       }
       const imported: FlightRow[] = [];

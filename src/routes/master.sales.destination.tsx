@@ -62,6 +62,8 @@ import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
 import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   destinationsResource,
+  DESTINATION_IMPORT_HEADER_ALIASES,
+  importDestinationsChunked,
   type DestinationRow as DestinationDbRow,
 } from "@/lib/masters/resources/destinations";
 import {
@@ -72,7 +74,7 @@ import {
   useMasterList,
   useBranchOptions,
   toErrorMessage,
-  importSummary,
+  formatImportToast,
 } from "@/lib/masters/screen";
 import { LookupCombobox, EntityCombobox } from "@/components/masters/lookup-combobox";
 import {
@@ -306,14 +308,17 @@ function getPageItems(current: number, total: number): (number | "…")[] {
 }
 
 function rowToView(r: DestinationDbRow & Record<string, unknown>): Destination {
+  const countryCode = (r.country_code as string | null) ?? "";
+  const stateCode = (r.state_code as string | null) ?? "";
   return {
     id: r.id,
     type: DB_TO_TYPE[r.dest_type] ?? "Domestic",
     code: r.code,
     name: r.name,
-    country: (r.country_name as string) ?? "",
+    // Prefer master name when linked; otherwise show free-text code from import.
+    country: ((r.country_name as string) || countryCode) ?? "",
     countryId: r.country_id ?? "",
-    state: (r.state_name as string) ?? "",
+    state: ((r.state_name as string) || stateCode) ?? "",
     stateId: r.state_id ?? "",
     zone: (r.zone_name as string) ?? "",
     zoneId: r.zone_id ?? "",
@@ -413,6 +418,9 @@ function DestinationPage() {
       country_id: isLocal ? null : f.countryId || null,
       state_id: isInternational ? null : f.stateId || null,
       zone_id: f.zoneId || null,
+      // Persist free-text codes (e.g. CD) when not linked to State/Country masters.
+      country_code: isLocal || f.countryId ? null : f.country.trim() || null,
+      state_code: isInternational || f.stateId ? null : f.state.trim() || null,
       service_type: f.type === "Domestic" ? f.serviceType || null : null,
       main_branch_id: f.mainBranchId || null,
       manifest_branch_id: f.manifestBranchId || null,
@@ -535,40 +543,61 @@ function DestinationPage() {
   };
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
-    if (authed) {
-      const importRows = mapCsvToImportRows(
-        parsedRows,
-        destinationsResource.importColumns,
-      ).map((rec) => ({
-        ...rec,
-        dest_type: rec.dest_type?.trim() || TYPE_TO_DB[type],
-      })) as ImportRow[];
-      const res = await rc.commitImport.mutateAsync(importRows);
-      toast.success(importSummary(res));
-      return;
+    try {
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsedRows,
+          destinationsResource.importColumns,
+          { aliases: DESTINATION_IMPORT_HEADER_ALIASES },
+        ).map((rec) => {
+          const statusRaw = (rec.status || "").trim();
+          const serviceRaw = (rec.service_type || "").replace(/\u00a0/g, "").trim();
+          return {
+            ...rec,
+            dest_type: rec.dest_type?.trim() || TYPE_TO_DB[type],
+            country_code: (rec.country_code || "").trim().toUpperCase(),
+            state_code: (rec.state_code || "").trim().toUpperCase(),
+            service_type: serviceRaw,
+            status: statusRaw
+              ? statusRaw.toUpperCase().replace(/IN-ACTIVE/gi, "INACTIVE").replace(/-/g, "")
+              : "ACTIVE",
+          };
+        }) as ImportRow[];
+        // Soft import: State/Country codes are stored on the destination even if
+        // those masters do not contain the same code (no auto-create, no block).
+        const res = await importDestinationsChunked("COMMIT", importRows);
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(destinationsResource.key) });
+        return;
+      }
+      const imported: Destination[] = [];
+      for (const rec of mapCsvToImportRows(parsedRows, destinationsResource.importColumns, {
+        aliases: DESTINATION_IMPORT_HEADER_ALIASES,
+      })) {
+        if (!rec.code?.trim()) continue;
+        const status = (rec.status || "").trim();
+        imported.push({
+          id: crypto.randomUUID(),
+          type,
+          code: rec.code.trim(),
+          name: (rec.name || "").trim(),
+          country: (rec.country_code || "").trim(),
+          state: (rec.state_code || "").trim(),
+          serviceType: (rec.service_type || "").replace(/\u00a0/g, "").trim(),
+          status: /in-?active/i.test(status) ? "In-Active" : "Active",
+        });
+      }
+      if (imported.length === 0) {
+        toast.error("No valid rows found");
+        return;
+      }
+      setRows((prev) => [...imported, ...prev]);
+      toast.success(`Imported ${imported.length} destination${imported.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
-    const imported: Destination[] = [];
-    for (const rec of parsedRows) {
-      const code = (rec["Destination Code"] ?? rec["code"] ?? "").trim();
-      if (!code) continue;
-      const status = (rec["Status"] ?? rec["status"] ?? "").trim();
-      imported.push({
-        id: crypto.randomUUID(),
-        type,
-        code,
-        name: (rec["Destination Name"] ?? rec["name"] ?? "").trim(),
-        country: (rec["Country"] ?? rec["country_code"] ?? "").trim(),
-        state: (rec["State"] ?? rec["state_code"] ?? "").trim(),
-        serviceType: (rec["Service Type"] ?? rec["service_type"] ?? "").trim(),
-        status: status === "In-Active" ? "In-Active" : "Active",
-      });
-    }
-    if (imported.length === 0) {
-      toast.error("No valid rows found");
-      return;
-    }
-    setRows((prev) => [...imported, ...prev]);
-    toast.success(`Imported ${imported.length} destination${imported.length === 1 ? "" : "s"}`);
   };
 
   const handleRefresh = () => {

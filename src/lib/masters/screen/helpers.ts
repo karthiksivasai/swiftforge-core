@@ -17,3 +17,24 @@ export function importSummary(res: { ok: number; skipped: number; error_count: n
   if (res.error_count) parts.push(`${res.error_count} error${res.error_count === 1 ? "" : "s"}`);
   return parts.join(", ");
 }
+
+type ImportResultLike = {
+  ok: number;
+  skipped: number;
+  error_count: number;
+  errors?: ReadonlyArray<{ row_no: number; message: string }>;
+};
+
+/** Success toast, or error toast with up to 3 sample row messages. */
+export function formatImportToast(res: ImportResultLike): {
+  ok: boolean;
+  message: string;
+} {
+  const summary = importSummary(res);
+  if (res.error_count <= 0) return { ok: true, message: summary };
+  const sample = (res.errors ?? [])
+    .slice(0, 3)
+    .map((err) => `Row ${err.row_no}: ${err.message}`)
+    .join("; ");
+  return { ok: false, message: sample ? `${summary} — ${sample}` : summary };
+}

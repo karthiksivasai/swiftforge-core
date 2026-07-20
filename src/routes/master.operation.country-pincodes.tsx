@@ -50,7 +50,7 @@ import {
   countryPincodeCreateSchema,
   countryPincodeUpdateSchema,
 } from "@/lib/masters/schemas/countryPincodes";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { LookupCombobox } from "@/components/masters/lookup-combobox";
 
 type CountryPincodeRow = {
@@ -411,7 +411,10 @@ function CountryPincodesPage() {
           countryPincodesResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(countryPincodesResource.key) });
         return;
       }
       const imported: CountryPincodeRow[] = [];

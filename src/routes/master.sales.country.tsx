@@ -65,9 +65,13 @@ import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
 import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
 import type { CsvRecord } from "@/lib/masters/core/csv";
-import { countriesResource, type CountryRow } from "@/lib/masters/resources/countries";
+import {
+  countriesResource,
+  COUNTRY_IMPORT_HEADER_ALIASES,
+  type CountryRow,
+} from "@/lib/masters/resources/countries";
 import { countryCreateSchema, countryUpdateSchema } from "@/lib/masters/schemas/countries";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type WeightUnit = "Kgs" | "Lbs";
@@ -673,34 +677,46 @@ function CountryPage() {
   };
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
-    if (authed) {
-      const importRows = mapCsvToImportRows(
-        parsedRows,
-        countriesResource.importColumns,
-      ) as ImportRow[];
-      const res = await rc.commitImport.mutateAsync(importRows);
-      toast.success(importSummary(res));
-      return;
+    try {
+      if (authed) {
+        const importRows = mapCsvToImportRows(
+          parsedRows,
+          countriesResource.importColumns,
+          { aliases: COUNTRY_IMPORT_HEADER_ALIASES },
+        ) as ImportRow[];
+        const res = await rc.commitImport.mutateAsync(importRows);
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({
+          queryKey: masterKeys.all(countriesResource.key),
+        });
+        return;
+      }
+      const imported: Country[] = [];
+      for (const rec of mapCsvToImportRows(parsedRows, countriesResource.importColumns, {
+        aliases: COUNTRY_IMPORT_HEADER_ALIASES,
+      })) {
+        if (!rec.code?.trim()) continue;
+        const wu = rec.weight_unit?.trim().toUpperCase();
+        imported.push({
+          id: crypto.randomUUID(),
+          code: rec.code.trim(),
+          name: (rec.name || "").trim(),
+          weightUnit: wu === "KGS" ? "Kgs" : wu === "LBS" ? "Lbs" : "",
+          currency: (rec.currency || "").trim(),
+          isdCode: (rec.isd_code || "").trim(),
+        });
+      }
+      if (imported.length === 0) {
+        toast.error("No valid rows found");
+        return;
+      }
+      setDemoRows((prev) => [...imported, ...prev]);
+      toast.success(`Imported ${imported.length} countr${imported.length === 1 ? "y" : "ies"}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
-    const imported: Country[] = [];
-    for (const rec of mapCsvToImportRows(parsedRows, countriesResource.importColumns)) {
-      if (!rec.code?.trim()) continue;
-      const wu = rec.weight_unit?.trim().toUpperCase();
-      imported.push({
-        id: crypto.randomUUID(),
-        code: rec.code.trim(),
-        name: (rec.name || "").trim(),
-        weightUnit: wu === "KGS" ? "Kgs" : wu === "LBS" ? "Lbs" : "",
-        currency: (rec.currency || "").trim(),
-        isdCode: (rec.isd_code || "").trim(),
-      });
-    }
-    if (imported.length === 0) {
-      toast.error("No valid rows found");
-      return;
-    }
-    setDemoRows((prev) => [...imported, ...prev]);
-    toast.success(`Imported ${imported.length} countr${imported.length === 1 ? "y" : "ies"}`);
   };
 
   const handleRefresh = () => {

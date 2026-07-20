@@ -72,7 +72,7 @@ import {
   vendorContractsResource,
 } from "@/lib/masters/resources/vendorContracts";
 import { vendorContractCreateSchema } from "@/lib/masters/schemas/vendorContracts";
-import { toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import {
   dbVendorContractToUi,
   slabsToDraftRates,
@@ -457,7 +457,10 @@ function VendorContractPage() {
           vendorContractsResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(vendorContractsResource.key) });
         return;
       }
       toast.info("Import will be enabled with backend wiring");

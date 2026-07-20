@@ -64,7 +64,7 @@ import {
   serviceCenterCreateSchema,
   serviceCenterUpdateSchema,
 } from "@/lib/masters/schemas/serviceCenters";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type ServiceCentre = {
@@ -412,13 +412,19 @@ function ServiceCentrePage() {
   }
 
   async function handleImportRows(parsedRows: CsvRecord[]) {
+    try {
     if (authed) {
       const importRows = mapCsvToImportRows(
         parsedRows,
         serviceCentersResource.importColumns,
       ) as ImportRow[];
       const res = await rc.commitImport.mutateAsync(importRows);
-      toast.success(importSummary(res));
+      const toastRes = formatImportToast(res);
+      if (toastRes.ok) toast.success(toastRes.message);
+      else toast.error(toastRes.message);
+      void queryClient.invalidateQueries({
+        queryKey: masterKeys.all(serviceCentersResource.key),
+      });
       return;
     }
 
@@ -439,6 +445,9 @@ function ServiceCentrePage() {
     }
     setDemoRows((prev) => [...parsed, ...prev]);
     toast.success(`Imported ${parsed.length} rows`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
   }
 
   function handleRefresh() {

@@ -113,6 +113,67 @@ describe("mapCsvToImportRows", () => {
       { code: "DOX", name: "Documents", product_type_code: "Domestic" },
     ]);
   });
+
+  it("maps CourierWala 'X Code' / 'X Name' headers onto code/name without aliases", () => {
+    expect(
+      mapCsvToImportRows(
+        [{ "Country Code": "IN", "Country Name": "India", "Weight Unit": "KGS", Currency: "INR" }],
+        ["code", "name", "weight_unit", "currency"],
+      ),
+    ).toEqual([
+      { code: "IN", name: "India", weight_unit: "KGS", currency: "INR" },
+    ]);
+    expect(
+      mapCsvToImportRows(
+        [{ "Zone Code": "1", "Zone Name": "INTERNATIONAL ZONE 1" }],
+        ["code", "name"],
+      ),
+    ).toEqual([{ code: "1", name: "INTERNATIONAL ZONE 1" }]);
+  });
+
+  it("keeps Zone Code on zone_code when both code and zone_code are import columns", () => {
+    const rows = mapCsvToImportRows(
+      [{ "State Code": "TS", "State Name": "Telangana", "Zone Code": "1" }],
+      ["code", "name", "zone_code"],
+    );
+    expect(rows).toEqual([{ code: "TS", name: "Telangana", zone_code: "1" }]);
+  });
+
+  it("maps short labels onto *_code columns via prefix (Country → country_code)", () => {
+    const rows = mapCsvToImportRows(
+      [
+        {
+          "Destination Code": "HYD",
+          "Destination Name": "Hyderabad",
+          Country: "IN",
+          State: "TS",
+          "Service Type": "REGULAR",
+          Status: "Active",
+        },
+      ],
+      ["code", "name", "country_code", "state_code", "service_type", "status"],
+    );
+    expect(rows).toEqual([
+      {
+        code: "HYD",
+        name: "Hyderabad",
+        country_code: "IN",
+        state_code: "TS",
+        service_type: "REGULAR",
+        status: "Active",
+      },
+    ]);
+  });
+
+  it("maps Product Type onto product_type_code via prefix without aliases", () => {
+    const rows = mapCsvToImportRows(
+      [{ "Product Code": "DOX", "Product Name": "Documents", "Product Type": "International" }],
+      ["code", "name", "product_type_code"],
+    );
+    expect(rows).toEqual([
+      { code: "DOX", name: "Documents", product_type_code: "International" },
+    ]);
+  });
 });
 
 describe("csvTemplate", () => {

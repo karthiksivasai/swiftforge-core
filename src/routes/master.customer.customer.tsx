@@ -82,6 +82,8 @@ import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
 import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   customersResource,
+  CUSTOMER_IMPORT_HEADER_ALIASES,
+  normalizeCustomerImportRow,
   fetchCustomerChildren,
   saveCustomer,
   type CustomerRow as CustomerDbRow,
@@ -92,7 +94,7 @@ import {
   uiCustomerToSavePayload,
   type UiCustomerRow,
 } from "@/lib/masters/customerUiMap";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 
 // ---------- Types ----------
 type CustomerStatus = "Active" | "In-Active";
@@ -725,9 +727,15 @@ function CustomerPage() {
         const importRows = mapCsvToImportRows(
           parsedRows,
           customersResource.importColumns,
+          { aliases: CUSTOMER_IMPORT_HEADER_ALIASES },
+        ).map((rec, i) =>
+          normalizeCustomerImportRow(rec, parsedRows[i]),
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(customersResource.key) });
         return;
       }
       toast.success(`Selected ${file.name}`);

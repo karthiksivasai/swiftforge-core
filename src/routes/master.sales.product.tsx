@@ -77,7 +77,7 @@ import {
 } from "@/lib/masters/resources/products";
 import { productTypesResource } from "@/lib/masters/resources/productTypes";
 import { productCreateSchema, productUpdateSchema } from "@/lib/masters/schemas/products";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type ProductType = CanonicalProductTypeName;
@@ -531,6 +531,7 @@ function ProductPage() {
   };
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    try {
     if (authed) {
       await supabase.rpc("ensure_canonical_product_types");
       const importRows = mapCsvToImportRows(parsedRows, productsResource.importColumns, {
@@ -549,16 +550,9 @@ function ProductPage() {
         };
       }) as ImportRow[];
       const res = await rc.commitImport.mutateAsync(importRows);
-      const summary = importSummary(res);
-      if (res.error_count > 0) {
-        const sample = res.errors
-          .slice(0, 3)
-          .map((err) => `Row ${err.row_no}: ${err.message}`)
-          .join("; ");
-        toast.error(sample ? `${summary} — ${sample}` : summary);
-      } else {
-        toast.success(summary);
-      }
+      const toastRes = formatImportToast(res);
+      if (toastRes.ok) toast.success(toastRes.message);
+      else toast.error(toastRes.message);
       void queryClient.invalidateQueries({ queryKey: masterKeys.all(productsResource.key) });
       return;
     }
@@ -603,6 +597,9 @@ function ProductPage() {
     }
     setDemoRows((prev) => [...imported, ...prev]);
     toast.success(`Imported ${imported.length} product${imported.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
   };
 
   const handleRefresh = () => {

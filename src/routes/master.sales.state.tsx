@@ -68,7 +68,7 @@ import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
 import type { CsvRecord } from "@/lib/masters/core/csv";
 import { statesResource, type StateRow as StateDbRow } from "@/lib/masters/resources/states";
 import { stateCreateSchema, stateUpdateSchema } from "@/lib/masters/schemas/states";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { LookupCombobox } from "@/components/masters/lookup-combobox";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 
@@ -323,13 +323,17 @@ function StatePage() {
   };
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    try {
     if (authed) {
       const importRows = mapCsvToImportRows(
         parsedRows,
         statesResource.importColumns,
       ) as ImportRow[];
       const res = await rc.commitImport.mutateAsync(importRows);
-      toast.success(importSummary(res));
+      const toastRes = formatImportToast(res);
+      if (toastRes.ok) toast.success(toastRes.message);
+      else toast.error(toastRes.message);
+      void queryClient.invalidateQueries({ queryKey: masterKeys.all(statesResource.key) });
       return;
     }
     const imported: StateRow[] = [];
@@ -350,6 +354,9 @@ function StatePage() {
     }
     setDemoRows((prev) => [...imported, ...prev]);
     toast.success(`Imported ${imported.length} state${imported.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
   };
 
   const handleRefresh = () => {

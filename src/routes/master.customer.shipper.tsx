@@ -63,7 +63,7 @@ import {
   type ShipperRow as ShipperDbRow,
 } from "@/lib/masters/resources/shippers";
 import { shipperCreateSchema, shipperUpdateSchema } from "@/lib/masters/schemas/shippers";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 
 type Status = "Active" | "In-Active";
 
@@ -302,7 +302,10 @@ function ShipperPage() {
           shippersResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(shippersResource.key) });
         return;
       }
       const imported: ShipperRow[] = [];

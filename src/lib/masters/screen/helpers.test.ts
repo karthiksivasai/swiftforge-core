@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 
-import { toErrorMessage, importSummary } from "./helpers";
+import { toErrorMessage, importSummary, formatImportToast } from "./helpers";
 
 describe("toErrorMessage", () => {
   it("surfaces the first Zod issue message", () => {
@@ -31,5 +31,31 @@ describe("importSummary", () => {
       "Imported 3, skipped 2, 1 error",
     );
     expect(importSummary({ ok: 10, skipped: 0, error_count: 4 })).toBe("Imported 10, 4 errors");
+  });
+});
+
+describe("formatImportToast", () => {
+  it("returns success when there are no errors", () => {
+    expect(formatImportToast({ ok: 5, skipped: 0, error_count: 0 })).toEqual({
+      ok: true,
+      message: "Imported 5",
+    });
+  });
+
+  it("includes sample row errors when present", () => {
+    expect(
+      formatImportToast({
+        ok: 0,
+        skipped: 0,
+        error_count: 2,
+        errors: [
+          { row_no: 1, message: "Code is required" },
+          { row_no: 2, message: "Name is required" },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      message: "Imported 0, 2 errors — Row 1: Code is required; Row 2: Name is required",
+    });
   });
 });

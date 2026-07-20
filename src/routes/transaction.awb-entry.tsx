@@ -55,6 +55,7 @@ import {
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useLookup, type LookupKey as LiveLookupKey } from "@/lib/masters/core/lookup";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
 import {
@@ -83,6 +84,18 @@ import { getCarrierAdapter } from "@/lib/integrations/adapter";
 import { normalizeVendorToCarrierCode, SUPPORTED_CARRIER_CODES } from "@/lib/integrations/carriers";
 
 type LookupPair = { id?: string; code: string; name: string };
+
+/** Demo master-lookups keys → live `public.lookup` RPC keys when signed in. */
+const DEMO_TO_LIVE_LOOKUP: Partial<Record<LookupKey, LiveLookupKey>> = {
+  customer: "customer",
+  destination: "destination",
+  shipper: "shipper",
+  product: "product",
+  vendor: "vendor",
+  fieldExecutive: "field-executive",
+  salesExecutive: "sales-executive",
+  area: "area",
+};
 
 type PartyDetails = {
   origin: LookupPair;
@@ -4509,19 +4522,26 @@ function LookupPairInput({
   onChange: (v: LookupPair) => void;
   lookup: LookupKey;
 }) {
+  const { isAuthenticated: live } = useAuth();
   const [lookupOpen, setLookupOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const liveKey = DEMO_TO_LIVE_LOOKUP[lookup];
+  const { data: liveRows, isFetching } = useLookup(liveKey ?? "branch", query, {
+    enabled: live && lookupOpen && Boolean(liveKey),
+  });
+
   return (
     <>
       <div className="flex gap-1">
         <Input
           value={value.code}
-          onChange={(e) => onChange({ ...value, code: e.target.value })}
+          onChange={(e) => onChange({ ...value, id: undefined, code: e.target.value })}
           className="w-20"
           placeholder="Code"
         />
         <Input
           value={value.name}
-          onChange={(e) => onChange({ ...value, name: e.target.value })}
+          onChange={(e) => onChange({ ...value, id: undefined, name: e.target.value })}
           className="min-w-0 flex-1"
           placeholder="Name"
         />
@@ -4535,13 +4555,57 @@ function LookupPairInput({
           <Search className="h-4 w-4" />
         </Button>
       </div>
-      <MasterLookupDialog
-        open={lookupOpen}
-        onOpenChange={setLookupOpen}
-        lookup={lookup}
-        returnField="code"
-        onSelect={(_v, option: LookupOption) => onChange({ code: option.code, name: option.name })}
-      />
+      {live && liveKey ? (
+        <Dialog
+          open={lookupOpen}
+          onOpenChange={(o) => {
+            setLookupOpen(o);
+            if (!o) setQuery("");
+          }}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogTitle className="text-base font-semibold">
+              Select {MASTER_LOOKUPS[lookup]?.title?.replace(/^Select\s+/i, "") ?? lookup}
+            </DialogTitle>
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by code or name…"
+              className="mb-2"
+            />
+            <div className="max-h-72 overflow-auto rounded border">
+              {(liveRows ?? []).map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted/50"
+                  onClick={() => {
+                    onChange({ id: row.id, code: row.code, name: row.name });
+                    setLookupOpen(false);
+                    setQuery("");
+                  }}
+                >
+                  <span className="font-medium">{row.name}</span>
+                  <span className="text-muted-foreground">{row.code}</span>
+                </button>
+              ))}
+              {!isFetching && (liveRows ?? []).length === 0 && (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground">No matches</div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <MasterLookupDialog
+          open={lookupOpen}
+          onOpenChange={setLookupOpen}
+          lookup={lookup}
+          returnField="code"
+          onSelect={(_v, option: LookupOption) =>
+            onChange({ code: option.code, name: option.name })
+          }
+        />
+      )}
     </>
   );
 }

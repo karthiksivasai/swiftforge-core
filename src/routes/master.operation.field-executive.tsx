@@ -59,7 +59,7 @@ import {
   fieldExecutiveCreateSchema,
   fieldExecutiveUpdateSchema,
 } from "@/lib/masters/schemas/fieldExecutives";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { LookupCombobox } from "@/components/masters/lookup-combobox";
 
 type LookupPair = { code: string; name: string };
@@ -460,13 +460,17 @@ function FieldExecutivePage() {
   };
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    try {
     if (authed) {
       const importRows = mapCsvToImportRows(
         parsedRows,
         fieldExecutivesResource.importColumns,
       ) as ImportRow[];
       const res = await rc.commitImport.mutateAsync(importRows);
-      toast.success(importSummary(res));
+      const toastRes = formatImportToast(res);
+      if (toastRes.ok) toast.success(toastRes.message);
+      else toast.error(toastRes.message);
+      void queryClient.invalidateQueries({ queryKey: masterKeys.all(fieldExecutivesResource.key) });
       return;
     }
 
@@ -507,6 +511,9 @@ function FieldExecutivePage() {
     }
     setDemoRows((prev) => [...imported, ...prev]);
     toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
   };
 
   const handleRefresh = () => {

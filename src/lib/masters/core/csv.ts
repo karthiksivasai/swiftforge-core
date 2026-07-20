@@ -124,11 +124,69 @@ export function toCsv(
   return [header, ...lines].join("\r\n");
 }
 
+/** Normalize CSV/import headers: case-insensitive, ignore spaces/underscores/punctuation. */
+export function normalizeImportHeader(s: string): string {
+  return s.toLowerCase().replace(/[\s_./-]+/g, "");
+}
+
+/**
+ * Resolve one import column from a normalized header→value map.
+ *
+ * Match order:
+ * 1. Exact column / explicit alias (e.g. product_type_code ← "Product Type" alias)
+ * 2. Unique suffix (e.g. code ← "Country Code" / "Zone Code", while zone_code
+ *    still claims "Zone Code" via exact match on another column)
+ * 3. Unique longest prefix (e.g. product_type_code ← "Product Type")
+ */
+function resolveImportValue(
+  col: string,
+  byNormalized: Map<string, string>,
+  aliasKeys: readonly string[],
+  importColumns: readonly string[],
+): string {
+  for (const key of aliasKeys) {
+    if (byNormalized.has(key)) return byNormalized.get(key) ?? "";
+  }
+
+  const colNorm = normalizeImportHeader(col);
+  const otherExact = new Set(
+    importColumns.filter((c) => c !== col).map((c) => normalizeImportHeader(c)),
+  );
+  // Headers that already equal another import column stay reserved for that column.
+  const reserved = new Set<string>([...otherExact].filter((h) => byNormalized.has(h)));
+
+  const suffixHits = [...byNormalized.keys()].filter(
+    (h) => h !== colNorm && h.endsWith(colNorm) && !reserved.has(h),
+  );
+  if (suffixHits.length === 1) return byNormalized.get(suffixHits[0]) ?? "";
+  if (suffixHits.length > 1) {
+    const minLen = Math.min(...suffixHits.map((h) => h.length));
+    const shortest = suffixHits.filter((h) => h.length === minLen);
+    if (shortest.length === 1) return byNormalized.get(shortest[0]) ?? "";
+  }
+
+  const prefixHits = [...byNormalized.keys()].filter(
+    (h) => h.length > 0 && h !== colNorm && colNorm.startsWith(h) && !reserved.has(h),
+  );
+  if (prefixHits.length >= 1) {
+    const maxLen = Math.max(...prefixHits.map((h) => h.length));
+    const longest = prefixHits.filter((h) => h.length === maxLen);
+    if (longest.length === 1) return byNormalized.get(longest[0]) ?? "";
+  }
+
+  return "";
+}
+
 /**
  * Reshape parsed CSV records to the exact keys an import expects, dropping
  * unknown columns and filling absent ones with "". Header matching is
  * case-insensitive and ignores spaces/underscores so "Zone Code", "zone_code",
  * and "ZONECODE" all map to the `zone_code` import key.
+ *
+ * Also maps CourierWala-style labels onto short keys without per-screen aliases:
+ * "Country Code" → `code`, "Destination Name" → `name`, "Product Type" →
+ * `product_type_code` (prefix), while "Zone Code" still maps to `zone_code`
+ * when that column is present.
  *
  * Optional `aliases` map alternate header labels onto an import column
  * (e.g. `{ code: ["Product Code"] }` so exported UI CSVs re-import cleanly).
@@ -138,29 +196,28 @@ export function mapCsvToImportRows(
   importColumns: readonly string[],
   opts?: { aliases?: Readonly<Record<string, readonly string[]>> },
 ): CsvRecord[] {
-  const normalize = (s: string) => s.toLowerCase().replace(/[\s_]+/g, "");
   const aliasKeys = new Map<string, string[]>();
   for (const col of importColumns) {
-    const keys = [normalize(col)];
+    const keys = [normalizeImportHeader(col)];
     for (const a of opts?.aliases?.[col] ?? []) {
-      const n = normalize(a);
+      const n = normalizeImportHeader(a);
       if (n && !keys.includes(n)) keys.push(n);
     }
     aliasKeys.set(col, keys);
   }
   return rows.map((rec) => {
     const byNormalized = new Map<string, string>();
-    for (const [k, v] of Object.entries(rec)) byNormalized.set(normalize(k), v);
+    for (const [k, v] of Object.entries(rec)) {
+      byNormalized.set(normalizeImportHeader(k), v);
+    }
     const out: CsvRecord = {};
     for (const col of importColumns) {
-      let value = "";
-      for (const key of aliasKeys.get(col) ?? [normalize(col)]) {
-        if (byNormalized.has(key)) {
-          value = byNormalized.get(key) ?? "";
-          break;
-        }
-      }
-      out[col] = value;
+      out[col] = resolveImportValue(
+        col,
+        byNormalized,
+        aliasKeys.get(col) ?? [normalizeImportHeader(col)],
+        importColumns,
+      );
     }
     return out;
   });

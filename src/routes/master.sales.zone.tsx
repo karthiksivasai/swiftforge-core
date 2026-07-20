@@ -58,9 +58,13 @@ import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
 import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
 import type { CsvRecord } from "@/lib/masters/core/csv";
-import { zonesResource, type ZoneRow } from "@/lib/masters/resources/zones";
+import {
+  zonesResource,
+  ZONE_IMPORT_HEADER_ALIASES,
+  type ZoneRow,
+} from "@/lib/masters/resources/zones";
 import { zoneCreateSchema, zoneUpdateSchema } from "@/lib/masters/schemas/zones";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type Zone = {
@@ -240,13 +244,19 @@ function ZonePage() {
         const importRows = mapCsvToImportRows(
           parsedRows,
           zonesResource.importColumns,
+          { aliases: ZONE_IMPORT_HEADER_ALIASES },
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(zonesResource.key) });
         return;
       }
       const imported: Zone[] = [];
-      for (const rec of mapCsvToImportRows(parsedRows, zonesResource.importColumns)) {
+      for (const rec of mapCsvToImportRows(parsedRows, zonesResource.importColumns, {
+        aliases: ZONE_IMPORT_HEADER_ALIASES,
+      })) {
         if (!rec.code?.trim()) continue;
         imported.push({
           id: crypto.randomUUID(),

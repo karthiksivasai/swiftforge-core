@@ -48,7 +48,7 @@ import {
   type AirlineRow as AirlineDbRow,
 } from "@/lib/masters/resources/airlines";
 import { airlineCreateSchema, airlineUpdateSchema } from "@/lib/masters/schemas/airlines";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { LookupCombobox } from "@/components/masters/lookup-combobox";
 
 type LookupPair = { code: string; name: string };
@@ -258,13 +258,17 @@ function AirlinePage() {
   };
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    try {
     if (authed) {
       const importRows = mapCsvToImportRows(
         parsedRows,
         airlinesResource.importColumns,
       ) as ImportRow[];
       const res = await rc.commitImport.mutateAsync(importRows);
-      toast.success(importSummary(res));
+      const toastRes = formatImportToast(res);
+      if (toastRes.ok) toast.success(toastRes.message);
+      else toast.error(toastRes.message);
+      void queryClient.invalidateQueries({ queryKey: masterKeys.all(airlinesResource.key) });
       return;
     }
 
@@ -285,6 +289,9 @@ function AirlinePage() {
     }
     setDemoRows((prev) => [...imported, ...prev]);
     toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
   };
 
   const handleRefresh = () => {

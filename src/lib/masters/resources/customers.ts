@@ -105,6 +105,114 @@ export const customersResource: MasterResource<CustomerRow, CustomerCreate, Cust
   updateSchema: customerUpdateSchema,
 };
 
+/** UI / CourierWala-style headers → import_master column keys. */
+export const CUSTOMER_IMPORT_HEADER_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  code: ["Customer Code", "Cust Code", "CustCode", "customercode"],
+  name: ["Customer Name", "Cust Name", "Company Name", "customername"],
+  branch: ["Branch Name", "Branch Code"],
+  contact_person: ["Contact", "Contact Person", "Contact Name"],
+  phone: [
+    "Phone No",
+    "Tel",
+    "Telephone",
+    "Phone Number",
+    "Tel1",
+    "Tel 1",
+    "Landline",
+    // CourierWala Customerlist.xlsx
+    "customer_tel1",
+    "customer_tel2",
+    "customer_phone",
+    "customer_mobile",
+  ],
+  email: [
+    "E-Mail",
+    "Email Id",
+    "Email ID",
+    "customer_e_mail",
+    "customer_email",
+    "customeremail",
+  ],
+  mobile: [
+    "Mobile No",
+    "Mobile Number",
+    "Mobile No.",
+    "Cell",
+    "Cell No",
+    "GSM",
+    "Phone",
+    "Phone No",
+    "Tel",
+    "Telephone",
+    "Tel1",
+    "Tel 1",
+    // CourierWala Customerlist.xlsx — tel lives here, not in a Mobile column
+    "customer_tel1",
+    "customer_tel2",
+    "customer_phone",
+    "customer_mobile",
+  ],
+  contract_head: ["Contract", "Contract Head Name"],
+  service_center_code: [
+    "Service Centre",
+    "Service Center",
+    "Service Centre Code",
+    "Service Center Code",
+  ],
+  status: ["Active", "Customer Status", "CustomerStatus"],
+};
+
+function looksLikePhone(value: string): boolean {
+  const digits = value.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 15;
+}
+
+/** Pull a phone-like value from any raw sheet column (tel1, customer_tel1, etc.). */
+export function pickPhoneFromRawRow(raw: Record<string, string>): string {
+  const entries = Object.entries(raw);
+  const preferred = entries.filter(([k]) => {
+    const n = k.toLowerCase().replace(/[\s_]+/g, "");
+    return /(tel\d*|telephone|phone|mobile|cell|gsm)/.test(n) && !/(person|name|email)/.test(n);
+  });
+  for (const [, v] of preferred) {
+    const t = (v ?? "").trim();
+    if (t && looksLikePhone(t)) return t;
+    if (t) return t;
+  }
+  for (const [, v] of entries) {
+    const t = (v ?? "").trim();
+    if (t && looksLikePhone(t)) return t;
+  }
+  return "";
+}
+
+/**
+ * CourierWala sheets often have customer_tel1 / Phone but blank Mobile.
+ * Backend requires mobile NOT NULL — fill from any phone-like field before import.
+ * Rows with no phone at all get a placeholder so legacy lists still import.
+ */
+export const CUSTOMER_IMPORT_DEFAULT_MOBILE = "0000000000";
+
+export function normalizeCustomerImportRow(
+  row: Record<string, string>,
+  raw?: Record<string, string>,
+): Record<string, string> {
+  const fromRaw = raw ? pickPhoneFromRawRow(raw) : "";
+  const phone = (row.phone ?? "").trim() || fromRaw;
+  const mobile =
+    (row.mobile ?? "").trim() || phone || fromRaw || CUSTOMER_IMPORT_DEFAULT_MOBILE;
+  const statusRaw = (row.status ?? "").trim();
+  const status = statusRaw
+    ? statusRaw.toUpperCase().replace(/IN-ACTIVE/gi, "INACTIVE").replace(/-/g, "")
+    : "ACTIVE";
+  return {
+    ...row,
+    phone: phone || mobile,
+    mobile,
+    status: status === "INACTIVE" ? "INACTIVE" : "ACTIVE",
+  };
+}
+
 export type DbCustomerAddress = CustomerAddressInput & { seq: number };
 export type DbCustomerFuelSurcharge = CustomerFuelSurchargeInput & { seq: number };
 export type DbCustomerOtherCharge = CustomerOtherChargeInput & { seq: number };

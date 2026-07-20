@@ -6,10 +6,15 @@
  *
  * Backend persistence stays on existing RPCs (`import_master` / `import_excel`):
  * the client normalizes any supported file into the same row shape those RPCs expect.
+ *
+ * Excel *read* uses SheetJS (`xlsx`) — ExcelJS often throws
+ * "Cannot read properties of undefined (reading 'sheets')" on real-world
+ * workbooks in the browser. Excel *write* still uses ExcelJS.
  */
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 
 import { parseCsv, toCsv, type CsvParseResult, type CsvRecord } from "@/lib/masters/core/csv";
 
@@ -55,41 +60,54 @@ function isExcelFile(file: File): boolean {
   );
 }
 
+function matrixToCsvResult(matrix: string[][]): CsvParseResult {
+  const nonEmpty = matrix.filter((row) => row.some((c) => c.trim().length > 0));
+  if (nonEmpty.length === 0) return { headers: [], rows: [] };
+  const headers = nonEmpty[0].map((h) => h.trim());
+  if (headers.every((h) => !h)) return { headers: [], rows: [] };
+  const rows: CsvRecord[] = nonEmpty.slice(1).map((cells) => {
+    const rec: CsvRecord = {};
+    headers.forEach((h, idx) => {
+      if (!h) return;
+      rec[h] = (cells[idx] ?? "").trim();
+    });
+    return rec;
+  });
+  return { headers: headers.filter(Boolean), rows };
+}
+
+/** Parse Excel (.xlsx / .xls / SpreadsheetML) via SheetJS. */
+function parseExcelBuffer(buffer: ArrayBuffer): CsvParseResult {
+  let workbook: XLSX.WorkBook;
+  try {
+    workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: false });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Could not read Excel file (${msg}). Save as .xlsx or CSV and try again.`,
+    );
+  }
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return { headers: [], rows: [] };
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) return { headers: [], rows: [] };
+
+  const matrix = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(sheet, {
+    header: 1,
+    defval: "",
+    raw: false,
+    blankrows: false,
+  }) as (string | number | boolean | null)[][];
+
+  return matrixToCsvResult(
+    matrix.map((row) => row.map((cell) => (cell == null ? "" : String(cell).trim()))),
+  );
+}
+
 /** Parse CSV or Excel into the same header-keyed records used by master imports. */
 export async function parseTabularFile(file: File): Promise<CsvParseResult> {
   if (isExcelFile(file)) {
-    const buffer = await file.arrayBuffer();
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
-    const sheet = workbook.worksheets[0];
-    if (!sheet || sheet.rowCount < 1) return { headers: [], rows: [] };
-
-    const matrix: string[][] = [];
-    sheet.eachRow({ includeEmpty: false }, (row) => {
-      const cells: string[] = [];
-      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-        while (cells.length < colNumber - 1) cells.push("");
-        const text =
-          cell.text != null && String(cell.text).length
-            ? String(cell.text).trim()
-            : cell.value == null
-              ? ""
-              : String(cell.value).trim();
-        cells[colNumber - 1] = text;
-      });
-      if (cells.some((c) => c.length > 0)) matrix.push(cells);
-    });
-
-    if (matrix.length === 0) return { headers: [], rows: [] };
-    const headers = matrix[0].map((h) => h.trim());
-    const rows: CsvRecord[] = matrix.slice(1).map((cells) => {
-      const rec: CsvRecord = {};
-      headers.forEach((h, idx) => {
-        rec[h] = (cells[idx] ?? "").trim();
-      });
-      return rec;
-    });
-    return { headers, rows };
+    return parseExcelBuffer(await file.arrayBuffer());
   }
 
   const text = await file.text();

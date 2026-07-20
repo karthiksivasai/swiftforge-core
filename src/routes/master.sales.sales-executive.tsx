@@ -66,7 +66,7 @@ import {
   salesExecutiveCreateSchema,
   salesExecutiveUpdateSchema,
 } from "@/lib/masters/schemas/salesExecutives";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type SalesExecRow = {
@@ -242,7 +242,10 @@ function SalesExecutivePage() {
           salesExecutivesResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(salesExecutivesResource.key) });
         return;
       }
       const imported: SalesExecRow[] = [];

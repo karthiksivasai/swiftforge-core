@@ -53,7 +53,7 @@ import {
   useMasterList,
   useBranchOptions,
   toErrorMessage,
-  importSummary,
+  formatImportToast,
 } from "@/lib/masters/screen";
 import { LookupCombobox, EntityCombobox } from "@/components/masters/lookup-combobox";
 
@@ -380,7 +380,10 @@ function PinCodePage() {
           pincodesResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(pincodesResource.key) });
         return;
       }
       const yes = (v: string | undefined, def = false) => {

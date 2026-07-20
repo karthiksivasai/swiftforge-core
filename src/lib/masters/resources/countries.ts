@@ -32,3 +32,12 @@ export const countriesResource: MasterResource<CountryRow, CountryCreate, Countr
   createSchema: countryCreateSchema,
   updateSchema: countryUpdateSchema,
 };
+
+/** CourierWala / UI export headers → import_master column keys. */
+export const COUNTRY_IMPORT_HEADER_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  code: ["Country Code", "CountryCode", "ISO Code", "ISO"],
+  name: ["Country Name", "CountryName"],
+  weight_unit: ["Weight Unit", "WeightUnit", "Wt Unit", "Unit"],
+  currency: ["Currency Code", "CurrencyCode", "Curr"],
+  isd_code: ["ISD Code", "ISD", "Dial Code", "Country ISD"],
+};

@@ -51,7 +51,7 @@ import {
   deliveryExceptionCreateSchema,
   deliveryExceptionUpdateSchema,
 } from "@/lib/masters/schemas/deliveryExceptions";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 
 type ExceptionType = "Delivered" | "Un-Delivered";
 
@@ -575,13 +575,17 @@ function ExceptionPage() {
   };
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
+    try {
     if (authed) {
       const importRows = mapCsvToImportRows(
         parsedRows,
         deliveryExceptionsResource.importColumns,
       ) as ImportRow[];
       const res = await rc.commitImport.mutateAsync(importRows);
-      toast.success(importSummary(res));
+      const toastRes = formatImportToast(res);
+      if (toastRes.ok) toast.success(toastRes.message);
+      else toast.error(toastRes.message);
+      void queryClient.invalidateQueries({ queryKey: masterKeys.all(deliveryExceptionsResource.key) });
       return;
     }
     const imported: ExceptionRow[] = [];
@@ -603,6 +607,9 @@ function ExceptionPage() {
     }
     setDemoRows((prev) => [...imported, ...prev]);
     toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
   };
 
   const handleRefresh = () => {

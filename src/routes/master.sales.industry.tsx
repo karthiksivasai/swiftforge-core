@@ -63,7 +63,7 @@ import {
   type IndustryRow as IndustryDbRow,
 } from "@/lib/masters/resources/industries";
 import { industryCreateSchema, industryUpdateSchema } from "@/lib/masters/schemas/industries";
-import { useMasterList, toErrorMessage, importSummary } from "@/lib/masters/screen";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type IndustryRow = {
@@ -235,7 +235,10 @@ function IndustryPage() {
           industriesResource.importColumns,
         ) as ImportRow[];
         const res = await rc.commitImport.mutateAsync(importRows);
-        toast.success(importSummary(res));
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(industriesResource.key) });
         return;
       }
       const imported: IndustryRow[] = [];

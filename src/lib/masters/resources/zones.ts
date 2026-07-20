@@ -29,3 +29,9 @@ export const zonesResource: MasterResource<ZoneRow, ZoneCreate, ZoneUpdate> = {
   createSchema: zoneCreateSchema,
   updateSchema: zoneUpdateSchema,
 };
+
+/** CourierWala / UI export headers → import_master column keys. */
+export const ZONE_IMPORT_HEADER_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  code: ["Zone Code", "ZoneCode", "Zon Code"],
+  name: ["Zone Name", "ZoneName", "Zon Name"],
+};
