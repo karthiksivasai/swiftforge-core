@@ -49,6 +49,8 @@ export function VendorOtpDialog({
   open,
   busy,
   error,
+  shipperMobile,
+  sandboxOtp,
   onVerify,
   onResend,
   onCancel,
@@ -56,14 +58,18 @@ export function VendorOtpDialog({
   open: boolean;
   busy?: boolean;
   error?: string | null;
+  /** Masked or full shipper mobile shown in copy */
+  shipperMobile?: string | null;
+  /** Shown only when SMS is sandbox (no live phone delivery). */
+  sandboxOtp?: string | null;
   onVerify: (otp: string) => void;
   onResend: () => void;
   onCancel: () => void;
 }) {
   const [otp, setOtp] = useState("");
   useEffect(() => {
-    if (open) setOtp("");
-  }, [open]);
+    if (open) setOtp(sandboxOtp?.trim() || "");
+  }, [open, sandboxOtp]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !busy && onCancel()}>
@@ -71,10 +77,18 @@ export function VendorOtpDialog({
         <DialogHeader>
           <DialogTitle>Vendor Verification</DialogTitle>
           <DialogDescription>
-            An OTP has been sent to your registered mobile number.
+            {shipperMobile
+              ? `OTP is for shipper mobile ${shipperMobile}.`
+              : "OTP is for the shipper mobile number in Shipper details."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
+          {sandboxOtp ? (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              Live SMS is not configured. Sandbox OTP:{" "}
+              <span className="font-mono text-base font-semibold tracking-widest">{sandboxOtp}</span>
+            </div>
+          ) : null}
           <label className="text-sm font-medium">Enter OTP</label>
           <Input
             value={otp}

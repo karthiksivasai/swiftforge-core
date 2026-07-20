@@ -221,10 +221,7 @@ export const NAVIGATION: NavSection[] = [
     items: makeLeaves("/utility", [
       { label: "Serviceable Pincode", slug: "serviceable-pincode" },
       { label: "Notification", slug: "notification" },
-      { label: "Notification Setup", slug: "notification-setup" },
-      { label: "Notification Templates", slug: "notification-templates" },
       { label: "Integration Configuration", slug: "integration-configuration" },
-      { label: "Webhooks", slug: "webhooks" },
     ]),
     groups: [
       makeGroup("utility", {

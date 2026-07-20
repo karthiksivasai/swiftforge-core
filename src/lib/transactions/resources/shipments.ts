@@ -232,6 +232,50 @@ export async function listShipments(params?: {
   return { rows: (data ?? []) as unknown as ShipmentRow[], count: count ?? 0 };
 }
 
+export async function getShipmentById(id: string): Promise<ShipmentRow | null> {
+  const { data, error } = await supabase
+    .from("shipments")
+    .select(SHIPMENT_COLUMNS)
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throw translateDbError(error);
+  return (data as unknown as ShipmentRow) ?? null;
+}
+
+/** Resolve a previous booking by AWB / forwarding / delivery / reference no. */
+export async function findShipmentBySearch(args: {
+  query: string;
+  field?: "awb_no" | "forwarding_awb" | "delivery_awb" | "reference_no";
+}): Promise<ShipmentRow | null> {
+  const q = args.query.trim();
+  if (!q) return null;
+  const field = args.field ?? "awb_no";
+  const safe = q.replace(/[%,()]/g, " ");
+
+  // Prefer exact match first (CourierWala-style AWB lookup).
+  const exact = await supabase
+    .from("shipments")
+    .select(SHIPMENT_COLUMNS)
+    .is("deleted_at", null)
+    .eq(field, safe)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (exact.error) throw translateDbError(exact.error);
+  if (exact.data) return exact.data as unknown as ShipmentRow;
+
+  const { data, error } = await supabase
+    .from("shipments")
+    .select(SHIPMENT_COLUMNS)
+    .is("deleted_at", null)
+    .ilike(field, `%${safe}%`)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (error) throw translateDbError(error);
+  return ((data?.[0] as unknown as ShipmentRow) ?? null);
+}
+
 export async function fetchShipmentChildren(shipmentId: string): Promise<ShipmentChildren> {
   const [pieces, charges, comments, attachments] = await Promise.all([
     supabase

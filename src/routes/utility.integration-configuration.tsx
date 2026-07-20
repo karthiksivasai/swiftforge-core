@@ -62,7 +62,7 @@ const emptyForm = (): CredForm => ({
   api_secret: "",
   account_number: "",
   endpoint: "",
-  sandbox_mode: true,
+  sandbox_mode: false,
   is_active: true,
   remark: "",
 });
@@ -107,7 +107,7 @@ const DEMO_CREDS: IntegrationCredential[] = [
     has_api_secret: false,
     account_number: "ACC-DEMO",
     endpoint: "https://api.sandbox.example.com",
-    sandbox_mode: true,
+    sandbox_mode: false,
     is_active: true,
     remark: "Demo",
     row_version: 1,
@@ -190,6 +190,9 @@ function IntegrationConfigurationPage() {
   const selectedProvider = providers.find((p) => p.provider_code === form.provider_code);
   const isEinvoice = selectedProvider?.provider_type === "EINVOICE";
   const isCustoms = selectedProvider?.provider_type === "CUSTOMS";
+  const isMessaging = selectedProvider?.provider_type === "MESSAGING";
+  const isMsg91 = form.provider_code === "MSG91";
+  const isTwilio = form.provider_code === "TWILIO";
 
   const canAdd = !authed || canDo(permissions, VENDOR_AGGREGATE_PERMISSIONS.vendors, "add");
   const canModify = !authed || canDo(permissions, VENDOR_AGGREGATE_PERMISSIONS.vendors, "modify");
@@ -338,8 +341,21 @@ function IntegrationConfigurationPage() {
               ? "E-Invoice / IRN Credentials"
               : isCustoms
                 ? "Customs EDI Credentials"
-                : "Carrier Credentials"}
+                : isMessaging
+                  ? "SMS Messaging Credentials (OTP)"
+                  : "Carrier Credentials"}
           </span>
+          {isMessaging ? (
+            <p className="mb-3 text-xs text-muted-foreground">
+              Used to send vendor booking OTP to the shipper mobile. Turn{" "}
+              <span className="font-medium">Sandbox mode OFF</span> for live phone SMS.
+              {isMsg91
+                ? " MSG91: API Key = Authkey, Account = Sender ID, Endpoint = DLT/Flow template id."
+                : isTwilio
+                  ? " Twilio: Username = Account SID, Password = Auth Token, Account = From number."
+                  : ""}
+            </p>
+          ) : null}
           <div className="grid gap-3 md:grid-cols-2">
             <label className="flex flex-col gap-1 text-xs font-medium">
               Provider *
@@ -364,14 +380,22 @@ function IntegrationConfigurationPage() {
                           ? " · IRN"
                           : p.provider_type === "CUSTOMS"
                             ? " · EDI"
-                            : ""}
+                            : p.provider_type === "MESSAGING"
+                              ? " · SMS"
+                              : ""}
                       </SelectItem>
                     ))}
                 </SelectContent>
               </Select>
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium">
-              {isEinvoice ? "Username" : isCustoms ? "CHA Code" : "Username"}
+              {isTwilio
+                ? "Account SID"
+                : isEinvoice
+                  ? "Username"
+                  : isCustoms
+                    ? "CHA Code"
+                    : "Username"}
               <Input
                 value={form.username}
                 onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
@@ -379,7 +403,13 @@ function IntegrationConfigurationPage() {
               />
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium">
-              {hasPassword ? "Password (leave blank to keep)" : "Password"}
+              {hasPassword
+                ? isTwilio
+                  ? "Auth Token (leave blank to keep)"
+                  : "Password (leave blank to keep)"
+                : isTwilio
+                  ? "Auth Token"
+                  : "Password"}
               <Input
                 type="password"
                 value={form.password}
@@ -392,10 +422,14 @@ function IntegrationConfigurationPage() {
               {hasApiKey
                 ? isEinvoice
                   ? "Client ID (leave blank to keep)"
-                  : "API Key (leave blank to keep)"
+                  : isMsg91
+                    ? "Authkey (leave blank to keep)"
+                    : "API Key (leave blank to keep)"
                 : isEinvoice
                   ? "Client ID"
-                  : "API Key"}
+                  : isMsg91
+                    ? "Authkey"
+                    : "API Key"}
               <Input
                 type="password"
                 value={form.api_key}
@@ -421,7 +455,15 @@ function IntegrationConfigurationPage() {
               />
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium">
-              {isEinvoice ? "GSTIN" : isCustoms ? "IEC" : "Account number"}
+              {isMsg91
+                ? "Sender ID"
+                : isTwilio
+                  ? "From number (e.g. +1…)"
+                  : isEinvoice
+                    ? "GSTIN"
+                    : isCustoms
+                      ? "IEC"
+                      : "Account number"}
               <Input
                 value={form.account_number}
                 onChange={(e) => setForm((f) => ({ ...f, account_number: e.target.value }))}
@@ -429,12 +471,22 @@ function IntegrationConfigurationPage() {
               />
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium md:col-span-2">
-              {isCustoms ? "Export Directory" : "Endpoint"}
+              {isMsg91
+                ? "MSG91 Flow / Template ID (DLT)"
+                : isCustoms
+                  ? "Export Directory"
+                  : "Endpoint"}
               <Input
                 value={form.endpoint}
                 onChange={(e) => setForm((f) => ({ ...f, endpoint: e.target.value }))}
                 className="h-9"
-                placeholder={isCustoms ? "/exports/customs" : "https://api.sandbox.example.com"}
+                placeholder={
+                  isMsg91
+                    ? "MSG91 template / flow id"
+                    : isCustoms
+                      ? "/exports/customs"
+                      : "https://api.sandbox.example.com"
+                }
               />
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium md:col-span-2">
@@ -452,7 +504,7 @@ function IntegrationConfigurationPage() {
                   checked={form.sandbox_mode}
                   onCheckedChange={(c) => setForm((f) => ({ ...f, sandbox_mode: Boolean(c) }))}
                 />
-                Sandbox mode
+                {isMessaging ? "Sandbox mode (OFF = live SMS to phone)" : "Sandbox mode"}
               </label>
               <label className="flex items-center gap-2 text-xs">
                 <Checkbox
@@ -489,12 +541,8 @@ function IntegrationConfigurationPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Integration Configuration</h1>
         <p className="text-sm text-muted-foreground">
-          Carrier, vendor shipping gateway, e-invoice (IRN/GSP), and Customs EDI credentials.
-          Secrets are write-only.{" "}
-          <a href="/utility/webhooks" className="underline">
-            Configure outbound webhooks
-          </a>
-          .
+          Carrier, vendor shipping, SMS (MSG91/Twilio OTP), e-invoice (IRN/GSP), and Customs EDI
+          credentials. Secrets are write-only.
         </p>
       </div>
       <Card className="min-w-0 overflow-hidden border p-4 md:p-6">

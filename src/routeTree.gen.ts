@@ -13,10 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as DemoRouteImport } from './routes/demo'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as UtilityWebhooksRouteImport } from './routes/utility.webhooks'
 import { Route as UtilityServiceablePincodeRouteImport } from './routes/utility.serviceable-pincode'
-import { Route as UtilityNotificationTemplatesRouteImport } from './routes/utility.notification-templates'
-import { Route as UtilityNotificationSetupRouteImport } from './routes/utility.notification-setup'
 import { Route as UtilityNotificationRouteImport } from './routes/utility.notification'
 import { Route as UtilityIntegrationConfigurationRouteImport } from './routes/utility.integration-configuration'
 import { Route as UtilitySplatRouteImport } from './routes/utility.$'
@@ -124,27 +121,10 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const UtilityWebhooksRoute = UtilityWebhooksRouteImport.update({
-  id: '/utility/webhooks',
-  path: '/utility/webhooks',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const UtilityServiceablePincodeRoute =
   UtilityServiceablePincodeRouteImport.update({
     id: '/utility/serviceable-pincode',
     path: '/utility/serviceable-pincode',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityNotificationTemplatesRoute =
-  UtilityNotificationTemplatesRouteImport.update({
-    id: '/utility/notification-templates',
-    path: '/utility/notification-templates',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityNotificationSetupRoute =
-  UtilityNotificationSetupRouteImport.update({
-    id: '/utility/notification-setup',
-    path: '/utility/notification-setup',
     getParentRoute: () => rootRouteImport,
   } as any)
 const UtilityNotificationRoute = UtilityNotificationRouteImport.update({
@@ -650,10 +630,7 @@ export interface FileRoutesByFullPath {
   '/utility/$': typeof UtilitySplatRoute
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
-  '/utility/notification-setup': typeof UtilityNotificationSetupRoute
-  '/utility/notification-templates': typeof UtilityNotificationTemplatesRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
-  '/utility/webhooks': typeof UtilityWebhooksRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -746,10 +723,7 @@ export interface FileRoutesByTo {
   '/utility/$': typeof UtilitySplatRoute
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
-  '/utility/notification-setup': typeof UtilityNotificationSetupRoute
-  '/utility/notification-templates': typeof UtilityNotificationTemplatesRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
-  '/utility/webhooks': typeof UtilityWebhooksRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -843,10 +817,7 @@ export interface FileRoutesById {
   '/utility/$': typeof UtilitySplatRoute
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
-  '/utility/notification-setup': typeof UtilityNotificationSetupRoute
-  '/utility/notification-templates': typeof UtilityNotificationTemplatesRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
-  '/utility/webhooks': typeof UtilityWebhooksRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -941,10 +912,7 @@ export interface FileRouteTypes {
     | '/utility/$'
     | '/utility/integration-configuration'
     | '/utility/notification'
-    | '/utility/notification-setup'
-    | '/utility/notification-templates'
     | '/utility/serviceable-pincode'
-    | '/utility/webhooks'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -1037,10 +1005,7 @@ export interface FileRouteTypes {
     | '/utility/$'
     | '/utility/integration-configuration'
     | '/utility/notification'
-    | '/utility/notification-setup'
-    | '/utility/notification-templates'
     | '/utility/serviceable-pincode'
-    | '/utility/webhooks'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -1133,10 +1098,7 @@ export interface FileRouteTypes {
     | '/utility/$'
     | '/utility/integration-configuration'
     | '/utility/notification'
-    | '/utility/notification-setup'
-    | '/utility/notification-templates'
     | '/utility/serviceable-pincode'
-    | '/utility/webhooks'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -1230,10 +1192,7 @@ export interface RootRouteChildren {
   UtilitySplatRoute: typeof UtilitySplatRoute
   UtilityIntegrationConfigurationRoute: typeof UtilityIntegrationConfigurationRoute
   UtilityNotificationRoute: typeof UtilityNotificationRoute
-  UtilityNotificationSetupRoute: typeof UtilityNotificationSetupRoute
-  UtilityNotificationTemplatesRoute: typeof UtilityNotificationTemplatesRoute
   UtilityServiceablePincodeRoute: typeof UtilityServiceablePincodeRoute
-  UtilityWebhooksRoute: typeof UtilityWebhooksRoute
   MasterCustomerConsigneeRoute: typeof MasterCustomerConsigneeRoute
   MasterCustomerCustomerRoute: typeof MasterCustomerCustomerRoute
   MasterCustomerCustomerRateRoute: typeof MasterCustomerCustomerRateRoute
@@ -1328,32 +1287,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/webhooks': {
-      id: '/utility/webhooks'
-      path: '/utility/webhooks'
-      fullPath: '/utility/webhooks'
-      preLoaderRoute: typeof UtilityWebhooksRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/utility/serviceable-pincode': {
       id: '/utility/serviceable-pincode'
       path: '/utility/serviceable-pincode'
       fullPath: '/utility/serviceable-pincode'
       preLoaderRoute: typeof UtilityServiceablePincodeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/utility/notification-templates': {
-      id: '/utility/notification-templates'
-      path: '/utility/notification-templates'
-      fullPath: '/utility/notification-templates'
-      preLoaderRoute: typeof UtilityNotificationTemplatesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/utility/notification-setup': {
-      id: '/utility/notification-setup'
-      path: '/utility/notification-setup'
-      fullPath: '/utility/notification-setup'
-      preLoaderRoute: typeof UtilityNotificationSetupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/utility/notification': {
@@ -1990,10 +1928,7 @@ const rootRouteChildren: RootRouteChildren = {
   UtilitySplatRoute: UtilitySplatRoute,
   UtilityIntegrationConfigurationRoute: UtilityIntegrationConfigurationRoute,
   UtilityNotificationRoute: UtilityNotificationRoute,
-  UtilityNotificationSetupRoute: UtilityNotificationSetupRoute,
-  UtilityNotificationTemplatesRoute: UtilityNotificationTemplatesRoute,
   UtilityServiceablePincodeRoute: UtilityServiceablePincodeRoute,
-  UtilityWebhooksRoute: UtilityWebhooksRoute,
   MasterCustomerConsigneeRoute: MasterCustomerConsigneeRoute,
   MasterCustomerCustomerRoute: MasterCustomerCustomerRoute,
   MasterCustomerCustomerRateRoute: MasterCustomerCustomerRateRoute,

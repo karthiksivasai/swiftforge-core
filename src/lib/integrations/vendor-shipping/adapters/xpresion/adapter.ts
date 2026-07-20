@@ -10,26 +10,33 @@ const DEFAULT_ENDPOINT = "https://xpresion.courierwalaexpress.in/api/v1/Awbentry
 
 function docsFromParsed(parsed: ReturnType<typeof parseXpresionResponse>): VendorDocumentDescriptor[] {
   const docs: VendorDocumentDescriptor[] = [];
-  if (parsed.labelUrl || parsed.pdfUrl) {
+  if (parsed.authorityLetterUrl) {
     docs.push({
-      doc_type: "SHIPPING_LABEL",
-      label: "Shipping Label",
-      source_url: parsed.labelUrl || parsed.pdfUrl,
+      doc_type: "AUTHORITY_LETTER",
+      label: "Authority Letter",
+      source_url: parsed.authorityLetterUrl,
     });
   }
-  if (parsed.awb || parsed.forwardingNo) {
+  if (parsed.vendorAwbUrl || parsed.pdfUrl || parsed.awb || parsed.forwardingNo) {
     docs.push({
       doc_type: "VENDOR_AWB",
       label: "Vendor AWB",
-      source_url: parsed.pdfUrl,
+      source_url: parsed.vendorAwbUrl || parsed.pdfUrl,
       raw_meta: { awb: parsed.awb, forwardingNo: parsed.forwardingNo },
     });
   }
-  if (parsed.performaUrl) {
+  if (parsed.vendorInvoiceUrl || parsed.performaUrl) {
     docs.push({
-      doc_type: "COMMERCIAL_INVOICE",
-      label: "Commercial / Performa Invoice",
-      source_url: parsed.performaUrl,
+      doc_type: "VENDOR_INVOICE",
+      label: "Vendor Invoice",
+      source_url: parsed.vendorInvoiceUrl || parsed.performaUrl,
+    });
+  }
+  if (parsed.labelUrl || parsed.pdfUrl) {
+    docs.push({
+      doc_type: "SHIPPING_LABEL",
+      label: "AWB Label",
+      source_url: parsed.labelUrl || parsed.pdfUrl,
     });
   }
   if (parsed.boxLabelUrl) {
@@ -45,17 +52,19 @@ function docsFromParsed(parsed: ReturnType<typeof parseXpresionResponse>): Vendo
 /** Sandbox path when credentials missing or sandbox_mode — exercises OTP UX. */
 function sandboxBook(request: VendorBookRequest): VendorBookResult {
   const otp = (request.otp ?? "").trim();
+  const expected = (request.sandboxExpectedOtp ?? "").trim();
   const awbBase = String(request.context.shipment.awb_no ?? "SANDBOX");
   if (!otp) {
     return {
       status: "OTP_REQUIRED",
-      message: "An OTP has been sent to your registered mobile number.",
+      message: "An OTP has been sent to the shipper mobile number.",
       apiStatus: "OTP_REQUIRED",
       vendorProvider: "XPRESION",
       rawResponse: { Status: "OTP", Message: "OTP required (sandbox)" },
     };
   }
-  if (otp !== "123456" && otp.length < 4) {
+  const otpOk = expected ? otp === expected : otp === "123456";
+  if (!otpOk) {
     return {
       status: "ERROR",
       message: "Invalid OTP. Please try again.",
@@ -79,19 +88,9 @@ function sandboxBook(request: VendorBookRequest): VendorBookResult {
     labelGenerated: true,
     syncStatus: "OK",
     apiStatus: "VENDOR_BOOKED",
-    documents: [
-      {
-        doc_type: "VENDOR_AWB",
-        label: "Vendor AWB",
-        raw_meta: { sandbox: true, awb: vendorAwb },
-      },
-      {
-        doc_type: "SHIPPING_LABEL",
-        label: "Shipping Label",
-        raw_meta: { sandbox: true },
-      },
-    ],
-    rawResponse: { Status: "SUCCESS", AWBNo: vendorAwb, ForwardingNo: vendorAwb },
+    // No blank sandbox PDFs — Authority Letter / AWB Label / Invoice are app-generated.
+    documents: [],
+    rawResponse: { Status: "SUCCESS", AWBNo: vendorAwb, ForwardingNo: vendorAwb, sandbox: true },
   };
 }
 
@@ -101,15 +100,12 @@ export class XpresionAdapter implements VendorShippingAdapter {
 
   async book(request: VendorBookRequest): Promise<VendorBookResult> {
     const creds = request.credentials ?? {};
-    const sandbox =
-      creds.sandboxMode !== false &&
-      (!creds.username || !creds.password || !creds.endpointUrl?.includes("http"));
-
-    // Prefer live call when username+password+endpoint present and not forced sandbox
     const endpoint = (creds.endpointUrl || DEFAULT_ENDPOINT).trim();
     const canLive = Boolean(creds.username && creds.password && endpoint.startsWith("http"));
+    // Sandbox only when explicitly enabled, or when live credentials are missing.
+    const sandbox = creds.sandboxMode === true || !canLive;
 
-    if (!canLive || sandbox) {
+    if (sandbox) {
       return sandboxBook(request);
     }
 

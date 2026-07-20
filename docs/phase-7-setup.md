@@ -419,12 +419,18 @@ Per-tenant **Vendor Shipping Integrations** (Utility → Integration Configurati
 1. Save carrier/gateway **credentials** (UserID / Password / Account / Endpoint) for provider code `XPRESION` (or future `DHL` / `FEDEX` / …).
 2. Create a **Vendor Integration** row: provider, linked credentials, endpoint, OTP required, services/products, optional mapped vendor IDs.
 3. On AWB **Book**: Internal `confirm_booking` → Vendor Shipping Service → adapter → Provider API.
-4. OTP modal when required; documents + activity timeline attach automatically.
-5. Edge Function: `supabase/functions/vendor-shipping` (optional; FE falls back to local sandbox adapter).
+4. OTP is sent to the **shipper mobile** from AWB Shipper details (`shipments.shipper.mobile`).
+5. **Live SMS:** Utility → Integration Configuration → add **MSG91** or **Twilio** (`MESSAGING`), paste keys, set **Sandbox mode OFF**, Active. Deploy edge `send-sms`. Apply `0081_live_sms_messaging.sql`.
+   - MSG91: API Key = Authkey, Account = Sender ID, Endpoint = Flow/Template ID (DLT).
+   - Twilio: Username = Account SID, Password = Auth Token, Account = From number.
+6. Without messaging credentials, OTP stays sandbox (shown in UI). Live Xpresion uses `ShipperMobile` on the vendor API.
+7. Edge Functions: `vendor-shipping` (optional), `send-sms` (required for phone OTP).
 
 AWB Entry never references a specific provider brand — only the Vendor Shipping client facade.
 
-Apply migration `0077_vendor_shipping_api.sql`. Deploy edge function when going live against a real gateway.
+**Shipment Documents Center (`0082`):** After `BOOKED` + vendor success + OTP verified, AWB Entry shows a modern document grid (Authority Letter, AWB Label, Invoice, Vendor AWB, Vendor Invoice, KYC) with preview drawer / print / download. Files are versioned in `shipment_documents` (append-only). Vendor adapters only save into this store — future internal label/invoice generators use the same API.
+
+Apply migrations `0077`–`0082`. Deploy `send-sms` for realtime OTP.
 
 ---
 

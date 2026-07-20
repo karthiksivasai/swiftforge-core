@@ -11,7 +11,232 @@ const DEFAULT_XPRESION_ENDPOINT =
 type Json = Record<string, unknown>;
 
 function str(v: unknown, fallback = ""): string {
-  return v == null ? fallback : String(v).trim();
+  if (v == null) return fallback;
+  const s = String(v).trim();
+  return s || fallback;
+}
+
+function num3(v: unknown, fallback = "0.000"): string {
+  const n = typeof v === "number" ? v : Number.parseFloat(str(v));
+  return Number.isFinite(n) ? n.toFixed(3) : fallback;
+}
+
+function asJson(v: unknown): Json {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Json) : {};
+}
+
+function fmtDate(d: string): string {
+  if (!d) return "";
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) return d;
+  const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  return d;
+}
+
+/** Build full Xpresion Awbentry body from shipment context + secrets. */
+function buildXpresionPayload(
+  ship: Json,
+  pieces: unknown[],
+  creds: { username: string; password: string; customerCode: string },
+  otp: string,
+): Json {
+  const shipper = asJson(ship.shipper);
+  const consignee = asJson(ship.consignee);
+  const extras = asJson(ship.wizard_extras);
+  const proforma = asJson(extras.proforma);
+  const kyc = asJson(extras.kyc);
+  const product = str(ship.product_code).toUpperCase();
+
+  let weight = Number.parseFloat(str(ship.charge_weight ?? ship.actual_weight, "0"));
+  if (!Number.isFinite(weight) || weight <= 0) weight = 1;
+  // Xpresion MEDICINE product rejects weights below 0.500 kg.
+  if (product.includes("MEDICINE") && weight < 0.5) weight = 0.5;
+
+  const addr1 = str(shipper.address1);
+  const addr2 = str(shipper.address2, addr1 || ".");
+
+  const proformaLines = Array.isArray(proforma.lines) ? proforma.lines : [];
+  const contentFromLines = proformaLines
+    .map((l) => str(asJson(l).description))
+    .filter(Boolean)
+    .join(", ");
+  const content = str(ship.content, contentFromLines || "GOODS");
+
+  let shipmentValue = str(ship.shipment_value);
+  if (!shipmentValue || shipmentValue === "0") {
+    const sum = proformaLines.reduce((acc, line) => {
+      const n = Number.parseFloat(str(asJson(line).amount, "0"));
+      return acc + (Number.isFinite(n) ? n : 0);
+    }, 0);
+    if (sum > 0) shipmentValue = String(sum);
+  }
+  if (!shipmentValue) shipmentValue = "1";
+
+  const invoiceNo = str(
+    proforma.invoiceNo ?? proforma.invoice_no,
+    str(ship.awb_no, "INV"),
+  );
+  const bookDate = str(ship.book_date);
+  const invoiceDate = fmtDate(
+    str(proforma.invoiceDate ?? proforma.invoice_date ?? bookDate),
+  );
+
+  const dimsSource = Array.isArray(pieces) && pieces.length > 0 ? pieces : [{}];
+  const Dimensions = dimsSource.map((p) => {
+    const row = asJson(p);
+    return {
+      ActualWeight: num3(row.actual_weight_per_pc ?? ship.actual_weight, num3(weight)),
+      Vol_WeightL: num3(row.length, "10.000"),
+      Vol_WeightW: num3(row.breadth, "10.000"),
+      Vol_WeightH: num3(row.height, "10.000"),
+    };
+  });
+
+  const Performa =
+    proformaLines.length > 0
+      ? proformaLines.map((line, i) => {
+          const l = asJson(line);
+          return {
+            BoxNo: str(l.boxNo ?? l.box_no, `Box-${i + 1}`),
+            Description: str(l.description, content),
+            HSNCode: str(l.hsCode ?? l.hsn_code),
+            Quantity: str(l.quantity, "1"),
+            Unit: str(l.unit, "PCS"),
+            Rate: str(l.rate, "0.00"),
+            Amount: str(l.amount, "0.00"),
+            Weight: num3(l.weight, "0.000"),
+            PerformaIGST: str(l.igstPercent ?? l.igst_percent, "0"),
+            PerformaIGSTAmount: str(l.igstAmount ?? l.igst_amount, "0"),
+          };
+        })
+      : [
+          {
+            BoxNo: "Box-1",
+            Description: content,
+            HSNCode: "",
+            Quantity: "1",
+            Unit: "PCS",
+            Rate: shipmentValue,
+            Amount: shipmentValue,
+            Weight: num3(weight),
+            PerformaIGST: "0",
+            PerformaIGSTAmount: "0",
+          },
+        ];
+
+  const kycDocs = Array.isArray(kyc.documents) ? kyc.documents : [];
+  const firstKyc = asJson(kycDocs[0]);
+  const docType = str(
+    shipper.document_type ?? firstKyc.entryType ?? firstKyc.entry_type,
+    "Aadhaar Number",
+  );
+  const docNo = str(shipper.document_no ?? firstKyc.documentNo ?? firstKyc.document_no);
+
+  return {
+    UserID: creds.username,
+    Password: creds.password,
+    CustomerCode: creds.customerCode,
+    CustomerRefNo: str(ship.reference_no || ship.awb_no),
+    OriginName: str(ship.origin_code ?? shipper.origin_code),
+    DestinationName: str(ship.destination_code ?? consignee.origin_code),
+    ShipperName: str(shipper.company_name || shipper.name),
+    ShipperContact: str(shipper.contact_name),
+    ShipperAdd1: addr1,
+    ShipperAdd2: addr2,
+    ShipperCity: str(shipper.city),
+    ShipperState: str(shipper.state),
+    ShipperPin: str(shipper.pincode ?? shipper.pin_code),
+    ShipperTelno: str(shipper.telephone ?? shipper.tel),
+    ShipperMobile: str(shipper.mobile ?? shipper.mobile_no),
+    ShipperEmail: str(shipper.email),
+    DocumentType: docType,
+    DocumentNumber: docNo,
+    ConsigneeName: str(consignee.company_name || consignee.name),
+    ConsigneeContact: str(consignee.contact_name),
+    ConsigneeAdd1: str(consignee.address1),
+    ConsigneeAdd2: str(consignee.address2, str(consignee.address1, ".")),
+    ConsigneeCity: str(consignee.city),
+    ConsigneeState: str(consignee.state),
+    ConsigneePin: str(consignee.pincode ?? consignee.pin_code),
+    ConsigneeTelno: str(consignee.telephone ?? consignee.tel),
+    ConsigneeMobile: str(consignee.mobile ?? consignee.mobile_no),
+    ConsigneeEmail: str(consignee.email),
+    ConsigneeDocumentType: str(consignee.document_type),
+    ConsigneeDocumentNumber: str(consignee.document_no),
+    Instruction: str(ship.instruction),
+    VendorName: str(ship.vendor_code),
+    ServiceName: str(ship.service),
+    ProductCode: str(ship.product_code),
+    Dox_Spx: str(ship.pieces_unit || ship.product_code, "SPX"),
+    Pieces: str(ship.pieces, "1"),
+    Weight: num3(weight, "1.000"),
+    Content: content,
+    Currency: str(ship.currency, "INR"),
+    ShipmentValue: shipmentValue,
+    CODAmount: "0.00",
+    CSBType: str(proforma.csbType ?? proforma.csb_type, "COMMERCIAL"),
+    TermofInvoice: str(proforma.termOfInvoice ?? proforma.term_of_invoice, "CIF"),
+    InvoiceNo: invoiceNo,
+    InvoiceDate: invoiceDate,
+    CompanyCode: str(ship.vendor_code),
+    IsCommercial: ship.is_commercial ? 1 : 0,
+    OTP: otp,
+    LSPType: "I",
+    RequiredPerforma: "y",
+    RequiredLable: "y",
+    KYCDocumentType: docType,
+    KYCImage: "",
+    ImageType: "PDF",
+    ExportReason: str(proforma.exportReason ?? proforma.export_reason),
+    KYCImage1: "",
+    ImageType1: "PDF",
+    EAWBNO: "",
+    EAWBDate: "",
+    EAWBExpDate: "",
+    Dimensions,
+    Performa,
+    additionalInfo: {
+      discount: "0.00",
+      Freight_Charges: "0.00",
+      Insurance: "0.00",
+      Other_charges: "0.00",
+      SpecifyCharges: "0",
+    },
+    Buyerdetails: {
+      DestinationCode: str(ship.destination_code),
+      Name: str(consignee.company_name || consignee.name),
+      Person: str(consignee.contact_name),
+      Address1: str(consignee.address1),
+      Address2: str(consignee.address2, str(consignee.address1, ".")),
+      PinCode: str(consignee.pincode ?? consignee.pin_code),
+      City: str(consignee.city),
+      State: str(consignee.state),
+      Telephone: str(consignee.telephone),
+      Mobile: str(consignee.mobile),
+      Email: str(consignee.email),
+      countryCode: str(consignee.country || ship.destination_code),
+      IECNo: str(consignee.iec_no),
+    },
+    ManifestGstDetails: {
+      GST_Invoice: proforma.gstInvoice || proforma.gst_invoice ? "1" : "0",
+      LUTIGST: "N",
+      TotalIGST: "0.00",
+      BankADCode: "",
+      BankAccount: "",
+      BankIFSC: "",
+      LUTNumber: "",
+      ExchangeRate: "0.00",
+      Firm: "NG",
+      NFEI: "1",
+      PayofIGST: "0",
+      ECommerce: "0",
+      MEISScheme: "0",
+      Format: str(proforma.format, "C2C"),
+      IECNo: str(shipper.iec_no),
+      LUTIssueDate: "",
+      LUTTillDate: "",
+    },
+  };
 }
 
 function corsHeaders(req: Request): HeadersInit {
@@ -56,17 +281,40 @@ function parseProviderResponse(raw: Json): {
   forwardingNo?: string;
   refNo?: string;
 } {
-  const status = str(raw.Status ?? raw.status).toLowerCase();
-  const code = str(raw.ResponseCode ?? raw.ErrorCode);
-  const msg = str(raw.Message ?? raw.APIError ?? raw.Error, "Vendor response");
+  const nested = raw.Response ?? raw.response;
+  const body: Json =
+    nested && typeof nested === "object" && !Array.isArray(nested)
+      ? { ...raw, ...(nested as Json) }
+      : raw;
+
+  const status = str(body.Status ?? body.status ?? body.APIStatus).toLowerCase();
+  const code = str(body.ResponseCode ?? body.ErrorCode).toLowerCase();
+
+  let msg = str(body.Message ?? body.APIError, "");
+  const errs = body.Error ?? body.Errors;
+  if (Array.isArray(errs)) {
+    const parts = errs
+      .map((e) => {
+        if (!e || typeof e !== "object") return String(e ?? "").trim();
+        const row = e as Json;
+        return str(row.Description ?? row.description ?? row.Message ?? row.message);
+      })
+      .filter(Boolean);
+    if (parts.length) msg = parts.join("; ");
+  }
+  if (!msg) msg = "Vendor booking failed";
+
   const combined = `${status} ${code} ${msg}`.toLowerCase();
   const otpRequired =
     combined.includes("otp") &&
     (combined.includes("required") || combined.includes("sent") || combined.includes("verify"));
-  const awb = str(raw.AWBNo || raw.awbNo) || undefined;
-  const forwardingNo = str(raw.ForwardingNo || raw.forwardingNo) || undefined;
+  const awb = str(body.AWBNo || body.awbNo) || undefined;
+  const forwardingNo = str(body.ForwardingNo || body.forwardingNo) || undefined;
+  const failed =
+    status === "fail" || status === "failed" || status === "error" || code === "1" || code === "td01";
   const success =
     !otpRequired &&
+    !failed &&
     (status === "success" || status === "ok" || code === "0" || Boolean(awb || forwardingNo));
   return {
     success,
@@ -74,7 +322,7 @@ function parseProviderResponse(raw: Json): {
     message: msg,
     awb,
     forwardingNo,
-    refNo: str(raw.RefNo || raw.refNo) || undefined,
+    refNo: str(body.RefNo || body.refNo) || undefined,
   };
 }
 
@@ -147,7 +395,8 @@ Deno.serve(async (req) => {
       secretRow?.endpoint_url ?? integ.endpoint_url,
       DEFAULT_XPRESION_ENDPOINT,
     );
-    const sandbox = secretRow?.sandbox_mode !== false && (!username || !password);
+    // Live when username+password present unless sandbox_mode is explicitly true.
+    const sandbox = secretRow?.sandbox_mode === true || !username || !password;
 
     // Only XPRESION gateway is live in this function; others return NOT_IMPLEMENTED
     if (providerCode !== "XPRESION" && providerCode !== "CW" && providerCode !== "COURIERWALA") {
@@ -207,67 +456,48 @@ Deno.serve(async (req) => {
           labelGenerated: true,
           syncStatus: "OK",
           apiStatus: "VENDOR_BOOKED",
-          documents: [
-            { doc_type: "VENDOR_AWB", label: "Vendor AWB", raw_meta: { sandbox: true } },
-            { doc_type: "SHIPPING_LABEL", label: "Shipping Label", raw_meta: { sandbox: true } },
-          ],
-          rawResponse: { Status: "SUCCESS", AWBNo: vendorAwb },
+          // No blank sandbox PDFs — Authority Letter / AWB Label are generated in the app.
+          documents: [],
+          rawResponse: { Status: "SUCCESS", AWBNo: vendorAwb, sandbox: true },
         },
         200,
         req,
       );
     }
 
-    // Build a minimal live payload — full mapping is also available client-side;
-    // edge uses shipment fields from context for the critical auth + party block.
     const ship = (context.shipment ?? {}) as Json;
-    const shipper = (ship.shipper ?? {}) as Json;
-    const consignee = (ship.consignee ?? {}) as Json;
-    const payload: Json = {
-      UserID: username,
-      Password: password,
-      CustomerCode: customerCode,
-      CustomerRefNo: str(ship.reference_no || ship.awb_no),
-      OriginName: str(ship.origin_code),
-      DestinationName: str(ship.destination_code),
-      ShipperName: str(shipper.company_name),
-      ShipperContact: str(shipper.contact_name),
-      ShipperAdd1: str(shipper.address1),
-      ShipperAdd2: str(shipper.address2),
-      ShipperCity: str(shipper.city),
-      ShipperState: str(shipper.state),
-      ShipperPin: str(shipper.pincode ?? shipper.pin_code),
-      ShipperTelno: str(shipper.telephone),
-      ShipperMobile: str(shipper.mobile),
-      ShipperEmail: str(shipper.email),
-      DocumentType: str(shipper.document_type, "Aadhaar Number"),
-      DocumentNumber: str(shipper.document_no),
-      ConsigneeName: str(consignee.company_name),
-      ConsigneeContact: str(consignee.contact_name),
-      ConsigneeAdd1: str(consignee.address1),
-      ConsigneeAdd2: str(consignee.address2),
-      ConsigneeCity: str(consignee.city),
-      ConsigneeState: str(consignee.state),
-      ConsigneePin: str(consignee.pincode ?? consignee.pin_code),
-      ConsigneeTelno: str(consignee.telephone),
-      ConsigneeMobile: str(consignee.mobile),
-      ConsigneeEmail: str(consignee.email),
-      Instruction: str(ship.instruction),
-      VendorName: str(ship.vendor_code),
-      ServiceName: str(ship.service),
-      ProductCode: str(ship.product_code),
-      Dox_Spx: str(ship.pieces_unit || ship.product_code, "SPX"),
-      Pieces: str(ship.pieces, "1"),
-      Weight: str(ship.charge_weight ?? ship.actual_weight, "1.000"),
-      Content: str(ship.content),
-      Currency: str(ship.currency, "INR"),
-      ShipmentValue: str(ship.shipment_value, "0"),
-      OTP: otp,
-      RequiredPerforma: "y",
-      RequiredLable: "y",
-      IsCommercial: ship.is_commercial ? 1 : 0,
-      LSPType: "I",
-    };
+    const pieces = Array.isArray(context.pieces) ? (context.pieces as unknown[]) : [];
+    const payload = buildXpresionPayload(
+      ship,
+      pieces,
+      { username, password, customerCode },
+      otp,
+    );
+
+    // Fail fast with clear messages before calling the live gateway.
+    const missing: string[] = [];
+    if (!str(payload.DocumentNumber)) missing.push("Shipper Document No");
+    if (!str(payload.ShipperAdd1)) missing.push("Shipper Address 1");
+    if (!str(payload.Content)) missing.push("Content");
+    if (!str(payload.ShipmentValue) || str(payload.ShipmentValue) === "0") {
+      missing.push("Shipment Value");
+    }
+    if (!str(payload.InvoiceNo)) missing.push("Invoice No");
+    if (missing.length) {
+      const message = `Complete before vendor booking: ${missing.join(", ")}`;
+      return jsonResponse(
+        {
+          status: "ERROR",
+          message,
+          error: message,
+          apiStatus: "VENDOR_PENDING",
+          vendorProvider: "XPRESION",
+          request: { ...payload, Password: "***" },
+        },
+        200,
+        req,
+      );
+    }
 
     const { raw } = await callXpresion(endpoint, payload);
     const parsed = parseProviderResponse(raw);
@@ -279,6 +509,7 @@ Deno.serve(async (req) => {
           apiStatus: "OTP_REQUIRED",
           vendorProvider: "XPRESION",
           rawResponse: raw,
+          request: { ...payload, Password: "***", OTP: otp ? "***" : "" },
         },
         200,
         req,
@@ -293,13 +524,64 @@ Deno.serve(async (req) => {
           apiStatus: "VENDOR_PENDING",
           vendorProvider: "XPRESION",
           rawResponse: raw,
+          request: { ...payload, Password: "***" },
         },
         200,
         req,
       );
     }
 
+    const nested = asJson(raw.Response ?? raw.response);
+    const docBody: Json = { ...raw, ...nested };
     const vendorAwb = parsed.forwardingNo || parsed.awb;
+    const authorityUrl = str(
+      docBody.AuthorityLetter ||
+        docBody.authorityLetter ||
+        docBody.AuthorityLetterUrl ||
+        docBody.authority_letter_url,
+    );
+    const vendorAwbUrl = str(
+      docBody.VendorAwb || docBody.vendorAwb || docBody.Pdfdownload || docBody.Label,
+    );
+    const vendorInvoiceUrl = str(
+      docBody.VendorInvoice || docBody.vendorInvoice || docBody.Performa || docBody.performa,
+    );
+    const labelUrl = str(docBody.Label || docBody.Pdfdownload);
+
+    const documents: Array<{
+      doc_type: string;
+      label: string;
+      source_url?: string;
+    }> = [];
+    if (authorityUrl) {
+      documents.push({
+        doc_type: "AUTHORITY_LETTER",
+        label: "Authority Letter",
+        source_url: authorityUrl,
+      });
+    }
+    if (vendorAwbUrl) {
+      documents.push({
+        doc_type: "VENDOR_AWB",
+        label: "Vendor AWB",
+        source_url: vendorAwbUrl,
+      });
+    }
+    if (vendorInvoiceUrl) {
+      documents.push({
+        doc_type: "VENDOR_INVOICE",
+        label: "Vendor Invoice",
+        source_url: vendorInvoiceUrl,
+      });
+    }
+    if (labelUrl) {
+      documents.push({
+        doc_type: "SHIPPING_LABEL",
+        label: "Shipping Label",
+        source_url: labelUrl,
+      });
+    }
+
     return jsonResponse(
       {
         status: "SUCCESS",
@@ -311,21 +593,10 @@ Deno.serve(async (req) => {
         vendorProvider: "XPRESION",
         vendorServiceCode: str(ship.service),
         otpVerified: Boolean(otp),
-        labelGenerated: true,
+        labelGenerated: Boolean(labelUrl),
         syncStatus: "OK",
         apiStatus: "VENDOR_BOOKED",
-        documents: [
-          {
-            doc_type: "VENDOR_AWB",
-            label: "Vendor AWB",
-            source_url: str(raw.Pdfdownload || raw.Label) || undefined,
-          },
-          {
-            doc_type: "SHIPPING_LABEL",
-            label: "Shipping Label",
-            source_url: str(raw.Label || raw.Pdfdownload) || undefined,
-          },
-        ],
+        documents,
         rawResponse: raw,
       },
       200,

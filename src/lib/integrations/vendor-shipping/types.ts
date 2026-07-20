@@ -17,6 +17,8 @@ export type VendorDocType =
   | "VENDOR_INVOICE"
   | "COMMERCIAL_INVOICE"
   | "AUTHORITY_LETTER"
+  | "AWB_LABEL"
+  | "INVOICE"
   | "KYC"
   | "BOX_LABEL"
   | "CUSTOMS"
@@ -51,6 +53,9 @@ export type VendorBookResult = {
   error?: string;
   /** Maps to DB vendor_api_status after apply */
   apiStatus?: VendorApiStatus;
+  /** Present only while SMS transport is SANDBOX (no live phone delivery). */
+  sandboxOtp?: string | null;
+  shipperMobileMasked?: string | null;
 };
 
 export type VendorShippingCredentials = {
@@ -87,6 +92,8 @@ export type VendorShippingContext = {
 export type VendorBookRequest = {
   context: VendorShippingContext;
   otp?: string | null;
+  /** When set, sandbox adapter accepts this OTP (issued to shipper mobile). */
+  sandboxExpectedOtp?: string | null;
   credentials?: VendorShippingCredentials;
 };
 
@@ -139,6 +146,8 @@ export const VENDOR_DOC_TYPE_LABELS: Record<VendorDocType, string> = {
   VENDOR_INVOICE: "Vendor Invoice",
   COMMERCIAL_INVOICE: "Commercial Invoice",
   AUTHORITY_LETTER: "Authority Letter",
+  AWB_LABEL: "AWB Label",
+  INVOICE: "Invoice",
   KYC: "KYC",
   BOX_LABEL: "Box Label",
   CUSTOMS: "Customs Documents",

@@ -85,9 +85,27 @@ import {
   cancelShipment,
   confirmBooking,
   fetchShipmentChildren,
+  findShipmentBySearch,
+  getShipmentById,
   listShipments,
   saveShipment,
 } from "@/lib/transactions/resources/shipments";
+import {
+  buildAwbLabelHtml,
+  ensureAwbLabelDocument,
+  ensureBookedShipmentDocuments,
+  formToAwbLabelInput,
+  shipmentNeedsSystemDocuments,
+} from "@/lib/transactions/awbLabelGenerator";
+import {
+  buildInvoiceHtml,
+  ensureInvoiceDocument,
+  formToInvoiceInput,
+} from "@/lib/transactions/invoiceGenerator";
+import {
+  getShipmentDocument,
+  type ShipmentDocumentItem,
+} from "@/lib/transactions/shipmentDocuments";
 import {
   calculateShipmentRating,
   getRatingBreakdown,
@@ -107,18 +125,23 @@ import { getCarrierAdapter } from "@/lib/integrations/adapter";
 import { normalizeVendorToCarrierCode, SUPPORTED_CARRIER_CODES } from "@/lib/integrations/carriers";
 import {
   getVendorShippingContext,
+  maskMobile,
   startVendorBooking,
   type VendorApiStatus,
 } from "@/lib/integrations/vendor-shipping";
 import {
   VendorActivityTimeline,
   VendorBookingStatusStrip,
-  VendorDocumentsPanel,
   VendorOtpDialog,
   retryVendorBooking,
   verifyVendorOtp,
   type VendorShippingMeta,
 } from "@/components/transactions/vendor-shipping-panel";
+import {
+  ShipmentBookedBanner,
+  ShipmentDocumentQuickLinks,
+  ShipmentDocumentsCard,
+} from "@/components/transactions/shipment-documents-card";
 
 type LookupPair = { id?: string; code: string; name: string };
 
@@ -1251,6 +1274,8 @@ function AwbEntryPage() {
   const [vendorBookingBusy, setVendorBookingBusy] = useState(false);
   const [vendorOtpOpen, setVendorOtpOpen] = useState(false);
   const [vendorOtpError, setVendorOtpError] = useState<string | null>(null);
+  const [vendorOtpMobile, setVendorOtpMobile] = useState<string | null>(null);
+  const [vendorSandboxOtp, setVendorSandboxOtp] = useState<string | null>(null);
   const [vendorMeta, setVendorMeta] = useState<VendorShippingMeta>({});
   const [vendorPanelKey, setVendorPanelKey] = useState(0);
 
@@ -1356,11 +1381,50 @@ function AwbEntryPage() {
     await queryClient.refetchQueries({ queryKey: ["shipments"] });
   };
 
+  const normalizeProforma = (raw: unknown): ProformaData => {
+    const base = emptyProforma();
+    if (!raw || typeof raw !== "object") return base;
+    const p = raw as Record<string, unknown>;
+    const linesRaw = Array.isArray(p.lines) ? p.lines : [];
+    return {
+      csbType: String(p.csbType ?? base.csbType),
+      termOfInvoice: String(p.termOfInvoice ?? base.termOfInvoice),
+      gstInvoice: p.gstInvoice === true,
+      invoiceNo: String(p.invoiceNo ?? base.invoiceNo),
+      invoiceDate: String(p.invoiceDate ?? base.invoiceDate),
+      departmentNo: String(p.departmentNo ?? base.departmentNo),
+      exportReason: String(p.exportReason ?? base.exportReason),
+      format: String(p.format ?? base.format),
+      currency: String(p.currency ?? base.currency),
+      lines: linesRaw.map((line, i) => {
+        const l = line && typeof line === "object" ? (line as Record<string, unknown>) : {};
+        return {
+          id: String(l.id ?? `pf-${i}`),
+          boxNo: String(l.boxNo ?? "1"),
+          packages: String(l.packages ?? ""),
+          description: String(l.description ?? ""),
+          hsCode: String(l.hsCode ?? l.hsnCode ?? ""),
+          quantity: String(l.quantity ?? ""),
+          weight: String(l.weight ?? ""),
+          unit: String(l.unit ?? "PCS"),
+          rate: String(l.rate ?? ""),
+          amount: String(l.amount ?? ""),
+          igstPercent: String(l.igstPercent ?? "0"),
+          igstAmount: String(l.igstAmount ?? "0"),
+        };
+      }),
+    };
+  };
+
   const normalizeForm = (data: AwbFullForm): AwbFullForm => {
     const forwarding = data.forwarding ?? emptyForwarding();
+    const bookTimeDigits = String(data.bookTime ?? "")
+      .replace(/\D/g, "")
+      .slice(0, 4);
     return {
       ...data,
-      proforma: data.proforma ?? emptyProforma(),
+      bookTime: bookTimeDigits || data.bookTime,
+      proforma: normalizeProforma(data.proforma),
       forwarding: {
         ...emptyForwarding(),
         ...forwarding,
@@ -1539,9 +1603,32 @@ function AwbEntryPage() {
     return next;
   };
 
-  const handleFormToolbarSearch = () => {
+  const handleFormToolbarSearch = async () => {
     const q = formToolbarSearch.trim();
     if (!q) return;
+    if (authed) {
+      try {
+        setSaving(true);
+        const found = await findShipmentBySearch({ query: q, field: "awb_no" });
+        if (!found) {
+          toast.error("No AWB entry found");
+          return;
+        }
+        await openEdit({
+          ...emptyForm(),
+          id: found.id,
+          rowVersion: found.row_version,
+          status: found.current_status ?? "DRAFT",
+          awbNo: found.awb_no ?? q,
+        } as AwbRow);
+        toast.success(`Opened AWB ${found.awb_no ?? q}`);
+      } catch (e) {
+        toast.error(toErrorMessage(e, "Search failed"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     const match = rows.find((r) => r.awbNo.toLowerCase().includes(q.toLowerCase()));
     if (match) openEdit(match);
     else toast.error("No AWB entry found");
@@ -1749,9 +1836,11 @@ function AwbEntryPage() {
     setVendorMeta({});
     setVendorOtpOpen(false);
     setVendorOtpError(null);
+    setVendorSandboxOtp(null);
     if (authed) {
       try {
-        const full = (liveQuery.data?.rows ?? []).find((r) => r.id === row.id);
+        // Always reload full shipment so older AWBs get complete wizard_extras/proforma.
+        const full = await getShipmentById(row.id);
         if (!full) {
           toast.error("Shipment not found");
           return;
@@ -1769,6 +1858,7 @@ function AwbEntryPage() {
           carrierLabelFileId,
           ...rest
         } = patch;
+        const formForDocs = normalizeForm({ ...emptyForm(), ...rest } as AwbFullForm);
         setEditing({
           ...emptyForm(),
           ...rest,
@@ -1781,7 +1871,7 @@ function AwbEntryPage() {
           carrierBookingStatus,
           carrierLabelFileId,
         } as AwbRow);
-        setForm(normalizeForm({ ...emptyForm(), ...rest } as AwbFullForm));
+        setForm(formForDocs);
         setRatingSummary(null);
         try {
           const breakdown = await getRatingBreakdown(row.id);
@@ -1818,11 +1908,32 @@ function AwbEntryPage() {
               syncStatus: (ctx.shipment.vendor_sync_status as string) ?? null,
               lastError: (ctx.shipment.vendor_api_last_error as string) ?? null,
             });
-            setVendorPanelKey((k) => k + 1);
           }
         } catch {
           /* vendor shipping optional */
         }
+        const shipmentStatus = status ?? full.current_status;
+        if (shipmentNeedsSystemDocuments(shipmentStatus)) {
+          try {
+            await ensureBookedShipmentDocuments({
+              shipmentId: row.id,
+              form: formForDocs,
+              vendor:
+                (full.vendor_provider as string | null) ||
+                full.vendors?.code ||
+                formForDocs.vendor.code ||
+                null,
+            });
+          } catch (docErr) {
+            toast.warning(
+              toErrorMessage(
+                docErr,
+                "Could not prepare AWB Label / Invoice — click the links to retry",
+              ),
+            );
+          }
+        }
+        setVendorPanelKey((k) => k + 1);
       } catch (e) {
         toast.error(toErrorMessage(e));
       }
@@ -2019,6 +2130,39 @@ function AwbEntryPage() {
       if (!form.service.code.trim() && !form.service.name.trim()) {
         errors.push("Service is required when Vendor is selected");
       }
+      if (!form.shipper.mobileNo.trim() && !form.shipper.telephone.trim()) {
+        errors.push("Shipper mobile number is required for vendor OTP");
+      }
+      if (!form.shipper.documentType.trim()) {
+        errors.push("Shipper Document Type is required for vendor booking");
+      }
+      if (!form.shipper.documentNo.trim()) {
+        errors.push("Shipper Document No is required for vendor booking");
+      }
+      if (!form.shipper.address1.trim()) {
+        errors.push("Shipper Address 1 is required for vendor booking");
+      }
+      if (!form.content.trim() && !(form.proforma.lines ?? []).some((l) => l.description.trim())) {
+        errors.push("Content (or proforma description) is required for vendor booking");
+      }
+      const valueNum = Number.parseFloat(form.shipmentValue.trim() || "0");
+      const proformaSum = (form.proforma.lines ?? []).reduce((acc, l) => {
+        const n = Number.parseFloat(l.amount.trim() || "0");
+        return acc + (Number.isFinite(n) ? n : 0);
+      }, 0);
+      if ((!Number.isFinite(valueNum) || valueNum <= 0) && proformaSum <= 0) {
+        errors.push("Shipment Value must be greater than 0 for vendor booking");
+      }
+      if (!form.proforma.invoiceNo.trim() && !form.awbNo.trim()) {
+        errors.push("Invoice No is required on the Proforma tab for vendor booking");
+      }
+      const product = form.product.code.trim().toUpperCase();
+      if (product.includes("MEDICINE")) {
+        const w = Number.parseFloat(form.chargeWeight.trim() || form.actualWeight.trim() || "0");
+        if (!Number.isFinite(w) || w < 0.5) {
+          errors.push("MEDICINE product requires charge weight of at least 0.500 kg");
+        }
+      }
     }
     return errors;
   };
@@ -2090,6 +2234,21 @@ function AwbEntryPage() {
         allowLeaveRef.current = true;
         await clearDraftState();
 
+        const bookedForm = {
+          ...payload,
+          awbNo: booked.awb_no || payload.awbNo,
+        };
+        try {
+          await ensureBookedShipmentDocuments({
+            shipmentId: booked.id,
+            form: bookedForm,
+            vendor: bookedForm.vendor.code || bookedForm.vendor.name || null,
+          });
+          setVendorPanelKey((k) => k + 1);
+        } catch {
+          /* internal AWB label optional on book */
+        }
+
         // Vendor Shipping pipeline (provider-agnostic) — keep form open for OTP/docs
         let shippingEnabled = false;
         let shippingSkipReason: string | null = null;
@@ -2132,9 +2291,25 @@ function AwbEntryPage() {
             });
             setVendorPanelKey((k) => k + 1);
             if (outcome.result.status === "OTP_REQUIRED") {
+              const mobile =
+                outcome.result.shipperMobileMasked ||
+                (form.shipper.mobileNo.trim() || form.shipper.telephone.trim()
+                  ? maskMobile(form.shipper.mobileNo.trim() || form.shipper.telephone.trim())
+                  : null);
+              setVendorOtpMobile(mobile);
+              setVendorSandboxOtp(outcome.result.sandboxOtp ?? null);
               setVendorOtpError(null);
               setVendorOtpOpen(true);
-              toast.message("Vendor verification required — enter OTP");
+              if (outcome.result.sandboxOtp) {
+                toast.message(
+                  `Sandbox OTP ${outcome.result.sandboxOtp} (live SMS not configured)`,
+                );
+              } else {
+                toast.message(
+                  outcome.result.message ||
+                    "OTP sent to shipper mobile — enter OTP to continue",
+                );
+              }
             } else if (outcome.result.status === "SUCCESS") {
               toast.success("Vendor booking completed");
               if (outcome.result.vendorAwb) {
@@ -2167,7 +2342,7 @@ function AwbEntryPage() {
           toast.message(shippingSkipReason);
         }
         await refreshLive();
-        closeForm();
+        // Keep form open so internal AWB Label / Documents Center are available
       } catch (e) {
         const msg = toErrorMessage(e);
         setBookingErrors(msg.split("; ").filter(Boolean));
@@ -2404,10 +2579,66 @@ function AwbEntryPage() {
   const vendorShippingActive = Boolean(
     vendorMeta.status && vendorMeta.status !== "NONE",
   );
+  /** Documents Center for booked / in-progress shipments (AWB Label, Invoice, vendor docs). */
+  const showShipmentDocumentsCenter = Boolean(
+    editing?.id && shipmentNeedsSystemDocuments(formStatus),
+  );
   const canRetryVendorBooking = Boolean(
     editing?.id &&
       (vendorMeta.status === "VENDOR_PENDING" || vendorMeta.status === "FAILED"),
   );
+
+  const ensureInternalDocument = async (
+    type: string,
+  ): Promise<ShipmentDocumentItem | null> => {
+    if (!editing?.id) return null;
+
+    // System docs: build HTML sync-fast and return immediately (open in tab/sheet).
+    // PDF save continues in background inside ensure* helpers.
+    // Authority Letter is vendor-only (API) — not generated here.
+    if (type === "AWB_LABEL") {
+      const html = buildAwbLabelHtml(formToAwbLabelInput(form));
+      void ensureAwbLabelDocument({
+        shipmentId: editing.id,
+        form,
+        force: true,
+      }).then(() => setVendorPanelKey((k) => k + 1));
+      return {
+        type: "AWB_LABEL",
+        title: "AWB Label",
+        status: "AVAILABLE",
+        available: true,
+        fileName: `AWB-${form.awbNo || "label"}.pdf`,
+        mimeType: "text/html",
+        htmlPreview: html,
+        source: "SYSTEM",
+      };
+    }
+
+    if (type === "INVOICE") {
+      const html = buildInvoiceHtml(formToInvoiceInput(form));
+      void ensureInvoiceDocument({
+        shipmentId: editing.id,
+        form,
+        force: true,
+      }).then(() => setVendorPanelKey((k) => k + 1));
+      return {
+        type: "INVOICE",
+        title: "Invoice",
+        status: "AVAILABLE",
+        available: true,
+        fileName: `Invoice-${form.awbNo || "invoice"}.pdf`,
+        mimeType: "text/html",
+        htmlPreview: html,
+        source: "SYSTEM",
+      };
+    }
+
+    // Vendor / other docs: load stored bytes for preview
+    const stored = await getShipmentDocument(editing.id, type);
+    if (!stored?.available) return null;
+    return stored;
+  };
 
   const runVendorOtpVerify = async (otp: string) => {
     if (!editing?.id) return;
@@ -2479,8 +2710,20 @@ function AwbEntryPage() {
       });
       setVendorPanelKey((k) => k + 1);
       if (outcome.result.status === "OTP_REQUIRED") {
+        const mobile =
+          outcome.result.shipperMobileMasked ||
+          (form.shipper.mobileNo.trim() || form.shipper.telephone.trim()
+            ? maskMobile(form.shipper.mobileNo.trim() || form.shipper.telephone.trim())
+            : null);
+        setVendorOtpMobile(mobile);
+        setVendorSandboxOtp(outcome.result.sandboxOtp ?? null);
         setVendorOtpError(null);
         setVendorOtpOpen(true);
+        if (outcome.result.sandboxOtp) {
+          toast.message(`Sandbox OTP ${outcome.result.sandboxOtp} (live SMS not configured)`);
+        } else {
+          toast.message(outcome.result.message || "OTP resent to shipper mobile");
+        }
       } else if (outcome.result.status === "SUCCESS") {
         toast.success("Vendor booking completed");
       } else {
@@ -2541,11 +2784,55 @@ function AwbEntryPage() {
     toast.success("Refreshed");
   };
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
     const query = searchInput.trim();
     setAppliedSearch(query ? { field: searchField, query } : null);
     setPage(1);
-    if (query) toast.success("Search applied");
+    if (!query) return;
+
+    // CourierWala-style: searching an AWB opens the full entry form.
+    if (authed) {
+      try {
+        setSaving(true);
+        const field =
+          searchField === "forwardingNo"
+            ? "forwarding_awb"
+            : searchField === "deliveryNo"
+              ? "delivery_awb"
+              : searchField === "referenceNo"
+                ? "reference_no"
+                : "awb_no";
+        const found = await findShipmentBySearch({ query, field });
+        if (!found) {
+          toast.error("No AWB entry found");
+          return;
+        }
+        await openEdit({
+          ...emptyForm(),
+          id: found.id,
+          rowVersion: found.row_version,
+          status: found.current_status ?? "DRAFT",
+          awbNo: found.awb_no ?? query,
+        } as AwbRow);
+        toast.success(`Opened AWB ${found.awb_no ?? query}`);
+      } catch (e) {
+        toast.error(toErrorMessage(e, "Search failed"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    const match = rows.find((r) => {
+      const val = String(r[searchField] ?? "");
+      return val.toLowerCase().includes(query.toLowerCase());
+    });
+    if (match) {
+      await openEdit(match);
+      toast.success(`Opened AWB ${match.awbNo}`);
+    } else {
+      toast.error("No AWB entry found");
+    }
   };
 
   const patchPiecesDraft = (patch: Partial<PiecesDraft>) => {
@@ -2980,6 +3267,19 @@ function AwbEntryPage() {
                       </div>
                     </FieldWrapper>
                   </div>
+
+                  {editing?.id && (formStatus === "BOOKED" || showShipmentDocumentsCenter) ? (
+                    <ShipmentDocumentQuickLinks
+                      shipmentId={editing.id}
+                      refreshKey={vendorPanelKey}
+                      onOpenCenter={() => {
+                        document
+                          .getElementById("shipment-documents-center")
+                          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
+                      onEnsureDocument={ensureInternalDocument}
+                    />
+                  ) : null}
 
                   <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
                     <PartySection
@@ -3573,23 +3873,38 @@ function AwbEntryPage() {
                   </FormSection>
                 </div>
               </fieldset>
-              {editing?.id && (vendorShippingActive || vendorBookingBusy) ? (
-                <div className="border-t px-4 py-4 md:px-6">
-                  <VendorBookingStatusStrip
-                    meta={vendorMeta}
-                    bookingInProgress={vendorBookingBusy}
-                    canRetry={canRetryVendorBooking && !vendorBookingBusy}
-                    onRetry={() => void runVendorRetry()}
-                  />
-                  <VendorDocumentsPanel
-                    shipmentId={editing.id}
-                    rowVersion={editing.rowVersion ?? 1}
-                    refreshKey={vendorPanelKey}
-                    onRowVersion={(v) =>
-                      setEditing((prev) => (prev ? { ...prev, rowVersion: v } : prev))
-                    }
-                  />
-                  <VendorActivityTimeline shipmentId={editing.id} refreshKey={vendorPanelKey} />
+              {editing?.id &&
+              (showShipmentDocumentsCenter || vendorShippingActive || vendorBookingBusy) ? (
+                <div className="space-y-4 border-t px-4 py-4 md:px-6">
+                  {vendorShippingActive || vendorBookingBusy ? (
+                    vendorMeta.status === "VENDOR_BOOKED" || vendorMeta.otpVerified ? (
+                      <ShipmentBookedBanner
+                        vendorAwb={vendorMeta.vendorAwb}
+                        trackingNumber={vendorMeta.trackingNumber}
+                        provider={vendorMeta.provider}
+                      />
+                    ) : (
+                      <VendorBookingStatusStrip
+                        meta={vendorMeta}
+                        bookingInProgress={vendorBookingBusy}
+                        canRetry={canRetryVendorBooking && !vendorBookingBusy}
+                        onRetry={() => void runVendorRetry()}
+                      />
+                    )
+                  ) : null}
+                  {showShipmentDocumentsCenter ? (
+                    <div id="shipment-documents-center">
+                      <ShipmentDocumentsCard
+                        shipmentId={editing.id}
+                        refreshKey={vendorPanelKey}
+                        poll={vendorShippingActive}
+                        onEnsureDocument={ensureInternalDocument}
+                      />
+                    </div>
+                  ) : null}
+                  {vendorShippingActive || vendorBookingBusy ? (
+                    <VendorActivityTimeline shipmentId={editing.id} refreshKey={vendorPanelKey} />
+                  ) : null}
                 </div>
               ) : null}
               {canCarrierActions && !vendorShippingActive ? (
@@ -4923,10 +5238,15 @@ function AwbEntryPage() {
         open={vendorOtpOpen}
         busy={vendorBookingBusy}
         error={vendorOtpError}
+        shipperMobile={vendorOtpMobile}
+        sandboxOtp={vendorSandboxOtp}
         onVerify={(otp) => void runVendorOtpVerify(otp)}
         onResend={() => void runVendorRetry()}
         onCancel={() => {
-          if (!vendorBookingBusy) setVendorOtpOpen(false);
+          if (!vendorBookingBusy) {
+            setVendorOtpOpen(false);
+            setVendorSandboxOtp(null);
+          }
         }}
       />
 

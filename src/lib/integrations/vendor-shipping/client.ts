@@ -3,6 +3,12 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { resolveAdapterForIntegration } from "./registry";
+import {
+  extractShipperMobile,
+  maskMobile,
+  sendOtpToShipperMobile,
+  verifyShipperOtpChallenge,
+} from "./shipperOtp";
 import type {
   VendorActivityEvent,
   VendorApiStatus,
@@ -174,6 +180,62 @@ async function bookViaEdge(args: {
   }
 }
 
+function appSendsShipperOtp(context: VendorShippingContext): boolean {
+  const integ = context.integration;
+  if (!integ) return false;
+  // Live vendor credentials handle their own SMS; app SMS only in explicit sandbox / no creds.
+  return !integ.has_username || integ.sandbox_mode === true;
+}
+
+async function deliverOtpToShipper(
+  context: VendorShippingContext,
+  result: VendorBookResult,
+): Promise<VendorBookResult> {
+  if (result.status !== "OTP_REQUIRED") return result;
+
+  const mobile = extractShipperMobile(context.shipment.shipper);
+  if (!mobile) {
+    return {
+      status: "ERROR",
+      message: "Shipper mobile number is required to send OTP. Add it in Shipper details.",
+      error: "SHIPPER_MOBILE_REQUIRED",
+      apiStatus: "VENDOR_PENDING",
+      vendorProvider: result.vendorProvider,
+    };
+  }
+
+  const masked = maskMobile(mobile);
+
+  if (appSendsShipperOtp(context)) {
+    try {
+      const sent = await sendOtpToShipperMobile({
+        shipmentId: String(context.shipment.id ?? ""),
+      });
+      return {
+        ...result,
+        message: sent.message || `OTP sent to shipper mobile ${sent.masked}`,
+        sandboxOtp: sent.live ? null : (sent.sandboxOtp ?? null),
+        shipperMobileMasked: sent.masked,
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to send OTP SMS";
+      return {
+        status: "ERROR",
+        message: msg,
+        error: msg,
+        apiStatus: "VENDOR_PENDING",
+        vendorProvider: result.vendorProvider,
+      };
+    }
+  }
+
+  return {
+    ...result,
+    message: `OTP sent to shipper mobile ${masked}`,
+    shipperMobileMasked: masked,
+  };
+}
+
 async function bookViaLocalAdapter(args: {
   shipmentId: string;
   otp?: string | null;
@@ -187,19 +249,44 @@ async function bookViaLocalAdapter(args: {
       apiStatus: "NONE",
     };
   }
+
+  if (!args.otp) {
+    const mobile = extractShipperMobile(context.shipment.shipper);
+    if (!mobile) {
+      return {
+        status: "ERROR",
+        message: "Shipper mobile number is required to send OTP. Add it in Shipper details.",
+        error: "SHIPPER_MOBILE_REQUIRED",
+        apiStatus: "VENDOR_PENDING",
+      };
+    }
+  }
+
+  // OTP already verified in startVendorBooking when app-issued to shipper mobile.
+  const sandboxExpectedOtp =
+    args.otp && appSendsShipperOtp(context) ? args.otp.trim() : null;
+
   const adapter = resolveAdapterForIntegration(context.integration.provider_code);
-  return adapter.book({
+  const result = await adapter.book({
     context,
     otp: args.otp,
+    sandboxExpectedOtp,
     credentials: {
       username: context.integration.username,
       password: null,
       customerCode: context.integration.customer_code,
       accountNumber: context.integration.account_number,
       endpointUrl: context.integration.endpoint_url,
-      sandboxMode: context.integration.sandbox_mode !== false,
+      // Live by default; sandbox only when credential/integration explicitly flags it.
+      sandboxMode: context.integration.sandbox_mode === true,
     },
   });
+
+  if (result.status === "SUCCESS") {
+    return result;
+  }
+
+  return deliverOtpToShipper(context, result);
 }
 
 export type VendorBookingOutcome = {
@@ -236,12 +323,79 @@ export async function startVendorBooking(args: {
   rowVersion = progress.row_version;
 
   const action = args.otp ? "verify_otp" : args.isRetry ? "retry" : "book";
-  let result =
-    (await bookViaEdge({
-      shipmentId: args.shipmentId,
-      action,
-      otp: args.otp ?? undefined,
-    })) ?? (await bookViaLocalAdapter({ shipmentId: args.shipmentId, otp: args.otp }));
+
+  // App-issued OTPs (sandbox) must be verified against shipper challenge before booking continues.
+  if (args.otp) {
+    try {
+      const context = await getVendorShippingContext(args.shipmentId);
+      if (appSendsShipperOtp(context)) {
+        const checked = await verifyShipperOtpChallenge(args.shipmentId, args.otp);
+        if (!checked.ok) {
+          const appliedFail = await applyVendorResult({
+            shipmentId: args.shipmentId,
+            rowVersion,
+            result: {
+              status: "OTP_REQUIRED",
+              message: checked.message || "Invalid OTP. Please try again.",
+              error: "Invalid OTP",
+              apiStatus: "OTP_REQUIRED",
+            },
+          });
+          return {
+            result: {
+              status: "OTP_REQUIRED",
+              message: checked.message || "Invalid OTP. Please try again.",
+              error: "Invalid OTP",
+              apiStatus: "OTP_REQUIRED",
+            },
+            rowVersion: appliedFail.row_version,
+            vendorApiStatus: appliedFail.vendor_api_status,
+          };
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "OTP verification failed";
+      const appliedFail = await applyVendorResult({
+        shipmentId: args.shipmentId,
+        rowVersion,
+        result: {
+          status: "OTP_REQUIRED",
+          message: msg,
+          error: msg,
+          apiStatus: "OTP_REQUIRED",
+        },
+      });
+      return {
+        result: {
+          status: "OTP_REQUIRED",
+          message: msg,
+          error: msg,
+          apiStatus: "OTP_REQUIRED",
+        },
+        rowVersion: appliedFail.row_version,
+        vendorApiStatus: appliedFail.vendor_api_status,
+      };
+    }
+  }
+
+  let result = await bookViaEdge({
+    shipmentId: args.shipmentId,
+    action,
+    otp: args.otp ?? undefined,
+  });
+
+  if (result) {
+    if (!args.otp && result.status === "OTP_REQUIRED") {
+      try {
+        const context = await getVendorShippingContext(args.shipmentId);
+        result = await deliverOtpToShipper(context, result);
+      } catch {
+        /* keep edge result */
+      }
+    }
+  } else {
+    result = await bookViaLocalAdapter({ shipmentId: args.shipmentId, otp: args.otp });
+  }
 
   if (args.otp && result.status === "SUCCESS") {
     result = { ...result, otpVerified: true };
