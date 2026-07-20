@@ -357,8 +357,8 @@ begin
 
   select coalesce(jsonb_agg(to_jsonb(c) order by c.seq), '[]'::jsonb)
     into v_charges
-  from public.shipment_charges c
-  where c.shipment_id = v_s.id and c.tenant_id = v_tenant;
+  from public.shipment_charge_snapshots c
+  where c.shipment_id = v_s.id and c.tenant_id = v_tenant and c.deleted_at is null;
 
   return jsonb_build_object(
     'shipment', jsonb_build_object(

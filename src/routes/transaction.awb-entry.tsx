@@ -1223,6 +1223,9 @@ function AwbEntryPage() {
   const [piecesDraft, setPiecesDraft] = useState<PiecesDraft>(emptyPiecesDraft);
   const [chargeDraft, setChargeDraft] = useState<ChargeDraft>(emptyChargeDraft);
   const [proformaDraft, setProformaDraft] = useState<ProformaDraft>(emptyProformaDraft);
+  const [proformaUnits, setProformaUnits] = useState<string[]>([...PROFORMA_UNITS]);
+  const [addUnitOpen, setAddUnitOpen] = useState(false);
+  const [newUnitInput, setNewUnitInput] = useState("");
   const [vendorChargesOpen, setVendorChargesOpen] = useState(true);
   const [vendorChargeDraft, setVendorChargeDraft] =
     useState<VendorChargeDraft>(emptyVendorChargeDraft);
@@ -2620,9 +2623,27 @@ function AwbEntryPage() {
     });
   };
 
+  const addProformaUnit = () => {
+    const unit = newUnitInput.trim().toUpperCase();
+    if (!unit) return toast.error("Unit is required");
+    if (proformaUnits.some((u) => u.toUpperCase() === unit)) {
+      patchProformaDraft({ unit });
+      setAddUnitOpen(false);
+      setNewUnitInput("");
+      toast.message(`Unit ${unit} already exists`);
+      return;
+    }
+    setProformaUnits((prev) => [...prev, unit]);
+    patchProformaDraft({ unit });
+    setAddUnitOpen(false);
+    setNewUnitInput("");
+    toast.success(`Unit ${unit} added`);
+  };
+
   const addProformaLine = () => {
     if (!proformaDraft.description.trim()) return toast.error("Description is required");
-    const amount = proformaDraft.amount || updateProformaDraftAmount(proformaDraft);
+    if (!proformaDraft.rate.trim()) return toast.error("Rate is required");
+    const amount = updateProformaDraftAmount(proformaDraft);
     const igstPct = Number.parseFloat(proformaDraft.igstPercent) || 0;
     const igstAmount = ((Number.parseFloat(amount) || 0) * igstPct) / 100;
     const line: ProformaLine = {
@@ -3888,7 +3909,7 @@ function AwbEntryPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {PROFORMA_UNITS.map((u) => (
+                            {proformaUnits.map((u) => (
                               <SelectItem key={u} value={u}>
                                 {u}
                               </SelectItem>
@@ -3896,12 +3917,18 @@ function AwbEntryPage() {
                           </SelectContent>
                         </Select>
                         <Button
+                          type="button"
                           size="sm"
                           variant="outline"
-                          className="shrink-0 bg-sidebar px-2 text-sidebar-foreground hover:bg-sidebar/90"
-                          onClick={() => toast.info("Add Unit will be enabled with backend wiring")}
+                          title="Add custom unit"
+                          aria-label="Add custom unit"
+                          className="shrink-0 px-2"
+                          onClick={() => {
+                            setNewUnitInput("");
+                            setAddUnitOpen(true);
+                          }}
                         >
-                          + Add Unit
+                          <Plus className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </FieldWrapper>
@@ -3909,6 +3936,12 @@ function AwbEntryPage() {
                       <Input
                         value={proformaDraft.rate}
                         onChange={(e) => patchProformaDraft({ rate: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addProformaLine();
+                          }
+                        }}
                       />
                     </FieldWrapper>
                     <FieldWrapper label="Amount">
@@ -3916,11 +3949,12 @@ function AwbEntryPage() {
                     </FieldWrapper>
                     <div className="flex items-end lg:col-span-2">
                       <Button
+                        type="button"
                         className="w-full bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
                         onClick={addProformaLine}
                       >
                         <Plus className="mr-1 h-4 w-4" />
-                        Add
+                        Add line
                       </Button>
                     </div>
                   </div>
@@ -4490,6 +4524,44 @@ function AwbEntryPage() {
               </div>
             </TabsContent>
           </Tabs>
+
+          <Dialog open={addUnitOpen} onOpenChange={setAddUnitOpen}>
+            <DialogContent className="max-w-sm gap-0 overflow-hidden p-0 sm:max-w-sm">
+              <div className="bg-sidebar px-4 py-3">
+                <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+                  Add Unit
+                </DialogTitle>
+              </div>
+              <div className="flex flex-col gap-4 p-6">
+                <FieldWrapper label="Unit code">
+                  <Input
+                    autoFocus
+                    value={newUnitInput}
+                    placeholder="e.g. BOX"
+                    onChange={(e) => setNewUnitInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addProformaUnit();
+                      }
+                    }}
+                  />
+                </FieldWrapper>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => setAddUnitOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                    onClick={addProformaUnit}
+                  >
+                    Add
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={formSetupOpen} onOpenChange={(o) => !o && closeFormSetup()}>
             <DialogContent className="max-w-3xl gap-0 overflow-hidden p-0 sm:max-w-3xl">
