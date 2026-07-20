@@ -4,7 +4,7 @@ export type IntegrationProvider = {
   id: string;
   provider_code: string;
   provider_name: string;
-  provider_type: "CARRIER" | "EINVOICE" | "CUSTOMS";
+  provider_type: "CARRIER" | "EINVOICE" | "CUSTOMS" | "VENDOR_GATEWAY";
   status: "ACTIVE" | "INACTIVE";
   supports_booking: boolean;
   supports_tracking: boolean;

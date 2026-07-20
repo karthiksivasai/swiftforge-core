@@ -35,6 +35,7 @@ import {
 import { testIrnConnection } from "@/lib/integrations/irn";
 import { testCustomsConnection } from "@/lib/integrations/customs-edi";
 import { CustomsEdiExportPanel } from "@/components/integrations/customs-edi-export-panel";
+import { VendorIntegrationsPanel } from "@/components/integrations/vendor-integrations-panel";
 import { integrationCredentialSchema } from "@/lib/integrations/schemas";
 import type { IntegrationCredential, IntegrationProvider } from "@/lib/integrations/types";
 import { toErrorMessage } from "@/lib/masters/screen";
@@ -488,7 +489,8 @@ function IntegrationConfigurationPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Integration Configuration</h1>
         <p className="text-sm text-muted-foreground">
-          Carrier, e-invoice (IRN/GSP), and Customs EDI credentials. Secrets are write-only.{" "}
+          Carrier, vendor shipping gateway, e-invoice (IRN/GSP), and Customs EDI credentials.
+          Secrets are write-only.{" "}
           <a href="/utility/webhooks" className="underline">
             Configure outbound webhooks
           </a>
@@ -639,6 +641,10 @@ function IntegrationConfigurationPage() {
             )}
           </TableBody>
         </Table>
+      </Card>
+
+      <Card className="min-w-0 overflow-hidden border p-4 md:p-6">
+        <VendorIntegrationsPanel canModify={canModify || !authed} />
       </Card>
 
       <CustomsEdiExportPanel authed={Boolean(authed)} />

@@ -105,6 +105,20 @@ import {
 } from "@/lib/transactions/shipmentUiMap";
 import { getCarrierAdapter } from "@/lib/integrations/adapter";
 import { normalizeVendorToCarrierCode, SUPPORTED_CARRIER_CODES } from "@/lib/integrations/carriers";
+import {
+  getVendorShippingContext,
+  startVendorBooking,
+  type VendorApiStatus,
+} from "@/lib/integrations/vendor-shipping";
+import {
+  VendorActivityTimeline,
+  VendorBookingStatusStrip,
+  VendorDocumentsPanel,
+  VendorOtpDialog,
+  retryVendorBooking,
+  verifyVendorOtp,
+  type VendorShippingMeta,
+} from "@/components/transactions/vendor-shipping-panel";
 
 type LookupPair = { id?: string; code: string; name: string };
 
@@ -1231,6 +1245,11 @@ function AwbEntryPage() {
   const [clientLoading, setClientLoading] = useState(false);
   const [loadedClientProfile, setLoadedClientProfile] = useState<ClientProfile | null>(null);
   const clientLoadSeqRef = useRef(0);
+  const [vendorBookingBusy, setVendorBookingBusy] = useState(false);
+  const [vendorOtpOpen, setVendorOtpOpen] = useState(false);
+  const [vendorOtpError, setVendorOtpError] = useState<string | null>(null);
+  const [vendorMeta, setVendorMeta] = useState<VendorShippingMeta>({});
+  const [vendorPanelKey, setVendorPanelKey] = useState(0);
 
   type DraftUiStatus = "idle" | "saving" | "saved" | "error";
   const [draftUiStatus, setDraftUiStatus] = useState<DraftUiStatus>("idle");
@@ -1713,6 +1732,10 @@ function AwbEntryPage() {
     setDraftSavedAt(null);
     setLoadedClientProfile(null);
     setClientLoading(false);
+    setVendorMeta({});
+    setVendorOtpOpen(false);
+    setVendorOtpError(null);
+    setVendorBookingBusy(false);
     setShowForm(true);
   };
 
@@ -1720,6 +1743,9 @@ function AwbEntryPage() {
     setRestoreDraft(null);
     setLoadedClientProfile(null);
     setClientLoading(false);
+    setVendorMeta({});
+    setVendorOtpOpen(false);
+    setVendorOtpError(null);
     if (authed) {
       try {
         const full = (liveQuery.data?.rows ?? []).find((r) => r.id === row.id);
@@ -1774,6 +1800,26 @@ function AwbEntryPage() {
         setBookingErrors([]);
         setActiveTab("awb");
         setShowForm(true);
+        try {
+          const ctx = await getVendorShippingContext(row.id);
+          if (ctx.shippingApiEnabled || ctx.shipment.vendor_api_status) {
+            setVendorMeta({
+              status: String(ctx.shipment.vendor_api_status ?? "NONE") as VendorApiStatus,
+              vendorAwb: (ctx.shipment.vendor_api_awb as string) ?? null,
+              trackingNumber: (ctx.shipment.vendor_tracking_number as string) ?? null,
+              bookingId: (ctx.shipment.vendor_booking_id as string) ?? null,
+              provider: (ctx.shipment.vendor_provider as string) ?? ctx.integration?.provider_code,
+              serviceCode: (ctx.shipment.vendor_service_code as string) ?? null,
+              otpVerified: ctx.shipment.vendor_otp_verified === true,
+              bookedAt: (ctx.shipment.vendor_api_booked_at as string) ?? null,
+              syncStatus: (ctx.shipment.vendor_sync_status as string) ?? null,
+              lastError: (ctx.shipment.vendor_api_last_error as string) ?? null,
+            });
+            setVendorPanelKey((k) => k + 1);
+          }
+        } catch {
+          /* vendor shipping optional */
+        }
       } catch (e) {
         toast.error(toErrorMessage(e));
       }
@@ -1805,6 +1851,10 @@ function AwbEntryPage() {
     setVendorChargeDraft(emptyVendorChargeDraft());
     setLoadedClientProfile(null);
     setClientLoading(false);
+    setVendorMeta({});
+    setVendorOtpOpen(false);
+    setVendorOtpError(null);
+    setVendorBookingBusy(false);
   };
 
   const requestCloseForm = () => {
@@ -2024,10 +2074,96 @@ function AwbEntryPage() {
         } catch {
           toast.success(`AWB ${booked.awb_no} booked`);
         }
-        await refreshLive();
+
+        setEditing((prev) => ({
+          ...(prev ?? ({ ...payload, id: booked.id } as AwbRow)),
+          id: booked.id,
+          rowVersion: booked.row_version,
+          status: booked.current_status ?? "BOOKED",
+          awbNo: booked.awb_no || payload.awbNo,
+        }));
+        setForm((f) => ({ ...f, awbNo: booked.awb_no || f.awbNo }));
         setLastSavedForm({ ...payload, awbNo: booked.awb_no || payload.awbNo });
         allowLeaveRef.current = true;
         await clearDraftState();
+
+        // Vendor Shipping pipeline (provider-agnostic) — keep form open for OTP/docs
+        let shippingEnabled = false;
+        let shippingSkipReason: string | null = null;
+        try {
+          const ctx = await getVendorShippingContext(booked.id);
+          shippingEnabled = ctx.shippingApiEnabled;
+          if (!shippingEnabled) {
+            shippingSkipReason =
+              "Vendor shipping is not configured for this vendor. AWB booked locally only — no OTP.";
+          }
+        } catch (ctxErr) {
+          shippingEnabled = false;
+          shippingSkipReason = toErrorMessage(
+            ctxErr,
+            "Could not load vendor shipping config. AWB booked locally only — no OTP.",
+          );
+        }
+
+        if (shippingEnabled) {
+          setVendorBookingBusy(true);
+          setVendorMeta({ status: "BOOKING_IN_PROGRESS", provider: undefined });
+          try {
+            const outcome = await startVendorBooking({
+              shipmentId: booked.id,
+              rowVersion: booked.row_version,
+            });
+            setEditing((prev) =>
+              prev ? { ...prev, rowVersion: outcome.rowVersion, status: "BOOKED" } : prev,
+            );
+            setVendorMeta({
+              status: outcome.vendorApiStatus as VendorApiStatus,
+              vendorAwb: outcome.result.vendorAwb,
+              trackingNumber: outcome.result.vendorTrackingNumber,
+              bookingId: outcome.result.vendorBookingId,
+              provider: outcome.result.vendorProvider,
+              serviceCode: outcome.result.vendorServiceCode,
+              otpVerified: outcome.result.otpVerified,
+              syncStatus: outcome.result.syncStatus,
+              lastError: outcome.result.error,
+            });
+            setVendorPanelKey((k) => k + 1);
+            if (outcome.result.status === "OTP_REQUIRED") {
+              setVendorOtpError(null);
+              setVendorOtpOpen(true);
+              toast.message("Vendor verification required — enter OTP");
+            } else if (outcome.result.status === "SUCCESS") {
+              toast.success("Vendor booking completed");
+              if (outcome.result.vendorAwb) {
+                setForm((f) => ({
+                  ...f,
+                  forwardingNo: outcome.result.vendorAwb || f.forwardingNo,
+                  forwarding: {
+                    ...f.forwarding,
+                    forwardingAwb: outcome.result.vendorAwb || f.forwarding.forwardingAwb,
+                  },
+                }));
+              }
+            } else {
+              toast.warning(
+                outcome.result.message ||
+                  "Vendor booking failed. Shipment has been saved locally. Retry later.",
+              );
+            }
+          } catch (ve) {
+            toast.warning(toErrorMessage(ve, "Vendor booking failed. Shipment saved locally."));
+            setVendorMeta({ status: "VENDOR_PENDING", lastError: toErrorMessage(ve) });
+          } finally {
+            setVendorBookingBusy(false);
+          }
+          await refreshLive();
+          return;
+        }
+
+        if (shippingSkipReason) {
+          toast.message(shippingSkipReason);
+        }
+        await refreshLive();
         closeForm();
       } catch (e) {
         const msg = toErrorMessage(e);
@@ -2257,11 +2393,102 @@ function AwbEntryPage() {
 
   const canCarrierActions = Boolean(
     editing?.id &&
-    formStatus &&
-    formStatus !== "DRAFT" &&
-    formStatus !== "CANCELLED" &&
-    formStatus !== "VOID",
+      formStatus &&
+      formStatus !== "DRAFT" &&
+      formStatus !== "CANCELLED" &&
+      formStatus !== "VOID",
   );
+  const vendorShippingActive = Boolean(
+    vendorMeta.status && vendorMeta.status !== "NONE",
+  );
+  const canRetryVendorBooking = Boolean(
+    editing?.id &&
+      (vendorMeta.status === "VENDOR_PENDING" || vendorMeta.status === "FAILED"),
+  );
+
+  const runVendorOtpVerify = async (otp: string) => {
+    if (!editing?.id) return;
+    setVendorBookingBusy(true);
+    setVendorOtpError(null);
+    try {
+      const outcome = await verifyVendorOtp({
+        shipmentId: editing.id,
+        rowVersion: editing.rowVersion ?? 1,
+        otp,
+      });
+      setEditing((prev) => (prev ? { ...prev, rowVersion: outcome.rowVersion } : prev));
+      setVendorMeta({
+        status: outcome.vendorApiStatus as VendorApiStatus,
+        vendorAwb: outcome.result.vendorAwb,
+        trackingNumber: outcome.result.vendorTrackingNumber,
+        bookingId: outcome.result.vendorBookingId,
+        provider: outcome.result.vendorProvider,
+        serviceCode: outcome.result.vendorServiceCode,
+        otpVerified: outcome.result.otpVerified,
+        syncStatus: outcome.result.syncStatus,
+        lastError: outcome.result.error,
+      });
+      setVendorPanelKey((k) => k + 1);
+      if (outcome.result.status === "SUCCESS") {
+        setVendorOtpOpen(false);
+        toast.success("OTP verified — vendor booking completed");
+        if (outcome.result.vendorAwb) {
+          setForm((f) => ({
+            ...f,
+            forwardingNo: outcome.result.vendorAwb || f.forwardingNo,
+            forwarding: {
+              ...f.forwarding,
+              forwardingAwb: outcome.result.vendorAwb || f.forwarding.forwardingAwb,
+            },
+          }));
+        }
+      } else if (outcome.result.status === "OTP_REQUIRED") {
+        setVendorOtpError(outcome.result.message || "Invalid OTP");
+      } else {
+        setVendorOtpError(outcome.result.message || "Verification failed");
+      }
+    } catch (e) {
+      setVendorOtpError(toErrorMessage(e));
+    } finally {
+      setVendorBookingBusy(false);
+    }
+  };
+
+  const runVendorRetry = async () => {
+    if (!editing?.id) return;
+    setVendorBookingBusy(true);
+    try {
+      const outcome = await retryVendorBooking({
+        shipmentId: editing.id,
+        rowVersion: editing.rowVersion ?? 1,
+      });
+      setEditing((prev) => (prev ? { ...prev, rowVersion: outcome.rowVersion } : prev));
+      setVendorMeta({
+        status: outcome.vendorApiStatus as VendorApiStatus,
+        vendorAwb: outcome.result.vendorAwb,
+        trackingNumber: outcome.result.vendorTrackingNumber,
+        bookingId: outcome.result.vendorBookingId,
+        provider: outcome.result.vendorProvider,
+        serviceCode: outcome.result.vendorServiceCode,
+        otpVerified: outcome.result.otpVerified,
+        syncStatus: outcome.result.syncStatus,
+        lastError: outcome.result.error,
+      });
+      setVendorPanelKey((k) => k + 1);
+      if (outcome.result.status === "OTP_REQUIRED") {
+        setVendorOtpError(null);
+        setVendorOtpOpen(true);
+      } else if (outcome.result.status === "SUCCESS") {
+        toast.success("Vendor booking completed");
+      } else {
+        toast.warning(outcome.result.message || "Vendor booking failed");
+      }
+    } catch (e) {
+      toast.error(toErrorMessage(e));
+    } finally {
+      setVendorBookingBusy(false);
+    }
+  };
   const carrierBooked = editing?.carrierBookingStatus === "BOOKED";
 
   const confirmDelete = async () => {
@@ -3325,7 +3552,26 @@ function AwbEntryPage() {
                   </FormSection>
                 </div>
               </fieldset>
-              {canCarrierActions ? (
+              {editing?.id && (vendorShippingActive || vendorBookingBusy) ? (
+                <div className="border-t px-4 py-4 md:px-6">
+                  <VendorBookingStatusStrip
+                    meta={vendorMeta}
+                    bookingInProgress={vendorBookingBusy}
+                    canRetry={canRetryVendorBooking && !vendorBookingBusy}
+                    onRetry={() => void runVendorRetry()}
+                  />
+                  <VendorDocumentsPanel
+                    shipmentId={editing.id}
+                    rowVersion={editing.rowVersion ?? 1}
+                    refreshKey={vendorPanelKey}
+                    onRowVersion={(v) =>
+                      setEditing((prev) => (prev ? { ...prev, rowVersion: v } : prev))
+                    }
+                  />
+                  <VendorActivityTimeline shipmentId={editing.id} refreshKey={vendorPanelKey} />
+                </div>
+              ) : null}
+              {canCarrierActions && !vendorShippingActive ? (
                 <div className="border-t px-4 py-4 md:px-6">
                   <FormSection title="Carrier booking & tracking">
                     <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -4600,6 +4846,17 @@ function AwbEntryPage() {
           </Card>
         </>
       )}
+
+      <VendorOtpDialog
+        open={vendorOtpOpen}
+        busy={vendorBookingBusy}
+        error={vendorOtpError}
+        onVerify={(otp) => void runVendorOtpVerify(otp)}
+        onResend={() => void runVendorRetry()}
+        onCancel={() => {
+          if (!vendorBookingBusy) setVendorOtpOpen(false);
+        }}
+      />
 
       <AlertDialog open={!!restoreDraft && !showForm}>
         <AlertDialogContent>

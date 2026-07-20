@@ -88,6 +88,18 @@ export type ShipmentRow = BaseRow & {
   carrier_label_file_id: string | null;
   carrier_booking_status: string | null;
   carrier_last_sync_at: string | null;
+  vendor_api_status?: string | null;
+  vendor_api_awb?: string | null;
+  vendor_api_ref?: string | null;
+  vendor_booking_id?: string | null;
+  vendor_tracking_number?: string | null;
+  vendor_provider?: string | null;
+  vendor_service_code?: string | null;
+  vendor_otp_verified?: boolean | null;
+  vendor_api_booked_at?: string | null;
+  vendor_sync_status?: string | null;
+  vendor_api_last_error?: string | null;
+  vendor_last_sync_at?: string | null;
   customers: NamedRef;
   products: NamedRef;
   vendors: NamedRef;
@@ -161,6 +173,10 @@ const SHIPMENT_COLUMNS = `
   flight_no, current_status, status_at, is_locked, is_hold, wizard_extras,
   carrier_provider_code, carrier_booking_ref, carrier_tracking_no,
   carrier_label_file_id, carrier_booking_status, carrier_last_sync_at,
+  vendor_api_status, vendor_api_awb, vendor_api_ref, vendor_booking_id,
+  vendor_tracking_number, vendor_label_generated_at, vendor_last_sync_at,
+  vendor_sync_status, vendor_provider, vendor_service_code, vendor_otp_verified,
+  vendor_api_booked_at, vendor_api_last_error,
   created_at, created_by, updated_at, updated_by, deleted_at, row_version,
   customers(code,name),
   products(code,name),

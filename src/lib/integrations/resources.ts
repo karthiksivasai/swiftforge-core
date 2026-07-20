@@ -26,7 +26,11 @@ function mapProvider(row: Record<string, unknown>): IntegrationProvider {
     provider_code: String(row.provider_code ?? ""),
     provider_name: String(row.provider_name ?? ""),
     provider_type:
-      (String(row.provider_type ?? "CARRIER") as "CARRIER" | "EINVOICE" | "CUSTOMS") || "CARRIER",
+      (String(row.provider_type ?? "CARRIER") as
+        | "CARRIER"
+        | "EINVOICE"
+        | "CUSTOMS"
+        | "VENDOR_GATEWAY") || "CARRIER",
     status: (String(row.status ?? "ACTIVE") as "ACTIVE" | "INACTIVE") || "ACTIVE",
     supports_booking: row.supports_booking !== false,
     supports_tracking: row.supports_tracking !== false,

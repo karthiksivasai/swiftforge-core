@@ -412,6 +412,22 @@ Apply `0060_customs_edi.sql` after `0059_irn_integration.sql`.
 
 ---
 
+## Vendor Shipping API (0077) — provider-agnostic
+
+Per-tenant **Vendor Shipping Integrations** (Utility → Integration Configuration):
+
+1. Save carrier/gateway **credentials** (UserID / Password / Account / Endpoint) for provider code `XPRESION` (or future `DHL` / `FEDEX` / …).
+2. Create a **Vendor Integration** row: provider, linked credentials, endpoint, OTP required, services/products, optional mapped vendor IDs.
+3. On AWB **Book**: Internal `confirm_booking` → Vendor Shipping Service → adapter → Provider API.
+4. OTP modal when required; documents + activity timeline attach automatically.
+5. Edge Function: `supabase/functions/vendor-shipping` (optional; FE falls back to local sandbox adapter).
+
+AWB Entry never references a specific provider brand — only the Vendor Shipping client facade.
+
+Apply migration `0077_vendor_shipping_api.sql`. Deploy edge function when going live against a real gateway.
+
+---
+
 ## Deferred (not 7F)
 
 | Item | Milestone |
@@ -420,6 +436,7 @@ Apply `0060_customs_edi.sql` after `0059_irn_integration.sql`.
 | Automatic submission / ack / polling | later |
 | Customs clearance workflow | later |
 | Background workers / retries / cron | later |
+| Native DHL/FedEx/UPS HTTP adapters | later (stubs in registry) |
 | Phase 8 — Mobile & AI | **Phase 8** |
 
 ---
