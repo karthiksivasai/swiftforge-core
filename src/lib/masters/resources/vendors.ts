@@ -1,5 +1,12 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { BaseRow } from "@/lib/masters/core/baseCrud";
+import {
+  IMPORT_MAX_ROWS,
+  type ImportMaster,
+  type ImportMode,
+  type ImportResult,
+  type ImportRow,
+} from "@/lib/masters/core/import";
 import type { MasterResource } from "@/lib/masters/core/useMasterResource";
 import { VENDOR_AGGREGATE_PERMISSIONS } from "@/lib/permissions";
 import {
@@ -186,4 +193,130 @@ export async function saveVendor(args: {
   });
   if (error) throw new Error(error.message);
   return data as VendorRow;
+}
+
+/** CourierWala / UI export header aliases for vendor CSV import. */
+export const VENDOR_IMPORT_HEADER_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  code: ["Vendor Code", "Code"],
+  name: ["Vendor Name", "Name"],
+  contact_person: ["Contact Person", "Contact"],
+  address1: ["Address 1", "Address"],
+  address2: ["Address 2"],
+  city: ["City", "Address3"],
+  state_code: ["State", "State Code", "Address4"],
+  phone1: ["Phone 1", "Phone", "Telephone 1"],
+  phone2: ["Phone 2", "Telephone 2"],
+  fax: ["Fax", "VENDOR_FAX"],
+  mobile: ["Mobile", "VENDOR_MOBILE"],
+  email: ["Email", "Email Id", "VENDOR_EMAIL"],
+  gst_no: ["GST No", "GSTNo", "GST"],
+  currency: ["Currency"],
+  origin_destination_code: ["Origin", "Origin Code", "origin", "Destination Code"],
+  status: ["Status"],
+  is_global: ["Global", "Is Global"],
+  vendor_zip: ["Vendor Zip", "Zip"],
+  pin_code: ["Pin Code", "Pincode"],
+  website: ["Web Site", "Website"],
+  mode: ["Mode"],
+  fuel_head: ["Fuel Head"],
+};
+
+function cleanCell(v: unknown): string {
+  return String(v ?? "")
+    .replace(/\u00a0/g, " ")
+    .trim();
+}
+
+/** Normalize mapped CSV rows for import_vendors. */
+export function normalizeVendorImportRow(rec: Record<string, string>): ImportRow {
+  const code = cleanCell(rec.code);
+  const name = cleanCell(rec.name);
+  const phone1 = cleanCell(rec.phone1);
+  const phone2 = cleanCell(rec.phone2);
+  const mobile = cleanCell(rec.mobile) || phone1 || phone2 || "0000000000";
+  const statusRaw = cleanCell(rec.status);
+  const statusLower = statusRaw.toLowerCase();
+  const statusIsBool = ["true", "false", "t", "f", "yes", "no", "y", "n", "1", "0"].includes(
+    statusLower,
+  );
+
+  return {
+    ...rec,
+    code,
+    name,
+    contact_person: cleanCell(rec.contact_person),
+    address1: cleanCell(rec.address1),
+    address2: cleanCell(rec.address2),
+    city: cleanCell(rec.city),
+    state_code: cleanCell(rec.state_code),
+    phone1,
+    phone2,
+    fax: cleanCell(rec.fax),
+    mobile,
+    email: cleanCell(rec.email),
+    website: cleanCell(rec.website),
+    gst_no: cleanCell(rec.gst_no),
+    currency: cleanCell(rec.currency) || "INR",
+    origin_destination_code: cleanCell(rec.origin_destination_code),
+    vendor_zip: cleanCell(rec.vendor_zip),
+    pin_code: cleanCell(rec.pin_code),
+    mode: cleanCell(rec.mode) || "COURIER",
+    vendor_class: cleanCell(rec.vendor_class) || "VENDOR",
+    fuel_head: cleanCell(rec.fuel_head),
+    // CourierWala Status True/False → is_global; otherwise keep status text.
+    status: statusIsBool ? "ACTIVE" : statusRaw || "ACTIVE",
+    is_global: statusIsBool ? statusRaw : cleanCell(rec.is_global),
+  };
+}
+
+async function importVendorsOnce(
+  mode: ImportMode,
+  rows: ReadonlyArray<ImportRow>,
+): Promise<ImportResult> {
+  if (rows.length > IMPORT_MAX_ROWS) {
+    throw new Error(
+      `Import batch of ${rows.length} exceeds the ${IMPORT_MAX_ROWS}-row limit.`,
+    );
+  }
+  const { data, error } = await supabase.rpc("import_vendors", {
+    p_mode: mode,
+    p_rows: rows,
+  });
+  if (error) throw new Error(error.message);
+  return data as ImportResult;
+}
+
+/** Soft-FK vendor import for CourierWala Vendor.csv. */
+export async function importVendorsChunked(
+  mode: ImportMode,
+  rows: ReadonlyArray<ImportRow>,
+  opts?: { chunkSize?: number },
+): Promise<ImportResult & { job_ids: string[] }> {
+  const chunkSize = Math.min(Math.max(1, opts?.chunkSize ?? 2000), IMPORT_MAX_ROWS);
+  const aggregate: ImportResult & { job_ids: string[] } = {
+    master: "vendors" satisfies ImportMaster,
+    mode,
+    job_id: null,
+    total: 0,
+    ok: 0,
+    skipped: 0,
+    error_count: 0,
+    errors: [],
+    job_ids: [],
+  };
+
+  for (let offset = 0; offset < rows.length; offset += chunkSize) {
+    const chunk = rows.slice(offset, offset + chunkSize);
+    const res = await importVendorsOnce(mode, chunk);
+    aggregate.total += res.total;
+    aggregate.ok += res.ok;
+    aggregate.skipped += res.skipped;
+    aggregate.error_count += res.error_count;
+    if (res.job_id) aggregate.job_ids.push(res.job_id);
+    for (const e of res.errors) {
+      aggregate.errors.push({ ...e, row_no: e.row_no + offset });
+    }
+  }
+  aggregate.job_id = aggregate.job_ids[0] ?? null;
+  return aggregate;
 }

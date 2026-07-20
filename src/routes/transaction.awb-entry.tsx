@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Download,
@@ -53,11 +53,14 @@ import {
   PAGE_SIZE,
   TablePager,
 } from "@/components/master-table-kit";
-import { MasterLookupDialog } from "@/components/master-lookup-dialog";
-import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
-import { useLookup, type LookupKey as LiveLookupKey } from "@/lib/masters/core/lookup";
+import { SearchableLookupPair } from "@/components/masters/searchable-lookup-pair";
+import { PartyContactLookup } from "@/components/transactions/party-contact-lookup";
+import { VendorServiceLookup } from "@/components/transactions/vendor-service-lookup";
+import type { LookupKey } from "@/lib/master-lookups";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
+import { rememberPartiesAfterAwbSave } from "@/lib/transactions/resources/partyContacts";
+import { listVendorServices } from "@/lib/transactions/resources/vendorServices";
 import {
   cancelShipment,
   confirmBooking,
@@ -84,18 +87,6 @@ import { getCarrierAdapter } from "@/lib/integrations/adapter";
 import { normalizeVendorToCarrierCode, SUPPORTED_CARRIER_CODES } from "@/lib/integrations/carriers";
 
 type LookupPair = { id?: string; code: string; name: string };
-
-/** Demo master-lookups keys → live `public.lookup` RPC keys when signed in. */
-const DEMO_TO_LIVE_LOOKUP: Partial<Record<LookupKey, LiveLookupKey>> = {
-  customer: "customer",
-  destination: "destination",
-  shipper: "shipper",
-  product: "product",
-  vendor: "vendor",
-  fieldExecutive: "field-executive",
-  salesExecutive: "sales-executive",
-  area: "area",
-};
 
 type PartyDetails = {
   origin: LookupPair;
@@ -342,7 +333,18 @@ const SEARCH_FIELDS: { value: SearchField; label: string }[] = [
 ];
 
 const PAYMENT_TYPES = ["Cash", "Cheque", "Credit", "To Pay"] as const;
-const DOCUMENT_TYPES = ["Passport", "Aadhar", "GSTIN", "PAN", "Other"] as const;
+const DOCUMENT_TYPES = [
+  "Aadhaar Number",
+  "GSTIN (Normal)",
+  "GSTIN",
+  "PAN Number",
+  "Passport Number",
+  "Driving License",
+  "IEC Certificate",
+  "Voter ID",
+  "TAN Number",
+  "Other",
+] as const;
 const CURRENCIES = ["INR", "USD", "AUD", "GBP", "EUR"] as const;
 const PIECE_UNITS = ["DOX", "NDOX", "ENV"] as const;
 const WEIGHT_UNITS = ["Kgs", "Lbs"] as const;
@@ -635,6 +637,44 @@ const ENTRY_TYPES = ["Duplicate Entry"] as const;
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
 
+/** Default shipper origin for new AWB entries (CourierWala / HYD hub). */
+const DEFAULT_SHIPPER_ORIGIN: LookupPair = { code: "HYD", name: "Hyderabad" };
+
+/** Ensure selected Service belongs to Vendor via Service Mapping (live). */
+async function validateVendorServicePair(form: {
+  vendor: LookupPair;
+  service: LookupPair;
+}): Promise<string | null> {
+  const hasVendor = Boolean(form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim());
+  if (!hasVendor) return null;
+  const serviceKey = (form.service.code.trim() || form.service.name.trim()).toLowerCase();
+  if (!serviceKey) return "Service is required when Vendor is selected";
+  try {
+    const hits = await listVendorServices({
+      vendorId: form.vendor.id || null,
+      vendorCode: form.vendor.code.trim() || form.vendor.name.trim() || null,
+      q: null,
+      limit: 200,
+    });
+    if (hits.length === 0) {
+      return "No services are configured for this vendor.";
+    }
+    const ok = hits.some(
+      (h) =>
+        h.code.toLowerCase() === serviceKey ||
+        h.name.toLowerCase() === serviceKey ||
+        (h.service_type ?? "").toLowerCase() === serviceKey ||
+        h.service.toLowerCase() === serviceKey,
+    );
+    if (!ok) {
+      return `Service "${form.service.code || form.service.name}" is not mapped to the selected Vendor`;
+    }
+    return null;
+  } catch (e) {
+    return toErrorMessage(e, "Could not validate Vendor / Service mapping");
+  }
+}
+
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const nowBookTime = () => {
@@ -754,7 +794,7 @@ const emptyForm = (): AwbFullForm => ({
   debitNoteNo: "0",
   creditNoteNo: "0",
   flightNo: "",
-  shipper: emptyParty(),
+  shipper: { ...emptyParty(), origin: { ...DEFAULT_SHIPPER_ORIGIN } },
   consignee: emptyParty(),
   product: emptyPair(),
   vendor: emptyPair(),
@@ -1129,6 +1169,11 @@ function AwbEntryPage() {
     enabled: authed,
   });
 
+  useEffect(() => {
+    if (!liveQuery.isError) return;
+    toast.error(toErrorMessage(liveQuery.error, "Failed to load AWB list"));
+  }, [liveQuery.isError, liveQuery.error]);
+
   const rows: AwbRow[] = authed
     ? (liveQuery.data?.rows ?? []).map((r) => {
         const list = dbShipmentToListRow(r);
@@ -1164,6 +1209,7 @@ function AwbEntryPage() {
 
   const refreshLive = async () => {
     await queryClient.invalidateQueries({ queryKey: ["shipments"] });
+    await queryClient.refetchQueries({ queryKey: ["shipments"] });
   };
 
   const normalizeForm = (data: AwbFullForm): AwbFullForm => {
@@ -1510,6 +1556,11 @@ function AwbEntryPage() {
     if (!form.product.code.trim()) return toast.error("Product is required");
     if (!formSetupSettings.airlineNotRequired && !form.airline.trim())
       return toast.error("Airline is required");
+    if (form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim()) {
+      if (!form.service.code.trim() && !form.service.name.trim()) {
+        return toast.error("Service is required when Vendor is selected");
+      }
+    }
 
     const payload = normalizeForm({
       ...form,
@@ -1522,6 +1573,11 @@ function AwbEntryPage() {
       setSaving(true);
       setBookingErrors([]);
       try {
+        const vendorServiceError = await validateVendorServicePair(payload);
+        if (vendorServiceError) {
+          toast.error(vendorServiceError);
+          return;
+        }
         const { fields, pieces, charges } = uiFormToShipmentPayload({
           ...payload,
           pickupId: editing?.pickupId ?? payload.pickupId,
@@ -1532,6 +1588,10 @@ function AwbEntryPage() {
           fields,
           pieces,
           charges,
+        });
+        await rememberPartiesAfterAwbSave({
+          shipper: payload.shipper,
+          consignee: payload.consignee,
         });
         await refreshLive();
         toast.success(editing ? "AWB entry updated" : `AWB ${saved.awb_no} saved (DRAFT)`);
@@ -1576,6 +1636,11 @@ function AwbEntryPage() {
     if (!form.product.code.trim()) errors.push("Product is required");
     if (!form.bookDate.trim()) errors.push("Book date is required");
     if (form.piecesLines.length < 1) errors.push("At least one shipment piece is required");
+    if (form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim()) {
+      if (!form.service.code.trim() && !form.service.name.trim()) {
+        errors.push("Service is required when Vendor is selected");
+      }
+    }
     return errors;
   };
 
@@ -1599,6 +1664,12 @@ function AwbEntryPage() {
     if (authed) {
       setSaving(true);
       try {
+        const vendorServiceError = await validateVendorServicePair(payload);
+        if (vendorServiceError) {
+          setBookingErrors([vendorServiceError]);
+          toast.error(vendorServiceError);
+          return;
+        }
         const { fields, pieces, charges } = uiFormToShipmentPayload({
           ...payload,
           pickupId: editing?.pickupId ?? payload.pickupId,
@@ -1613,6 +1684,10 @@ function AwbEntryPage() {
         const booked = await confirmBooking({
           id: saved.id,
           rowVersion: saved.row_version,
+        });
+        await rememberPartiesAfterAwbSave({
+          shipper: payload.shipper,
+          consignee: payload.consignee,
         });
         try {
           const breakdown = await getRatingBreakdown(booked.id);
@@ -4160,10 +4235,32 @@ function PartySection({
           />
         </FieldWrapper>
         <FieldWrapper label="Company Name">
-          <LookupPairInput
-            lookup={title.includes("Shipper") ? "shipper" : "customer"}
+          <PartyContactLookup
+            role={title.includes("Shipper") ? "shipper" : "consignee"}
             value={party.companyName}
-            onChange={(v) => onChange({ companyName: v })}
+            onCompanyChange={(v) => onChange({ companyName: v })}
+            onSelectContact={(c) =>
+              onChange({
+                companyName: { id: c.id, code: c.code, name: c.name },
+                contactName: c.contactName || c.name,
+                address1: c.address1,
+                address2: c.address2,
+                pincode: c.pincode,
+                city: c.city,
+                state: c.state,
+                country: c.country || "India",
+                telephone: c.telephone,
+                mobileNo: c.mobileNo,
+                email: c.email,
+                documentType: c.documentType,
+                documentNo: c.documentNo,
+                iecNo: c.iecNo,
+                origin:
+                  c.origin.code || c.origin.name
+                    ? { id: c.origin.id, code: c.origin.code, name: c.origin.name }
+                    : party.origin,
+              })
+            }
           />
         </FieldWrapper>
         <FieldWrapper label="Contact Name">
@@ -4253,6 +4350,9 @@ function ServicesSection({
   setForm: React.Dispatch<React.SetStateAction<AwbFullForm>>;
   airlineRequired?: boolean;
 }) {
+  const hasVendor = Boolean(
+    form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim(),
+  );
   return (
     <FormSection title="Services Details">
       <div className="grid grid-cols-1 gap-3">
@@ -4267,7 +4367,14 @@ function ServicesSection({
           <LookupPairInput
             lookup="vendor"
             value={form.vendor}
-            onChange={(v) => setForm((f) => ({ ...f, vendor: v }))}
+            onChange={(v) =>
+              setForm((f) => ({
+                ...f,
+                vendor: v,
+                // Changing vendor invalidates the previous service mapping.
+                service: emptyPair(),
+              }))
+            }
           />
         </FieldWrapper>
         <FieldWrapper label="Airline" required={airlineRequired}>
@@ -4276,12 +4383,19 @@ function ServicesSection({
             onChange={(e) => setForm((f) => ({ ...f, airline: e.target.value }))}
           />
         </FieldWrapper>
-        <FieldWrapper label="Service">
-          <LookupPairInput
-            lookup="product"
+        <FieldWrapper label="Service" required={hasVendor}>
+          <VendorServiceLookup
+            vendor={form.vendor}
             value={form.service}
             onChange={(v) => setForm((f) => ({ ...f, service: v }))}
+            productId={form.product.id}
+            destinationId={form.consignee.origin.id}
           />
+          {hasVendor ? null : (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Select a Vendor to load mapped services.
+            </p>
+          )}
         </FieldWrapper>
         <div className="grid grid-cols-[1fr_5rem] gap-2">
           <FieldWrapper label="Shipment Value">
@@ -4522,90 +4636,5 @@ function LookupPairInput({
   onChange: (v: LookupPair) => void;
   lookup: LookupKey;
 }) {
-  const { isAuthenticated: live } = useAuth();
-  const [lookupOpen, setLookupOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const liveKey = DEMO_TO_LIVE_LOOKUP[lookup];
-  const { data: liveRows, isFetching } = useLookup(liveKey ?? "branch", query, {
-    enabled: live && lookupOpen && Boolean(liveKey),
-  });
-
-  return (
-    <>
-      <div className="flex gap-1">
-        <Input
-          value={value.code}
-          onChange={(e) => onChange({ ...value, id: undefined, code: e.target.value })}
-          className="w-20"
-          placeholder="Code"
-        />
-        <Input
-          value={value.name}
-          onChange={(e) => onChange({ ...value, id: undefined, name: e.target.value })}
-          className="min-w-0 flex-1"
-          placeholder="Name"
-        />
-        <Button
-          size="icon"
-          variant="outline"
-          className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-          aria-label="Search"
-          onClick={() => setLookupOpen(true)}
-        >
-          <Search className="h-4 w-4" />
-        </Button>
-      </div>
-      {live && liveKey ? (
-        <Dialog
-          open={lookupOpen}
-          onOpenChange={(o) => {
-            setLookupOpen(o);
-            if (!o) setQuery("");
-          }}
-        >
-          <DialogContent className="max-w-lg">
-            <DialogTitle className="text-base font-semibold">
-              Select {MASTER_LOOKUPS[lookup]?.title?.replace(/^Select\s+/i, "") ?? lookup}
-            </DialogTitle>
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by code or name…"
-              className="mb-2"
-            />
-            <div className="max-h-72 overflow-auto rounded border">
-              {(liveRows ?? []).map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  className="flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted/50"
-                  onClick={() => {
-                    onChange({ id: row.id, code: row.code, name: row.name });
-                    setLookupOpen(false);
-                    setQuery("");
-                  }}
-                >
-                  <span className="font-medium">{row.name}</span>
-                  <span className="text-muted-foreground">{row.code}</span>
-                </button>
-              ))}
-              {!isFetching && (liveRows ?? []).length === 0 && (
-                <div className="px-3 py-6 text-center text-sm text-muted-foreground">No matches</div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      ) : (
-        <MasterLookupDialog
-          open={lookupOpen}
-          onOpenChange={setLookupOpen}
-          lookup={lookup}
-          returnField="code"
-          onSelect={(_v, option: LookupOption) =>
-            onChange({ code: option.code, name: option.name })
-          }
-        />
-      )}
-    </>
-  );
+  return <SearchableLookupPair value={value} onChange={onChange} lookup={lookup} />;
 }

@@ -36,6 +36,7 @@ import { customersResource } from "./customers";
 import { serviceMappingsResource } from "./serviceMappings";
 import { vendorContractsResource } from "./vendorContracts";
 import { localBranchesResource } from "./localBranches";
+import { expenseHeadsResource } from "./expenseHeads";
 
 // geo (Phase 3 — Geo Masters)
 export * from "./countries";
@@ -70,6 +71,7 @@ export * from "./customers";
 export * from "./serviceMappings";
 export * from "./vendorContracts";
 export * from "./localBranches";
+export * from "./expenseHeads";
 
 /** Erased resource type for generic iteration. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -108,6 +110,7 @@ export const masterResources = [
   serviceMappingsResource,
   vendorContractsResource,
   localBranchesResource,
+  expenseHeadsResource,
 ] as unknown as AnyMasterResource[];
 
 export const masterResourceByKey: Record<string, AnyMasterResource> = Object.fromEntries(

@@ -91,6 +91,7 @@ export type ShipmentRow = BaseRow & {
   customers: NamedRef;
   products: NamedRef;
   vendors: NamedRef;
+  delivery_vendor: NamedRef;
   destination: NamedRef;
   origin: NamedRef;
   field_executives: NamedRef;
@@ -163,7 +164,8 @@ const SHIPMENT_COLUMNS = `
   created_at, created_by, updated_at, updated_by, deleted_at, row_version,
   customers(code,name),
   products(code,name),
-  vendors(code,name),
+  vendors:vendors!shipments_vendor_fk(code,name),
+  delivery_vendor:vendors!shipments_delivery_vendor_fk(code,name),
   destination:destinations!shipments_destination_fk(code,name),
   origin:destinations!shipments_origin_fk(code,name),
   field_executives(code,name),

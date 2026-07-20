@@ -32,3 +32,4 @@ export * from "./consignees";
 export * from "./shippers";
 export * from "./customers";
 export * from "./localBranches";
+export * from "./expenseHeads";

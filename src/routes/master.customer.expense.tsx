@@ -1,17 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import {
-  RefreshCw,
-  Plus,
-  Search,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { RefreshCw, Plus, Search, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -50,62 +46,181 @@ import {
   IconButton,
   MasterBreadcrumb,
   PAGE_SIZE,
-  StatusPill,
   TablePager,
 } from "@/components/master-table-kit";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
-import type { CsvRecord } from "@/lib/masters/core/csv";
+import { cn } from "@/lib/utils";
 
-type Status = "Active" | "In-Active";
-type ExpenseType = "Direct" | "Indirect" | "Operational" | "Administrative";
+import { useAuth } from "@/lib/auth";
+import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { masterKeys } from "@/lib/masters/core/queryKeys";
+import { mapCsvToImportRows } from "@/lib/masters/core";
+import type { CsvRecord } from "@/lib/masters/core/csv";
+import {
+  expenseHeadsResource,
+  EXPENSE_IMPORT_HEADER_ALIASES,
+  expenseCodeFromName,
+  importExpenseHeadsChunked,
+  normalizeExpenseImportRow,
+  type ExpenseHeadRow as ExpenseDbRow,
+} from "@/lib/masters/resources/expenseHeads";
+import {
+  expenseHeadCreateSchema,
+  expenseHeadUpdateSchema,
+} from "@/lib/masters/schemas/expenseHeads";
+import type { ImportRow } from "@/lib/masters/core/import";
+import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
+
+type ExpenseKind = "Expense" | "Income";
 
 type ExpenseRow = {
   id: string;
   code: string;
   name: string;
-  expenseType: ExpenseType;
-  ledger: string;
-  glAccount: string;
-  taxPct: string;
-  status: Status;
+  kind: ExpenseKind;
+  authorizationRequired: boolean;
+  authorizedHoAmount: string;
+  authorizedBranchAmount: string;
+  documentRequired: boolean;
+  documentRequiredAmount: string;
+  row_version?: number;
 };
 
-const EXPENSE_TYPES: ExpenseType[] = ["Direct", "Indirect", "Operational", "Administrative"];
+type ExpenseForm = Omit<ExpenseRow, "id" | "row_version">;
 
-const emptyRow = (): Omit<ExpenseRow, "id"> => ({
-  code: "", name: "", expenseType: "Operational", ledger: "", glAccount: "",
-  taxPct: "0", status: "Active",
+const emptyForm = (): ExpenseForm => ({
+  code: "",
+  name: "",
+  kind: "Expense",
+  authorizationRequired: true,
+  authorizedHoAmount: "0",
+  authorizedBranchAmount: "0",
+  documentRequired: true,
+  documentRequiredAmount: "0",
 });
+
+const codeFromName = expenseCodeFromName;
+
+function rowToView(r: ExpenseDbRow): ExpenseRow {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    kind: r.kind === "INCOME" ? "Income" : "Expense",
+    authorizationRequired: Boolean(r.authorization_required),
+    authorizedHoAmount: String(r.authorized_ho_amount ?? 0),
+    authorizedBranchAmount: String(r.authorized_branch_amount ?? 0),
+    documentRequired: Boolean(r.document_required),
+    documentRequiredAmount: String(r.document_required_amount ?? 0),
+    row_version: r.row_version,
+  };
+}
+
+function toRaw(form: ExpenseForm) {
+  const name = form.name.trim();
+  return {
+    code: form.code.trim() || codeFromName(name),
+    name,
+    kind: form.kind === "Income" ? "INCOME" : "EXPENSE",
+    expense_type: "OPERATIONAL" as const,
+    authorization_required: form.authorizationRequired,
+    authorized_ho_amount: form.authorizedHoAmount,
+    authorized_branch_amount: form.authorizedBranchAmount,
+    document_required: form.documentRequired,
+    document_required_amount: form.documentRequiredAmount,
+    status: "ACTIVE" as const,
+  };
+}
+
+function YesNoToggle({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex h-10 overflow-hidden rounded-md border">
+      <button
+        type="button"
+        className={cn(
+          "flex-1 px-3 text-sm font-medium transition-colors",
+          value ? "bg-emerald-600 text-white" : "bg-background text-muted-foreground hover:bg-muted",
+        )}
+        onClick={() => onChange(true)}
+      >
+        Yes
+      </button>
+      <button
+        type="button"
+        className={cn(
+          "flex-1 border-l px-3 text-sm font-medium transition-colors",
+          !value ? "bg-emerald-600 text-white" : "bg-background text-muted-foreground hover:bg-muted",
+        )}
+        onClick={() => onChange(false)}
+      >
+        No
+      </button>
+    </div>
+  );
+}
 
 export const Route = createFileRoute("/master/customer/expense")({
   head: () => ({
     meta: [
       { title: "Expense — Master — Courier ERP" },
-      { name: "description", content: "Manage expense heads used across billing, invoicing, and accounting." },
+      {
+        name: "description",
+        content: "Manage expense heads used across billing, invoicing, and accounting.",
+      },
     ],
   }),
   component: ExpensePage,
 });
 
 function ExpensePage() {
-  const [rows, setRows] = useState<ExpenseRow[]>([]);
+  const { isAuthenticated: authed } = useAuth();
+  const rc = useMasterResource(expenseHeadsResource);
+  const live = useMasterList(expenseHeadsResource, { enabled: authed });
+  const queryClient = useQueryClient();
+
+  const [demoRows, setDemoRows] = useState<ExpenseRow[]>([]);
   const [search, setSearch] = useState("");
-  const [colFilters, setColFilters] = useState({ code: "", name: "", expenseType: "", ledger: "", status: "" });
+  const [colFilters, setColFilters] = useState({ name: "", isAuthorized: "" });
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ExpenseRow | null>(null);
-  const [form, setForm] = useState<Omit<ExpenseRow, "id">>(emptyRow());
+  const [form, setForm] = useState<ExpenseForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<ExpenseRow | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const rows: ExpenseRow[] = authed ? (live.rows as ExpenseDbRow[]).map(rowToView) : demoRows;
+
+  const canAdd = !authed || rc.perms.canAdd;
+  const canModify = !authed || rc.perms.canModify;
+  const canDelete = !authed || rc.perms.canDelete;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
-      if (q && ![r.code, r.name, r.expenseType, r.ledger, r.glAccount, r.status].some((v) => String(v).toLowerCase().includes(q))) return false;
-      if (colFilters.code && !r.code.toLowerCase().includes(colFilters.code.toLowerCase())) return false;
-      if (colFilters.name && !r.name.toLowerCase().includes(colFilters.name.toLowerCase())) return false;
-      if (colFilters.expenseType && !r.expenseType.toLowerCase().includes(colFilters.expenseType.toLowerCase())) return false;
-      if (colFilters.ledger && !r.ledger.toLowerCase().includes(colFilters.ledger.toLowerCase())) return false;
-      if (colFilters.status && !r.status.toLowerCase().includes(colFilters.status.toLowerCase())) return false;
+      const authLabel = r.authorizationRequired ? "1" : "0";
+      const authYesNo = r.authorizationRequired ? "yes" : "no";
+      if (q && ![r.name, r.code, r.kind, authLabel, authYesNo].some((v) => v.toLowerCase().includes(q)))
+        return false;
+      if (colFilters.name && !r.name.toLowerCase().includes(colFilters.name.toLowerCase()))
+        return false;
+      if (colFilters.isAuthorized) {
+        const f = colFilters.isAuthorized.trim().toLowerCase();
+        if (f === "1" || f === "yes" || f === "true") {
+          if (!r.authorizationRequired) return false;
+        } else if (f === "0" || f === "no" || f === "false") {
+          if (r.authorizationRequired) return false;
+        } else if (!authLabel.includes(f) && !authYesNo.includes(f)) {
+          return false;
+        }
+      }
       return true;
     });
   }, [rows, search, colFilters]);
@@ -116,77 +231,186 @@ function ExpensePage() {
   const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const endIdx = Math.min(currentPage * PAGE_SIZE, filtered.length);
 
-  const openAdd = () => { setEditing(null); setForm(emptyRow()); setOpen(true); };
+  const openAdd = () => {
+    setEditing(null);
+    setForm(emptyForm());
+    setOpen(true);
+  };
+
   const openEdit = (row: ExpenseRow) => {
     setEditing(row);
-    const { id: _id, ...rest } = row;
+    const { id: _id, row_version: _rv, ...rest } = row;
     setForm(rest);
     setOpen(true);
   };
 
-  const handleSave = () => {
-    if (!form.code.trim()) return toast.error("Expense Code is required");
-    if (!form.name.trim()) return toast.error("Expense Name is required");
-    const tax = parseFloat(form.taxPct || "0");
-    if (Number.isNaN(tax) || tax < 0 || tax > 100) return toast.error("Tax % must be between 0 and 100");
+  const handleSave = async () => {
+    if (!form.name.trim()) return toast.error("Expense Head is required");
+    if (!form.kind) return toast.error("Expense Type is required");
+    const raw = toRaw(form);
+    if (authed) {
+      setSaving(true);
+      try {
+        if (editing) {
+          await rc.update.mutateAsync({
+            id: editing.id,
+            rowVersion: editing.row_version ?? 0,
+            patch: expenseHeadUpdateSchema.parse(raw),
+          });
+          toast.success("Expense updated");
+        } else {
+          await rc.create.mutateAsync(expenseHeadCreateSchema.parse(raw));
+          toast.success("Expense added");
+        }
+        setOpen(false);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not save expense"));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
+      setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? { ...editing, ...form } : r)));
       toast.success("Expense updated");
     } else {
-      setRows((prev) => [{ id: crypto.randomUUID(), ...form }, ...prev]);
+      setDemoRows((prev) => [
+        { id: crypto.randomUUID(), ...form, code: form.code || codeFromName(form.name) },
+        ...prev,
+      ]);
       toast.success("Expense added");
     }
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success(`Deleted ${deleteTarget.code}`);
+    const row = deleteTarget;
+    if (authed) {
+      try {
+        await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
+        toast.success(`Deleted ${row.name}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not delete expense"));
+      }
+    } else {
+      setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success(`Deleted ${row.name}`);
+    }
+    setSelected((prev) => {
+      const n = new Set(prev);
+      n.delete(row.id);
+      return n;
+    });
     setDeleteTarget(null);
+  };
+
+  const confirmBulkDelete = async () => {
+    const ids = selected;
+    if (ids.size === 0) return;
+    if (authed) {
+      const targets = rows.filter((r) => ids.has(r.id));
+      let ok = 0;
+      for (const r of targets) {
+        try {
+          await rc.remove.mutateAsync({ id: r.id, rowVersion: r.row_version ?? 0 });
+          ok++;
+        } catch {
+          /* keep going */
+        }
+      }
+      if (ok === targets.length) toast.success(`Deleted ${ok} expense${ok === 1 ? "" : "s"}`);
+      else toast.error(`Deleted ${ok} of ${targets.length}; some could not be removed`);
+    } else {
+      setDemoRows((prev) => prev.filter((r) => !ids.has(r.id)));
+      toast.success(`Deleted ${ids.size} expense${ids.size === 1 ? "" : "s"}`);
+    }
+    setSelected(new Set());
+    setBulkDeleteOpen(false);
+  };
+
+  const pageIds = pageRows.map((r) => r.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const somePageSelected = pageIds.some((id) => selected.has(id));
+  const togglePageAll = (checked: boolean) => {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (checked) pageIds.forEach((id) => n.add(id));
+      else pageIds.forEach((id) => n.delete(id));
+      return n;
+    });
+  };
+  const toggleOne = (id: string, checked: boolean) => {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (checked) n.add(id);
+      else n.delete(id);
+      return n;
+    });
   };
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
+      const mapped = mapCsvToImportRows(parsedRows, expenseHeadsResource.importColumns, {
+        aliases: EXPENSE_IMPORT_HEADER_ALIASES,
+      }).map((rec) => normalizeExpenseImportRow(rec));
+      if (authed) {
+        if (!rc.perms.canAdd) {
+          toast.error("You don't have permission to import expenses");
+          return;
+        }
+        const importRows = mapped.filter((r) => String(r.name || "").trim()) as ImportRow[];
+        if (importRows.length === 0) {
+          toast.error("No valid rows found");
+          return;
+        }
+        const res = await importExpenseHeadsChunked("COMMIT", importRows);
+        const toastRes = formatImportToast(res);
+        if (toastRes.ok) toast.success(toastRes.message);
+        else toast.error(toastRes.message);
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(expenseHeadsResource.key) });
+        return;
+      }
       const imported: ExpenseRow[] = [];
-      for (const rec of parsedRows) {
-        const code = (rec["Code"] ?? rec["code"] ?? "").trim();
-        if (!code) continue;
-        const et =
-          EXPENSE_TYPES.find(
-            (t) =>
-              t.toLowerCase() === (rec["Expense Type"] ?? rec["expense_type"] ?? "").trim().toLowerCase(),
-          ) ?? "Operational";
-        const status =
-          (rec["Status"] ?? rec["status"] ?? "").trim().toLowerCase() === "in-active"
-            ? "In-Active"
-            : "Active";
+      for (const rec of mapped) {
+        const name = String(rec.name || "").trim();
+        if (!name) continue;
+        const kindRaw = String(rec.kind || "Expense").trim().toLowerCase();
+        const authRaw = String(rec.authorization_required || "1").trim().toLowerCase();
         imported.push({
           id: crypto.randomUUID(),
-          code,
-          name: (rec["Name"] ?? rec["name"] ?? "").trim(),
-          expenseType: et,
-          ledger: (rec["Ledger"] ?? rec["ledger"] ?? "").trim(),
-          glAccount: (rec["GL Account"] ?? rec["gl_account"] ?? "").trim(),
-          taxPct: (rec["Tax %"] ?? rec["tax_pct"] ?? "0").trim(),
-          status: status as Status,
+          code: String(rec.code || "").trim() || codeFromName(name),
+          name,
+          kind: kindRaw.startsWith("inc") ? "Income" : "Expense",
+          authorizationRequired: !(
+            authRaw === "0" ||
+            authRaw === "no" ||
+            authRaw === "false"
+          ),
+          authorizedHoAmount: String(rec.authorized_ho_amount || "0"),
+          authorizedBranchAmount: String(rec.authorized_branch_amount || "0"),
+          documentRequired: true,
+          documentRequiredAmount: String(rec.document_required_amount || "0"),
         });
       }
       if (imported.length === 0) {
         toast.error("No valid rows found");
         return;
       }
-      setRows((prev) => [...imported, ...prev]);
+      setDemoRows((prev) => [...imported, ...prev]);
       toast.success(`Imported ${imported.length} row${imported.length === 1 ? "" : "s"}`);
-    } catch {
-      toast.error("Failed to import file");
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
     }
   };
 
   const handleRefresh = () => {
     setSearch("");
-    setColFilters({ code: "", name: "", expenseType: "", ledger: "", status: "" });
+    setColFilters({ name: "", isAuthorized: "" });
     setPage(1);
+    if (authed) {
+      void queryClient.invalidateQueries({ queryKey: masterKeys.all(expenseHeadsResource.key) });
+    }
     toast.success("Refreshed");
   };
 
@@ -204,42 +428,68 @@ function ExpensePage() {
       <Card className="overflow-hidden p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               <DataIoToolbar
                 export={{
                   filename: "expenses",
                   title: "Expenses",
                   columns: [
-                    { key: "code", header: "Code" },
                     { key: "name", header: "Name" },
-                    { key: "expenseType", header: "Expense Type" },
-                    { key: "ledger", header: "Ledger" },
-                    { key: "glAccount", header: "GL Account" },
-                    { key: "taxPct", header: "Tax %" },
-                    { key: "status", header: "Status" },
+                    { key: "isAuthorized", header: "Is Authorized" },
+                    { key: "kind", header: "Expense Type" },
+                    { key: "authorizedHoAmount", header: "Authorised By HO Amount" },
+                    { key: "authorizedBranchAmount", header: "Authorised By Branch Amount" },
+                    { key: "documentRequired", header: "Document Required" },
+                    { key: "documentRequiredAmount", header: "Document Required For Amount" },
                   ],
                   getRows: () =>
                     rows.map((r) => ({
-                      code: r.code,
                       name: r.name,
-                      expenseType: r.expenseType,
-                      ledger: r.ledger,
-                      glAccount: r.glAccount,
-                      taxPct: r.taxPct,
-                      status: r.status,
+                      isAuthorized: r.authorizationRequired ? "1" : "0",
+                      kind: r.kind,
+                      authorizedHoAmount: r.authorizedHoAmount,
+                      authorizedBranchAmount: r.authorizedBranchAmount,
+                      documentRequired: r.documentRequired ? "Yes" : "No",
+                      documentRequiredAmount: r.documentRequiredAmount,
                     })),
                 }}
                 import={{ onRows: handleImportRows }}
               />
-              <IconButton label="Refresh" onClick={handleRefresh}><RefreshCw className="h-4 w-4" /></IconButton>
+              <IconButton label="Refresh" onClick={handleRefresh}>
+                <RefreshCw className="h-4 w-4" />
+              </IconButton>
             </div>
           </TooltipProvider>
           <div className="flex items-center gap-2">
+            {selected.size > 0 && canDelete && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => setBulkDeleteOpen(true)}
+                className="h-9 gap-1.5"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete Selected ({selected.size})
+              </Button>
+            )}
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Search..." className="h-9 w-56 pl-8" />
+              <Input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search..."
+                className="h-9 w-56 pl-8"
+              />
             </div>
-            <Button size="sm" onClick={openAdd} className="h-9 gap-1.5"><Plus className="h-4 w-4" />Add</Button>
+            {canAdd && (
+              <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            )}
           </div>
         </div>
 
@@ -247,31 +497,39 @@ function ExpensePage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
-                <TableHead className="text-sidebar-foreground">Code</TableHead>
-                <TableHead className="text-sidebar-foreground">Expense Name</TableHead>
-                <TableHead className="text-sidebar-foreground">Expense Type</TableHead>
-                <TableHead className="text-sidebar-foreground">Ledger</TableHead>
-                <TableHead className="text-sidebar-foreground text-right">Tax %</TableHead>
-                <TableHead className="text-sidebar-foreground">Status</TableHead>
+                <TableHead className="w-10 text-sidebar-foreground">
+                  <Checkbox
+                    checked={allPageSelected ? true : somePageSelected ? "indeterminate" : false}
+                    onCheckedChange={(v) => togglePageAll(v === true)}
+                    aria-label="Select all on page"
+                    className="border-sidebar-foreground/60 data-[state=checked]:bg-primary data-[state=indeterminate]:bg-primary"
+                  />
+                </TableHead>
+                <TableHead className="text-sidebar-foreground">Name</TableHead>
+                <TableHead className="text-sidebar-foreground">Is Authorized</TableHead>
                 <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
               </TableRow>
               <TableRow className="bg-muted/20 hover:bg-muted/20">
-                {(["code", "name", "expenseType", "ledger"] as const).map((k) => (
-                  <TableHead key={k} className="py-2">
-                    <Input
-                      value={colFilters[k]}
-                      onChange={(e) => { setColFilters((f) => ({ ...f, [k]: e.target.value })); setPage(1); }}
-                      placeholder={k[0].toUpperCase() + k.slice(1)}
-                      className="h-8"
-                    />
-                  </TableHead>
-                ))}
                 <TableHead />
                 <TableHead className="py-2">
                   <Input
-                    value={colFilters.status}
-                    onChange={(e) => { setColFilters((f) => ({ ...f, status: e.target.value })); setPage(1); }}
-                    placeholder="Status"
+                    value={colFilters.name}
+                    onChange={(e) => {
+                      setColFilters((f) => ({ ...f, name: e.target.value }));
+                      setPage(1);
+                    }}
+                    placeholder="Name"
+                    className="h-8"
+                  />
+                </TableHead>
+                <TableHead className="py-2">
+                  <Input
+                    value={colFilters.isAuthorized}
+                    onChange={(e) => {
+                      setColFilters((f) => ({ ...f, isAuthorized: e.target.value }));
+                      setPage(1);
+                    }}
+                    placeholder="Is Authorized"
                     className="h-8"
                   />
                 </TableHead>
@@ -281,27 +539,46 @@ function ExpensePage() {
             <TableBody>
               {pageRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-32 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={4} className="h-32 text-center text-sm text-muted-foreground">
                     No data available in table
                   </TableCell>
                 </TableRow>
               ) : (
                 pageRows.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="font-medium">{r.code}</TableCell>
-                    <TableCell>{r.name}</TableCell>
-                    <TableCell>{r.expenseType}</TableCell>
-                    <TableCell>{r.ledger}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{r.taxPct}</TableCell>
-                    <TableCell><StatusPill status={r.status} /></TableCell>
+                  <TableRow key={r.id} data-state={selected.has(r.id) ? "selected" : undefined}>
+                    <TableCell className="w-10">
+                      <Checkbox
+                        checked={selected.has(r.id)}
+                        onCheckedChange={(v) => toggleOne(r.id, v === true)}
+                        aria-label={`Select ${r.name}`}
+                      />
+                    </TableCell>
+                    <TableCell className="font-medium">{r.name}</TableCell>
+                    <TableCell>{r.authorizationRequired ? "1" : "0"}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
-                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)} aria-label={`Edit ${r.code}`}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(r)} aria-label={`Delete ${r.code}`}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canModify && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(r)}
+                            aria-label={`Edit ${r.name}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(r)}
+                            aria-label={`Delete ${r.name}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -311,53 +588,99 @@ function ExpensePage() {
           </Table>
         </div>
 
-        <TablePager totalPages={totalPages} currentPage={currentPage} setPage={setPage} startIdx={startIdx} endIdx={endIdx} total={filtered.length} />
+        <TablePager
+          totalPages={totalPages}
+          currentPage={currentPage}
+          setPage={setPage}
+          startIdx={startIdx}
+          endIdx={endIdx}
+          total={filtered.length}
+        />
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{editing ? "Edit Expense" : "Expense Details"}</DialogTitle>
+            <DialogTitle>{editing ? "Edit Expense" : "Expenses"}</DialogTitle>
           </DialogHeader>
 
           <div className="grid grid-cols-1 gap-4 py-2 md:grid-cols-2">
-            <FieldWrapper label="Expense Code" required>
-              <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} placeholder="e.g. EXP001" />
-            </FieldWrapper>
-            <FieldWrapper label="Expense Name" required>
-              <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Fuel Charges" />
-            </FieldWrapper>
-            <FieldWrapper label="Expense Type">
-              <Select value={form.expenseType} onValueChange={(v) => setForm((f) => ({ ...f, expenseType: v as ExpenseType }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+            <FieldWrapper label="Expense Type" required>
+              <Select
+                value={form.kind}
+                onValueChange={(v) => setForm((f) => ({ ...f, kind: v as ExpenseKind }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Type" />
+                </SelectTrigger>
                 <SelectContent>
-                  {EXPENSE_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  <SelectItem value="Expense">Expense</SelectItem>
+                  <SelectItem value="Income">Income</SelectItem>
                 </SelectContent>
               </Select>
             </FieldWrapper>
-            <FieldWrapper label="Ledger">
-              <Input value={form.ledger} onChange={(e) => setForm((f) => ({ ...f, ledger: e.target.value }))} placeholder="e.g. Fuel Expense A/c" />
+            <FieldWrapper label="Expense Head" required>
+              <Input
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              />
             </FieldWrapper>
-            <FieldWrapper label="GL Account">
-              <Input value={form.glAccount} onChange={(e) => setForm((f) => ({ ...f, glAccount: e.target.value }))} placeholder="e.g. 5100-01" />
+            <FieldWrapper label="Authorisation Required">
+              <YesNoToggle
+                value={form.authorizationRequired}
+                onChange={(v) => setForm((f) => ({ ...f, authorizationRequired: v }))}
+              />
             </FieldWrapper>
-            <FieldWrapper label="Tax %">
-              <Input type="number" step="0.01" min="0" max="100" value={form.taxPct} onChange={(e) => setForm((f) => ({ ...f, taxPct: e.target.value }))} />
+            <FieldWrapper label="Authorised By HO Amount">
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.authorizedHoAmount}
+                onChange={(e) => setForm((f) => ({ ...f, authorizedHoAmount: e.target.value }))}
+              />
             </FieldWrapper>
-            <FieldWrapper label="Status">
-              <Select value={form.status} onValueChange={(v) => setForm((f) => ({ ...f, status: v as Status }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Active">Active</SelectItem>
-                  <SelectItem value="In-Active">In-Active</SelectItem>
-                </SelectContent>
-              </Select>
+            <FieldWrapper label="Authorised By Branch Amount">
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.authorizedBranchAmount}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, authorizedBranchAmount: e.target.value }))
+                }
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Document Required">
+              <YesNoToggle
+                value={form.documentRequired}
+                onChange={(v) => setForm((f) => ({ ...f, documentRequired: v }))}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Document Required For Amount">
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.documentRequiredAmount}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, documentRequiredAmount: e.target.value }))
+                }
+              />
             </FieldWrapper>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-            <Button variant="destructive" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              Save
+            </Button>
+            <Button variant="destructive" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -367,13 +690,40 @@ function ExpensePage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete expense?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove <span className="font-medium text-foreground">{deleteTarget?.code}</span>
-              {deleteTarget?.name ? ` (${deleteTarget.name})` : ""} from the expense master.
+              This will permanently remove{" "}
+              <span className="font-medium text-foreground">{deleteTarget?.name}</span> from the
+              expense master.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selected.size} expense{selected.size === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove the selected expenses from the expense master. This
+              action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmBulkDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

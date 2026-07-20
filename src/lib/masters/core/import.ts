@@ -50,7 +50,9 @@ export type ImportMaster =
   | "vendor_contracts"
   // utility tax/fuel (0052)
   | "fuel_surcharge_rates"
-  | "tax_rates";
+  | "tax_rates"
+  // finance masters (0040 / 0069)
+  | "expense_heads";
 
 export type ImportMode = "VALIDATE" | "COMMIT";
 

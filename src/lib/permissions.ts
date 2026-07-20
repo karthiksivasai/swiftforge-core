@@ -272,6 +272,13 @@ export const FINANCE_PERMISSIONS = {
   invoiceCancelAfterIrn: "doc.invoice-cancel-after-irn-generated",
 } as const;
 
+/** Expense head master (Phase 4 finance). Seeded as `mst.expense-master`. */
+export const EXPENSE_MASTER_PERMISSIONS = {
+  expense_heads: "mst.expense-master",
+} as const;
+
+export type ExpenseMasterKey = keyof typeof EXPENSE_MASTER_PERMISSIONS;
+
 export type FinancePermissionKey = keyof typeof FINANCE_PERMISSIONS;
 
 /**

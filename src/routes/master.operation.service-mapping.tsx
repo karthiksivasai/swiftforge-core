@@ -60,6 +60,9 @@ import { masterKeys } from "@/lib/masters/core/queryKeys";
 import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
 import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
+  importServiceMappingsChunked,
+  normalizeServiceMappingImportRow,
+  SERVICE_MAPPING_IMPORT_HEADER_ALIASES,
   serviceMappingsResource,
   type ServiceMappingRow as ServiceMappingDbRow,
 } from "@/lib/masters/resources/serviceMappings";
@@ -395,12 +398,15 @@ function ServiceMappingPage() {
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
+      const mapped = mapCsvToImportRows(
+        parsedRows,
+        serviceMappingsResource.importColumns,
+        { aliases: SERVICE_MAPPING_IMPORT_HEADER_ALIASES },
+      ).map((rec) => normalizeServiceMappingImportRow(rec));
+
       if (authed) {
-        const importRows = mapCsvToImportRows(
-          parsedRows,
-          serviceMappingsResource.importColumns,
-        ) as ImportRow[];
-        const res = await rc.commitImport.mutateAsync(importRows);
+        const importRows = mapped as ImportRow[];
+        const res = await importServiceMappingsChunked("COMMIT", importRows);
         const toastRes = formatImportToast(res);
         if (toastRes.ok) toast.success(toastRes.message);
         else toast.error(toastRes.message);
@@ -408,26 +414,26 @@ function ServiceMappingPage() {
         return;
       }
       const imported: ServiceMappingRow[] = [];
-      for (const rec of mapCsvToImportRows(parsedRows, serviceMappingsResource.importColumns)) {
-        if (!rec.vendor_code?.trim() && !rec.service?.trim()) continue;
+      for (const rec of mapped) {
+        if (!String(rec.vendor_code ?? "").trim() && !String(rec.service ?? "").trim()) continue;
         const status =
-          (rec.status || "").trim().toLowerCase() === "in-active" ? "In-Active" : "Active";
-        const vendorName = (rec.vendor_code || "").trim();
-        const service = (rec.service || "").trim();
+          String(rec.status || "").trim().toUpperCase() === "INACTIVE" ? "In-Active" : "Active";
+        const vendorName = String(rec.vendor_code || "").trim();
+        const service = String(rec.service || "").trim();
         imported.push({
           id: crypto.randomUUID(),
           vendorId: "",
-          vendorCode: (rec.vendor_code || "").trim(),
+          vendorCode: vendorName,
           vendorName,
           service,
-          serviceType: (rec.service_type || buildServiceType(vendorName, service)).trim(),
+          serviceType: String(rec.service_type || buildServiceType(vendorName, service)).trim(),
           billingVendorId: "",
-          billingVendorCode: (rec.billing_vendor_code || "").trim(),
-          billingVendorName: (rec.billing_vendor_code || "").trim(),
-          minWeight: formatWeight((rec.min_weight || "0").toString()),
-          maxWeight: formatWeight((rec.max_weight || "99999").toString()),
+          billingVendorCode: String(rec.billing_vendor_code || "").trim(),
+          billingVendorName: String(rec.billing_vendor_code || "").trim(),
+          minWeight: formatWeight(String(rec.min_weight || "0")),
+          maxWeight: formatWeight(String(rec.max_weight || "99999")),
           status: status as Status,
-          vendorLink: (rec.vendor_link || "").trim(),
+          vendorLink: String(rec.vendor_link || "").trim(),
           isSinglePiece: String(rec.is_single_piece || "").trim().toLowerCase() === "yes",
         });
       }

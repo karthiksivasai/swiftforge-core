@@ -59,11 +59,15 @@ import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
 import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import type { LookupKey as LiveLookupKey } from "@/lib/masters/core/lookup";
 import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   vendorsResource,
   fetchVendorChildren,
   saveVendor,
+  importVendorsChunked,
+  normalizeVendorImportRow,
+  VENDOR_IMPORT_HEADER_ALIASES,
   type VendorRow as VendorDbRow,
 } from "@/lib/masters/resources/vendors";
 import { vendorCreateSchema } from "@/lib/masters/schemas/vendors";
@@ -89,15 +93,20 @@ type Status = "Active" | "In-Active";
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED"] as const;
 const MODES = ["Air", "Surface", "Train", "Courier", "Express"] as const;
 
-const SAVE_TABS = new Set([
-  "details",
-  "addresses",
-  "contacts",
-  "bank",
-  "documents",
-  "services",
-  "api-credentials",
-]);
+function parseCodeName(value: string): { code: string; name: string } {
+  const trimmed = value.trim();
+  if (!trimmed) return { code: "", name: "" };
+  const sep = trimmed.indexOf(" - ");
+  if (sep === -1) return { code: "", name: trimmed };
+  return { code: trimmed.slice(0, sep).trim(), name: trimmed.slice(sep + 3).trim() };
+}
+
+function joinCodeName(code: string, name: string): string {
+  const c = code.trim();
+  const n = name.trim();
+  if (c && n) return `${c} - ${n}`;
+  return n || c;
+}
 
 function seedVendor(id: string, code: string, name: string): UiVendorRow {
   return {
@@ -288,6 +297,9 @@ function VendorPage() {
   const [dialogTab, setDialogTab] = useState("details");
   const [editing, setEditing] = useState<UiVendorRow | null>(null);
   const [form, setForm] = useState<UiVendorRow>(emptyVendor());
+  const [fuelHeadCode, setFuelHeadCode] = useState("");
+  const [fuelChargeId, setFuelChargeId] = useState("");
+  const [originCode, setOriginCode] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<UiVendorRow | null>(null);
   const [copyZoneOpen, setCopyZoneOpen] = useState(false);
   const [fromVendor, setFromVendor] = useState<VendorPick>(emptyVendorPick());
@@ -335,9 +347,22 @@ function VendorPage() {
   const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const endIdx = Math.min(currentPage * PAGE_SIZE, filtered.length);
 
+  const applyFormRow = (row: UiVendorRow) => {
+    const fuel = parseCodeName(row.fuelHead);
+    const origin = parseCodeName(row.origin);
+    setFuelHeadCode(fuel.code);
+    setFuelChargeId("");
+    setOriginCode(origin.code);
+    setForm({
+      ...row,
+      fuelHead: fuel.name || row.fuelHead,
+      origin: origin.name || row.origin,
+    });
+  };
+
   const openAdd = () => {
     setEditing(null);
-    setForm(emptyVendor());
+    applyFormRow(emptyVendor());
     setDialogTab("details");
     setOpen(true);
   };
@@ -354,29 +379,40 @@ function VendorPage() {
           return;
         }
         const ui = dbVendorToUi(dbRow, children);
-        setEditing({ ...ui, row_version: dbRow.row_version });
-        setForm(structuredClone({ ...ui, row_version: dbRow.row_version }));
+        const withRv = { ...ui, row_version: dbRow.row_version };
+        setEditing(withRv);
+        applyFormRow(structuredClone(withRv));
+        // Soft origin code from labelRefs enrichment when present.
+        const originLabel = String((dbRow as Record<string, unknown>).origin_code ?? "");
+        if (originLabel) setOriginCode(originLabel);
       } catch (err) {
         toast.error(toErrorMessage(err, "Could not load vendor"));
         return;
       }
     } else {
       setEditing(row);
-      setForm(structuredClone(row));
+      applyFormRow(structuredClone(row));
     }
     setDialogTab("details");
     setOpen(true);
   };
 
+  const formForSave = (): UiVendorRow => ({
+    ...form,
+    fuelHead: joinCodeName(fuelHeadCode, form.fuelHead),
+    origin: joinCodeName(originCode, form.origin) || form.origin,
+  });
+
   const handleSave = async () => {
     if (!form.code.trim()) return toast.error("Vendor Code is required");
     if (!form.name.trim()) return toast.error("Vendor Name is required");
     if (!form.mobile.trim()) return toast.error("Mobile is required");
+    const saveRow = formForSave();
 
     if (authed) {
       setSaving(true);
       try {
-        const payload = uiVendorToSavePayload(form);
+        const payload = uiVendorToSavePayload(saveRow);
         const fields = vendorCreateSchema.parse(payload.fields);
         await saveVendor({
           id: editing?.id ?? null,
@@ -410,14 +446,19 @@ function VendorPage() {
       setDemoRows((prev) =>
         prev.map((r) =>
           r.id === editing.id
-            ? { ...editing, ...form, code: form.code.trim(), name: form.name.trim() }
+            ? { ...editing, ...saveRow, code: saveRow.code.trim(), name: saveRow.name.trim() }
             : r,
         ),
       );
       toast.success("Vendor updated");
     } else {
       setDemoRows((prev) => [
-        { ...form, id: crypto.randomUUID(), code: form.code.trim(), name: form.name.trim() },
+        {
+          ...saveRow,
+          id: crypto.randomUUID(),
+          code: saveRow.code.trim(),
+          name: saveRow.name.trim(),
+        },
         ...prev,
       ]);
       toast.success("Vendor added");
@@ -444,51 +485,65 @@ function VendorPage() {
 
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
+      const mapped = mapCsvToImportRows(parsedRows, vendorsResource.importColumns, {
+        aliases: VENDOR_IMPORT_HEADER_ALIASES,
+      }).map((rec) => normalizeVendorImportRow(rec));
+
       if (authed) {
-        const importRows = mapCsvToImportRows(
-          parsedRows,
-          vendorsResource.importColumns,
-        ) as ImportRow[];
-        const res = await rc.commitImport.mutateAsync(importRows);
+        if (!rc.perms.canAdd) {
+          toast.error("You don't have permission to import vendors");
+          return;
+        }
+        const importRows = mapped.filter((r) => String(r.code || "").trim()) as ImportRow[];
+        if (importRows.length === 0) {
+          toast.error("No valid rows found (Vendor Code is required)");
+          return;
+        }
+        const res = await importVendorsChunked("COMMIT", importRows);
         const toastRes = formatImportToast(res);
         if (toastRes.ok) toast.success(toastRes.message);
         else toast.error(toastRes.message);
         void queryClient.invalidateQueries({ queryKey: masterKeys.all(vendorsResource.key) });
         return;
       }
+
       const imported: UiVendorRow[] = [];
-      for (const rec of mapCsvToImportRows(parsedRows, vendorsResource.importColumns)) {
-        if (!rec.code?.trim()) continue;
-        const status =
-          (rec.status || "").trim().toLowerCase() === "in-active" ? "In-Active" : "Active";
+      for (const rec of mapped) {
+        if (!String(rec.code || "").trim()) continue;
+        const statusRaw = String(rec.status || "").trim().toLowerCase();
+        const status: Status = statusRaw === "inactive" || statusRaw === "in-active"
+          ? "In-Active"
+          : "Active";
+        const globalRaw = String(rec.is_global || "").trim().toLowerCase();
         imported.push({
           ...emptyVendor(),
           id: crypto.randomUUID(),
-          code: rec.code.trim(),
-          name: (rec.name || "").trim(),
-          contactPerson: (rec.contact_person || "").trim(),
-          address1: (rec.address1 || "").trim(),
-          address2: (rec.address2 || "").trim(),
-          pinCode: (rec.pin_code || "").trim(),
-          city: (rec.city || "").trim(),
-          state: (rec.state_code || rec.state || "").trim(),
-          phone1: (rec.phone1 || "").trim(),
-          phone2: (rec.phone2 || "").trim(),
-          fax: (rec.fax || "").trim(),
-          mobile: (rec.mobile || "").trim(),
-          email: (rec.email || "").trim(),
-          website: (rec.website || "").trim(),
-          gstNo: (rec.gst_no || "").trim(),
-          fuelHead: (rec.fuel_head || "").trim(),
-          currency: (rec.currency || "INR").trim(),
-          origin: (rec.origin_destination_code || "").trim(),
-          mode: (rec.mode || "").trim(),
-          vendorClass: (rec.vendor_class || "VENDOR").trim(),
-          vendorZip: (rec.vendor_zip || "").trim(),
-          status: status as Status,
-          global: String(rec.is_global).toLowerCase() === "true",
-          gst: String(rec.gst_applies).toLowerCase() !== "false",
-          volumetricWeightRoundOff: String(rec.vol_weight_round_off).toLowerCase() === "true",
+          code: String(rec.code).trim(),
+          name: String(rec.name || "").trim(),
+          contactPerson: String(rec.contact_person || "").trim(),
+          address1: String(rec.address1 || "").trim(),
+          address2: String(rec.address2 || "").trim(),
+          pinCode: String(rec.pin_code || "").trim(),
+          city: String(rec.city || "").trim(),
+          state: String(rec.state_code || "").trim(),
+          phone1: String(rec.phone1 || "").trim(),
+          phone2: String(rec.phone2 || "").trim(),
+          fax: String(rec.fax || "").trim(),
+          mobile: String(rec.mobile || "").trim(),
+          email: String(rec.email || "").trim(),
+          website: String(rec.website || "").trim(),
+          gstNo: String(rec.gst_no || "").trim(),
+          fuelHead: String(rec.fuel_head || "").trim(),
+          currency: String(rec.currency || "INR").trim(),
+          origin: String(rec.origin_destination_code || "").trim(),
+          mode: String(rec.mode || "").trim(),
+          vendorClass: String(rec.vendor_class || "VENDOR").trim(),
+          vendorZip: String(rec.vendor_zip || "").trim(),
+          status,
+          global: globalRaw === "true" || globalRaw === "1" || globalRaw === "yes",
+          gst: String(rec.gst_applies || "true").toLowerCase() !== "false",
+          volumetricWeightRoundOff:
+            String(rec.vol_weight_round_off || "").toLowerCase() === "true",
         });
       }
       if (imported.length === 0) {
@@ -557,7 +612,34 @@ function VendorPage() {
       }
     }
 
-    if (editing && !authed) {
+    if (authed) {
+      if (!editing?.id) {
+        return toast.error("Save vendor details before uploading rates");
+      }
+      try {
+        const payload = uiVendorToSavePayload(formForSave());
+        const fields = vendorCreateSchema.parse(payload.fields);
+        await saveVendor({
+          id: editing.id,
+          rowVersion: editing.row_version ?? null,
+          fields,
+          wizardExtras: payload.wizardExtras,
+          addresses: payload.addresses,
+          contacts: payload.contacts,
+          bankAccounts: payload.bankAccounts,
+          documents: payload.documents,
+          services: payload.services,
+          apiCredentials: payload.apiCredentials,
+        });
+        void queryClient.invalidateQueries({ queryKey: masterKeys.all(vendorsResource.key) });
+        toast.success(`Rate file uploaded: ${form.ratesFileName}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Could not upload rate file"));
+      }
+      return;
+    }
+
+    if (editing) {
       setDemoRows((prev) =>
         prev.map((r) => (r.id === editing.id ? { ...r, ratesFileName: form.ratesFileName } : r)),
       );
@@ -745,7 +827,7 @@ function VendorPage() {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Vendor" : "Vendor"}</DialogTitle>
           </DialogHeader>
@@ -753,17 +835,11 @@ function VendorPage() {
           <Tabs value={dialogTab} onValueChange={setDialogTab}>
             <TabsList>
               <TabsTrigger value="details">Details</TabsTrigger>
-              <TabsTrigger value="addresses">Addresses</TabsTrigger>
-              <TabsTrigger value="contacts">Contacts</TabsTrigger>
-              <TabsTrigger value="bank">Bank Accounts</TabsTrigger>
-              <TabsTrigger value="documents">Documents</TabsTrigger>
-              <TabsTrigger value="services">Services</TabsTrigger>
-              <TabsTrigger value="api-credentials">API Credentials</TabsTrigger>
               <TabsTrigger value="rates">Rates Details</TabsTrigger>
             </TabsList>
 
             <TabsContent value="details" className="mt-4">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <FieldWrapper label="Vendor Code" required>
                   <Input
                     value={form.code}
@@ -797,9 +873,18 @@ function VendorPage() {
                 </FieldWrapper>
                 <FieldWrapper label="Pin Code">
                   {authed ? (
-                    <Input
+                    <LookupCombobox
+                      lookupKey="pin-code"
                       value={form.pinCode}
-                      onChange={(e) => setForm((f) => ({ ...f, pinCode: e.target.value }))}
+                      valueLabel={form.pinCode}
+                      onChange={(_id, item) =>
+                        setForm((f) => ({
+                          ...f,
+                          pinCode: item?.code ?? "",
+                          city: item?.name ?? f.city,
+                        }))
+                      }
+                      placeholder="Search pin code..."
                     />
                   ) : (
                     <LookupInput
@@ -903,10 +988,22 @@ function VendorPage() {
                 </FieldWrapper>
 
                 <FieldWrapper label="Fuel Head">
-                  <LookupInput
-                    lookup="ledgerHead"
-                    value={form.fuelHead}
-                    onChange={(v) => setForm((f) => ({ ...f, fuelHead: v }))}
+                  <CodeNameLookup
+                    code={fuelHeadCode}
+                    name={form.fuelHead}
+                    onCodeChange={(code) => {
+                      setFuelHeadCode(code);
+                      setFuelChargeId("");
+                    }}
+                    onNameChange={(name) => setForm((f) => ({ ...f, fuelHead: name }))}
+                    onPick={(code, name, id) => {
+                      setFuelHeadCode(code);
+                      setFuelChargeId(id ?? "");
+                      setForm((f) => ({ ...f, fuelHead: name }));
+                    }}
+                    lookup={authed ? undefined : "ledgerHead"}
+                    liveLookupKey={authed ? "charge" : undefined}
+                    liveValue={fuelChargeId}
                   />
                 </FieldWrapper>
                 <FieldWrapper label="Currency">
@@ -927,27 +1024,26 @@ function VendorPage() {
                   </Select>
                 </FieldWrapper>
                 <FieldWrapper label="Origin">
-                  {authed ? (
-                    <LookupCombobox
-                      lookupKey="destination"
-                      value={form.originDestinationId ?? ""}
-                      valueLabel={form.origin}
-                      onChange={(id, item) =>
-                        setForm((f) => ({
-                          ...f,
-                          originDestinationId: id,
-                          origin: item?.name ?? "",
-                        }))
-                      }
-                      placeholder="Search destination..."
-                    />
-                  ) : (
-                    <LookupInput
-                      lookup="destination"
-                      value={form.origin}
-                      onChange={(v) => setForm((f) => ({ ...f, origin: v }))}
-                    />
-                  )}
+                  <CodeNameLookup
+                    code={originCode}
+                    name={form.origin}
+                    onCodeChange={(code) => {
+                      setOriginCode(code);
+                      setForm((f) => ({ ...f, originDestinationId: "" }));
+                    }}
+                    onNameChange={(name) => setForm((f) => ({ ...f, origin: name }))}
+                    onPick={(code, name, id) => {
+                      setOriginCode(code);
+                      setForm((f) => ({
+                        ...f,
+                        origin: name,
+                        originDestinationId: id ?? "",
+                      }));
+                    }}
+                    lookup={authed ? undefined : "destination"}
+                    liveLookupKey={authed ? "destination" : undefined}
+                    liveValue={form.originDestinationId}
+                  />
                 </FieldWrapper>
                 <FieldWrapper label="Vendor Zip">
                   <Input
@@ -970,7 +1066,7 @@ function VendorPage() {
                     </SelectContent>
                   </Select>
                 </FieldWrapper>
-                <div className="flex flex-col justify-end gap-1.5 md:col-span-2 lg:col-span-3">
+                <div className="flex flex-col justify-end gap-1.5 sm:col-span-2 lg:col-span-3">
                   <div className="flex h-9 flex-wrap items-center gap-x-6 gap-y-2">
                     <div className="flex items-center gap-2">
                       <Checkbox
@@ -1012,58 +1108,9 @@ function VendorPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="addresses" className="mt-4">
-              <AddressesTab
-                authed={authed}
-                rows={form.addresses}
-                setRows={(updater) => setForm((f) => ({ ...f, addresses: updater(f.addresses) }))}
-              />
-            </TabsContent>
-
-            <TabsContent value="contacts" className="mt-4">
-              <ContactsTab
-                rows={form.contacts}
-                setRows={(updater) => setForm((f) => ({ ...f, contacts: updater(f.contacts) }))}
-              />
-            </TabsContent>
-
-            <TabsContent value="bank" className="mt-4">
-              <BankAccountsTab
-                authed={authed}
-                rows={form.bankAccounts}
-                setRows={(updater) =>
-                  setForm((f) => ({ ...f, bankAccounts: updater(f.bankAccounts) }))
-                }
-              />
-            </TabsContent>
-
-            <TabsContent value="documents" className="mt-4">
-              <DocumentsTab
-                rows={form.documents}
-                setRows={(updater) => setForm((f) => ({ ...f, documents: updater(f.documents) }))}
-              />
-            </TabsContent>
-
-            <TabsContent value="services" className="mt-4">
-              <ServicesTab
-                authed={authed}
-                rows={form.services}
-                setRows={(updater) => setForm((f) => ({ ...f, services: updater(f.services) }))}
-              />
-            </TabsContent>
-
-            <TabsContent value="api-credentials" className="mt-4">
-              <ApiCredentialsTab
-                rows={form.apiCredentials}
-                setRows={(updater) =>
-                  setForm((f) => ({ ...f, apiCredentials: updater(f.apiCredentials) }))
-                }
-              />
-            </TabsContent>
-
             <TabsContent value="rates" className="mt-4">
-              <div className="flex min-h-[320px] flex-col gap-4 rounded-lg border bg-card">
-                <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+              <div className="flex min-h-[280px] flex-col">
+                <div className="flex flex-wrap items-center gap-3 py-1">
                   <Label className="text-sm font-medium text-muted-foreground">File Upload</Label>
                   <input
                     ref={ratesFileRef}
@@ -1076,7 +1123,7 @@ function VendorPage() {
                     }}
                   />
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     type="button"
                     onClick={() => ratesFileRef.current?.click()}
@@ -1089,31 +1136,18 @@ function VendorPage() {
                   <Button
                     size="sm"
                     type="button"
-                    className="ml-auto bg-chart-2 text-primary-foreground hover:bg-chart-2/90"
-                    onClick={handleRatesUpload}
+                    className="bg-amber-500 text-white hover:bg-amber-500/90"
+                    onClick={() => void handleRatesUpload()}
                   >
                     Upload
                   </Button>
-                </div>
-                <div className="flex flex-1 items-center justify-center px-4 pb-4">
-                  {form.ratesFileName ? (
-                    <p className="text-sm text-muted-foreground">
-                      Rate file{" "}
-                      <span className="font-medium text-foreground">{form.ratesFileName}</span>{" "}
-                      ready to upload.
-                    </p>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      Upload a vendor rate file to populate rate details.
-                    </p>
-                  )}
                 </div>
               </div>
             </TabsContent>
           </Tabs>
 
           <DialogFooter className="gap-2 sm:gap-2">
-            {SAVE_TABS.has(dialogTab) ? (
+            {dialogTab === "details" ? (
               <Button
                 onClick={() => void handleSave()}
                 disabled={saving}
@@ -1827,6 +1861,99 @@ function LookupInput({
         returnField={returnField}
         onSelect={(v) => onChange(v)}
       />
+    </div>
+  );
+}
+
+/** Code + name + search, matching CourierWala Fuel Head / Origin pickers. */
+function CodeNameLookup({
+  code,
+  name,
+  onCodeChange,
+  onNameChange,
+  onPick,
+  lookup,
+  liveLookupKey,
+  liveValue = "",
+}: {
+  code: string;
+  name: string;
+  onCodeChange: (code: string) => void;
+  onNameChange: (name: string) => void;
+  onPick: (code: string, name: string, id?: string) => void;
+  lookup?: LookupKey;
+  liveLookupKey?: LiveLookupKey;
+  liveValue?: string;
+}) {
+  const [lookupOpen, setLookupOpen] = useState(false);
+
+  if (liveLookupKey) {
+    // LookupCombobox only renders the label when `value` is truthy; keep a
+    // stable placeholder id so free-text / previously saved names still show.
+    const comboValue = liveValue || (name || code ? "__label__" : "");
+    return (
+      <div className="flex gap-1">
+        <Input
+          value={code}
+          onChange={(e) => onCodeChange(e.target.value.toUpperCase())}
+          placeholder="Code"
+          className="w-[4.5rem] shrink-0"
+        />
+        <LookupCombobox
+          lookupKey={liveLookupKey}
+          value={comboValue}
+          valueLabel={name || code}
+          onChange={(id, item) => {
+            if (!id || !item) {
+              onPick("", "", "");
+              return;
+            }
+            onPick(item.code ?? "", item.name ?? "", id);
+          }}
+          placeholder="Search..."
+          className="min-w-0 flex-1"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-1">
+      <Input
+        value={code}
+        onChange={(e) => onCodeChange(e.target.value.toUpperCase())}
+        placeholder="Code"
+        className="w-[4.5rem] shrink-0"
+      />
+      <Input
+        value={name}
+        onChange={(e) => onNameChange(e.target.value)}
+        className="min-w-0 flex-1"
+      />
+      {lookup ? (
+        <>
+          <Button
+            size="icon"
+            variant="outline"
+            type="button"
+            className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+            aria-label="Search"
+            onClick={() => setLookupOpen(true)}
+          >
+            <Search className="h-4 w-4" />
+          </Button>
+          <MasterLookupDialog
+            open={lookupOpen}
+            onOpenChange={setLookupOpen}
+            lookup={lookup}
+            returnField="code-name"
+            onSelect={(v) => {
+              const parsed = parseCodeName(v);
+              onPick(parsed.code || v.trim().toUpperCase(), parsed.name || v);
+            }}
+          />
+        </>
+      ) : null}
     </div>
   );
 }
