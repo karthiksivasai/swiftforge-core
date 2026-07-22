@@ -39,19 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import { Check, ChevronsUpDown } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
-import { BRANCHES } from "@/lib/branches-data";
 import { BranchSelect } from "@/components/branch-select";
 import { DOMESTIC_DESTINATIONS } from "@/lib/destinations-data";
 import { INTERNATIONAL_DESTINATIONS } from "@/lib/destinations-international-data";
@@ -72,7 +60,7 @@ import {
 } from "@/lib/masters/schemas/destinations";
 import {
   useMasterList,
-  useBranchOptions,
+  useDestinationOptions,
   toErrorMessage,
   formatImportToast,
 } from "@/lib/masters/screen";
@@ -213,9 +201,6 @@ const ZONES = [
 
 const SERVICE_TYPES = ["REGULAR", "METRO", "REMOTE"];
 
-// Main Branch and Branch Manifest share the same seeded list (from Main_Branch_List.xlsx).
-const BRANCH_OPTIONS = BRANCHES.map((b) => b.name);
-
 const SEED: Destination[] = [
   ...DOMESTIC_DESTINATIONS.map((d, i) => ({
     id: `dom-${i + 1}`,
@@ -228,6 +213,11 @@ const SEED: Destination[] = [
     ...d,
   })),
 ];
+
+// Main Branch / Branch Manifest = destination names (CourierWala-style).
+const DESTINATION_NAME_OPTIONS = Array.from(
+  new Set(SEED.map((d) => d.name).filter(Boolean)),
+).sort((a, b) => a.localeCompare(b));
 
 const PAGE_SIZE = 10;
 
@@ -346,11 +336,11 @@ function DestinationPage() {
       { idField: "country_id", table: "countries", as: "country" },
       { idField: "state_id", table: "states", as: "state" },
       { idField: "zone_id", table: "zones", as: "zone" },
-      { idField: "main_branch_id", table: "branches", as: "main_branch" },
-      { idField: "manifest_branch_id", table: "branches", as: "manifest_branch" },
+      { idField: "main_branch_id", table: "destinations", as: "main_branch" },
+      { idField: "manifest_branch_id", table: "destinations", as: "manifest_branch" },
     ],
   });
-  const branches = useBranchOptions(authed);
+  const destinationOptions = useDestinationOptions(authed);
   const queryClient = useQueryClient();
 
   const [demoRows, setDemoRows] = useState<Destination[]>(SEED);
@@ -372,6 +362,12 @@ function DestinationPage() {
   const [deleteTarget, setDeleteTarget] = useState<Destination | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+
+  const mainManifestItems = useMemo(() => {
+    if (!authed) return [];
+    const excludeId = editing?.id;
+    return destinationOptions.options.filter((o) => o.id !== excludeId);
+  }, [authed, destinationOptions.options, editing?.id]);
 
   // Live list is already filtered by dest_type; demo mode still scopes client-side.
   const scoped = useMemo(
@@ -570,6 +566,7 @@ function DestinationPage() {
         if (toastRes.ok) toast.success(toastRes.message);
         else toast.error(toastRes.message);
         void queryClient.invalidateQueries({ queryKey: masterKeys.all(destinationsResource.key) });
+        void queryClient.invalidateQueries({ queryKey: ["destinations", "options"] });
         return;
       }
       const imported: Destination[] = [];
@@ -603,8 +600,10 @@ function DestinationPage() {
   const handleRefresh = () => {
     setSearch("");
     setPage(1);
-    if (authed)
+    if (authed) {
       queryClient.invalidateQueries({ queryKey: masterKeys.all(destinationsResource.key) });
+      queryClient.invalidateQueries({ queryKey: ["destinations", "options"] });
+    }
     toast.success("Refreshed");
   };
 
@@ -914,10 +913,10 @@ function DestinationPage() {
                 <FieldWrapper label="Main Branch">
                   {authed ? (
                     <EntityCombobox
-                      items={branches.options}
+                      items={mainManifestItems}
                       value={form.mainBranchId ?? ""}
                       valueLabel={form.mainBranch}
-                      loading={branches.isLoading}
+                      loading={destinationOptions.isLoading}
                       onChange={(id, item) =>
                         setForm((f) => ({ ...f, mainBranchId: id, mainBranch: item?.name ?? "" }))
                       }
@@ -927,7 +926,7 @@ function DestinationPage() {
                     <BranchSelect
                       value={form.mainBranch}
                       onChange={(v) => setForm((f) => ({ ...f, mainBranch: v }))}
-                      options={BRANCH_OPTIONS}
+                      options={DESTINATION_NAME_OPTIONS}
                       placeholder="Select Main Branch"
                     />
                   )}
@@ -1044,10 +1043,10 @@ function DestinationPage() {
                 <FieldWrapper label="Branch Manifest">
                   {authed ? (
                     <EntityCombobox
-                      items={branches.options}
+                      items={mainManifestItems}
                       value={form.manifestBranchId ?? ""}
                       valueLabel={form.branchManifest}
-                      loading={branches.isLoading}
+                      loading={destinationOptions.isLoading}
                       onChange={(id, item) =>
                         setForm((f) => ({
                           ...f,
@@ -1061,7 +1060,7 @@ function DestinationPage() {
                     <BranchSelect
                       value={form.branchManifest}
                       onChange={(v) => setForm((f) => ({ ...f, branchManifest: v }))}
-                      options={BRANCH_OPTIONS}
+                      options={DESTINATION_NAME_OPTIONS}
                       placeholder="Select Manifest Branch"
                     />
                   )}
@@ -1227,61 +1226,3 @@ function PagerButton({
   );
 }
 
-function BranchCombobox({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="h-10 w-full justify-between font-normal"
-        >
-          <span className={cn("truncate", !value && "text-muted-foreground")}>
-            {value || placeholder}
-          </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-[--radix-popover-trigger-width] p-0"
-        align="start"
-        onWheel={(e) => e.stopPropagation()}
-        onTouchMove={(e) => e.stopPropagation()}
-      >
-        <Command>
-          <CommandInput placeholder="Search branch..." />
-          <CommandList className="max-h-72 overflow-y-auto overscroll-contain">
-            <CommandEmpty>No branch found.</CommandEmpty>
-            <CommandGroup>
-              {BRANCH_OPTIONS.map((b) => (
-                <CommandItem
-                  key={b}
-                  value={b}
-                  onSelect={() => {
-                    onChange(b);
-                    setOpen(false);
-                  }}
-                >
-                  <Check
-                    className={cn("mr-2 h-4 w-4", value === b ? "opacity-100" : "opacity-0")}
-                  />
-                  {b}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}

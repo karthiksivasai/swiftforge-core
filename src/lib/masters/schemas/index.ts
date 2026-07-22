@@ -31,5 +31,6 @@ export * from "./fieldExecutives";
 export * from "./consignees";
 export * from "./shippers";
 export * from "./customers";
+export * from "./customerRates";
 export * from "./localBranches";
 export * from "./expenseHeads";

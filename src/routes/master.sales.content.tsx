@@ -60,38 +60,62 @@ import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
 import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   contentsResource,
+  CONTENT_IMPORT_HEADER_ALIASES,
+  importContentsChunked,
   type ContentRow as ContentDbRow,
 } from "@/lib/masters/resources/contents";
 import { contentCreateSchema, contentUpdateSchema } from "@/lib/masters/schemas/contents";
 import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
+import { LookupCombobox } from "@/components/masters/lookup-combobox";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 
 type ContentRow = {
   id: string;
   code: string;
   name: string;
+  hsnCode: string;
+  vendorId: string;
+  vendorName: string;
+  countryId: string;
+  countryName: string;
+  clearanceCertNo: string;
+  notificationSubType: string;
+  notificationSubType1: string;
+  notificationNo: string;
+  srNo: string;
+  igstNotification: string;
+  igstSrNo: string;
+  igstcNotification: string;
+  igstcSrNo: string;
   row_version?: number;
 };
 
-const SEED_DATA: Omit<ContentRow, "id">[] = [
-  { code: "DOC", name: "Documents" },
-  { code: "PAR", name: "Parcel" },
-  { code: "GRM", name: "Garments" },
-  { code: "ELC", name: "Electronics" },
-  { code: "BKS", name: "Books" },
-  { code: "GFT", name: "Gifts" },
-  { code: "SMP", name: "Samples" },
-  { code: "SPR", name: "Spare Parts" },
-  { code: "MED", name: "Medicines" },
-  { code: "FOD", name: "Food Items" },
-  { code: "COS", name: "Cosmetics" },
-  { code: "JWL", name: "Jewellery" },
-  { code: "HDW", name: "Handicrafts" },
-  { code: "STA", name: "Stationery" },
-  { code: "TOY", name: "Toys" },
-];
+const emptyRow = (): Omit<ContentRow, "id"> => ({
+  code: "",
+  name: "",
+  hsnCode: "",
+  vendorId: "",
+  vendorName: "",
+  countryId: "",
+  countryName: "",
+  clearanceCertNo: "",
+  notificationSubType: "",
+  notificationSubType1: "",
+  notificationNo: "",
+  srNo: "",
+  igstNotification: "",
+  igstSrNo: "",
+  igstcNotification: "",
+  igstcSrNo: "",
+});
 
-const SEED: ContentRow[] = SEED_DATA.map((s, i) => ({ id: String(i + 1), ...s }));
+const SEED: ContentRow[] = [
+  { id: "1", ...emptyRow(), code: "DOC", name: "Documents" },
+  { id: "2", ...emptyRow(), code: "PAR", name: "Parcel" },
+  { id: "3", ...emptyRow(), code: "GRM", name: "Garments" },
+  { id: "4", ...emptyRow(), code: "ELC", name: "Electronics" },
+  { id: "5", ...emptyRow(), code: "MED", name: "Medicines" },
+];
 
 const PAGE_SIZE = 10;
 
@@ -99,28 +123,64 @@ export const Route = createFileRoute("/master/sales/content")({
   head: () => ({
     meta: [
       { title: "Content — Master — Courier ERP" },
-      { name: "description", content: "Manage the content master for customer classification." },
+      { name: "description", content: "Manage the content master for shipment classification." },
     ],
   }),
   component: ContentPage,
 });
 
-function emptyRow(): Omit<ContentRow, "id"> {
-  return { code: "", name: "" };
-}
-
-function rowToView(r: ContentDbRow): ContentRow {
-  return { id: r.id, code: r.code, name: r.name, row_version: r.row_version };
+function rowToView(r: ContentDbRow & Record<string, unknown>): ContentRow {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    hsnCode: r.hsn_code ?? "",
+    vendorId: r.vendor_id ?? "",
+    vendorName: String(r.vendor_name ?? ""),
+    countryId: r.country_id ?? "",
+    countryName: String(r.country_name ?? ""),
+    clearanceCertNo: r.clearance_cert_no ?? "",
+    notificationSubType: r.notification_sub_type ?? "",
+    notificationSubType1: r.notification_sub_type1 ?? "",
+    notificationNo: r.notification_no ?? "",
+    srNo: r.sr_no ?? "",
+    igstNotification: r.igst_notification ?? "",
+    igstSrNo: r.igst_sr_no ?? "",
+    igstcNotification: r.igstc_notification ?? "",
+    igstcSrNo: r.igstc_sr_no ?? "",
+    row_version: r.row_version,
+  };
 }
 
 function toRaw(form: Omit<ContentRow, "id">) {
-  return { code: form.code, name: form.name };
+  return {
+    code: form.code,
+    name: form.name,
+    hsn_code: form.hsnCode || null,
+    vendor_id: form.vendorId || null,
+    country_id: form.countryId || null,
+    clearance_cert_no: form.clearanceCertNo || null,
+    notification_sub_type: form.notificationSubType || null,
+    notification_sub_type1: form.notificationSubType1 || null,
+    notification_no: form.notificationNo || null,
+    sr_no: form.srNo || null,
+    igst_notification: form.igstNotification || null,
+    igst_sr_no: form.igstSrNo || null,
+    igstc_notification: form.igstcNotification || null,
+    igstc_sr_no: form.igstcSrNo || null,
+  };
 }
 
 function ContentPage() {
   const { isAuthenticated: authed } = useAuth();
   const rc = useMasterResource(contentsResource);
-  const live = useMasterList(contentsResource, { enabled: authed });
+  const live = useMasterList(contentsResource, {
+    enabled: authed,
+    labelRefs: [
+      { idField: "vendor_id", table: "vendors", as: "vendor" },
+      { idField: "country_id", table: "countries", as: "country" },
+    ],
+  });
   const queryClient = useQueryClient();
 
   const [demoRows, setDemoRows] = useState<ContentRow[]>(SEED);
@@ -131,7 +191,9 @@ function ContentPage() {
   const [form, setForm] = useState<Omit<ContentRow, "id">>(emptyRow());
   const [deleteTarget, setDeleteTarget] = useState<ContentRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const rows: ContentRow[] = authed ? (live.rows as ContentDbRow[]).map(rowToView) : demoRows;
+  const rows: ContentRow[] = authed
+    ? (live.rows as (ContentDbRow & Record<string, unknown>)[]).map(rowToView)
+    : demoRows;
 
   const canAdd = !authed || rc.perms.canAdd;
   const canModify = !authed || rc.perms.canModify;
@@ -140,7 +202,11 @@ function ContentPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) => [r.code, r.name].some((v) => String(v).toLowerCase().includes(q)));
+    return rows.filter((r) =>
+      [r.code, r.name, r.hsnCode, r.vendorName, r.countryName].some((v) =>
+        String(v).toLowerCase().includes(q),
+      ),
+    );
   }, [rows, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -225,11 +291,10 @@ function ContentPage() {
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
       if (authed) {
-        const importRows = mapCsvToImportRows(
-          parsedRows,
-          contentsResource.importColumns,
-        ) as ImportRow[];
-        const res = await rc.commitImport.mutateAsync(importRows);
+        const importRows = mapCsvToImportRows(parsedRows, contentsResource.importColumns, {
+          aliases: CONTENT_IMPORT_HEADER_ALIASES,
+        }) as ImportRow[];
+        const res = await importContentsChunked("COMMIT", importRows);
         const toastRes = formatImportToast(res);
         if (toastRes.ok) toast.success(toastRes.message);
         else toast.error(toastRes.message);
@@ -237,12 +302,25 @@ function ContentPage() {
         return;
       }
       const imported: ContentRow[] = [];
-      for (const rec of mapCsvToImportRows(parsedRows, contentsResource.importColumns)) {
+      for (const rec of mapCsvToImportRows(parsedRows, contentsResource.importColumns, {
+        aliases: CONTENT_IMPORT_HEADER_ALIASES,
+      })) {
         if (!rec.code?.trim()) continue;
         imported.push({
           id: crypto.randomUUID(),
+          ...emptyRow(),
           code: rec.code.trim(),
           name: (rec.name || "").trim(),
+          hsnCode: String(rec.hsn_code ?? "").trim(),
+          clearanceCertNo: String(rec.clearance_cert_no ?? "").trim(),
+          notificationSubType: String(rec.notification_sub_type ?? "").trim(),
+          notificationSubType1: String(rec.notification_sub_type1 ?? "").trim(),
+          notificationNo: String(rec.notification_no ?? "").trim(),
+          srNo: String(rec.sr_no ?? "").trim(),
+          igstNotification: String(rec.igst_notification ?? "").trim(),
+          igstSrNo: String(rec.igst_sr_no ?? "").trim(),
+          igstcNotification: String(rec.igstc_notification ?? "").trim(),
+          igstcSrNo: String(rec.igstc_sr_no ?? "").trim(),
         });
       }
       if (imported.length === 0) {
@@ -290,7 +368,7 @@ function ContentPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Content</h1>
         <p className="text-sm text-muted-foreground">
-          Manage the content master used to classify customers.
+          Manage content codes, HSN, vendor/country links, and customs notification fields.
         </p>
       </div>
 
@@ -305,11 +383,35 @@ function ContentPage() {
                   columns: [
                     { key: "code", header: "Content Code" },
                     { key: "name", header: "Content Name" },
+                    { key: "hsn_code", header: "HSN Code" },
+                    { key: "vendor", header: "Vendor" },
+                    { key: "country", header: "Country" },
+                    { key: "clearance_cert_no", header: "Clearance Ceth No" },
+                    { key: "notification_sub_type", header: "Notification Sub Type" },
+                    { key: "notification_sub_type1", header: "Notification Sub Type1" },
+                    { key: "notification_no", header: "Notification No" },
+                    { key: "sr_no", header: "SrNo" },
+                    { key: "igst_notification", header: "IGST Notification" },
+                    { key: "igst_sr_no", header: "IGST SrNo" },
+                    { key: "igstc_notification", header: "IGSTC Notification" },
+                    { key: "igstc_sr_no", header: "IGSTC SrNo" },
                   ],
                   getRows: () =>
                     rows.map((r) => ({
                       code: r.code,
                       name: r.name,
+                      hsn_code: r.hsnCode,
+                      vendor: r.vendorName,
+                      country: r.countryName,
+                      clearance_cert_no: r.clearanceCertNo,
+                      notification_sub_type: r.notificationSubType,
+                      notification_sub_type1: r.notificationSubType1,
+                      notification_no: r.notificationNo,
+                      sr_no: r.srNo,
+                      igst_notification: r.igstNotification,
+                      igst_sr_no: r.igstSrNo,
+                      igstc_notification: r.igstcNotification,
+                      igstc_sr_no: r.igstcSrNo,
                     })),
                 }}
                 import={canAdd ? { onRows: handleImportRows } : null}
@@ -348,13 +450,16 @@ function ContentPage() {
               <TableRow className="bg-sidebar hover:bg-sidebar">
                 <TableHead className="text-sidebar-foreground">Content Code</TableHead>
                 <TableHead className="text-sidebar-foreground">Content Name</TableHead>
+                <TableHead className="text-sidebar-foreground">HSN Code</TableHead>
+                <TableHead className="text-sidebar-foreground">Vendor</TableHead>
+                <TableHead className="text-sidebar-foreground">Country</TableHead>
                 <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {pageRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="h-32 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={6} className="h-32 text-center text-sm text-muted-foreground">
                     No contents found.
                   </TableCell>
                 </TableRow>
@@ -363,6 +468,9 @@ function ContentPage() {
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{r.code}</TableCell>
                     <TableCell>{r.name}</TableCell>
+                    <TableCell>{r.hsnCode || "—"}</TableCell>
+                    <TableCell>{r.vendorName || "—"}</TableCell>
+                    <TableCell>{r.countryName || "—"}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-1">
                         {canModify ? (
@@ -422,27 +530,151 @@ function ContentPage() {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Content" : "Add Content"}</DialogTitle>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 gap-5 py-2 md:grid-cols-2">
-            <FieldWrapper label="Content Code" required>
-              <Input
-                value={form.code}
-                onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-                placeholder="e.g. DOC"
-              />
-            </FieldWrapper>
+          <div className="space-y-4 py-2">
+            <fieldset className="rounded-md border p-4">
+              <legend className="rounded bg-sidebar px-2 py-0.5 text-xs font-medium text-sidebar-foreground">
+                Content
+              </legend>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <FieldWrapper label="Content Code" required>
+                  <Input
+                    value={form.code}
+                    onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
+                    placeholder="e.g. DOC"
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="Content Name" required className="lg:col-span-1">
+                  <Input
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g. Documents"
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="HSN Code">
+                  <Input
+                    value={form.hsnCode}
+                    onChange={(e) => setForm((f) => ({ ...f, hsnCode: e.target.value }))}
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="Vendor">
+                  {authed ? (
+                    <LookupCombobox
+                      lookupKey="vendor"
+                      value={form.vendorId}
+                      valueLabel={form.vendorName}
+                      onChange={(id, item) =>
+                        setForm((f) => ({
+                          ...f,
+                          vendorId: id,
+                          vendorName: item?.name ?? item?.code ?? "",
+                        }))
+                      }
+                      placeholder="Select Vendor"
+                    />
+                  ) : (
+                    <Input
+                      value={form.vendorName}
+                      onChange={(e) => setForm((f) => ({ ...f, vendorName: e.target.value }))}
+                      placeholder="Vendor"
+                    />
+                  )}
+                </FieldWrapper>
+                <FieldWrapper label="Country" className="md:col-span-2">
+                  {authed ? (
+                    <LookupCombobox
+                      lookupKey="country"
+                      value={form.countryId}
+                      valueLabel={form.countryName}
+                      onChange={(id, item) =>
+                        setForm((f) => ({
+                          ...f,
+                          countryId: id,
+                          countryName: item?.name ?? item?.code ?? "",
+                        }))
+                      }
+                      placeholder="Select Country"
+                    />
+                  ) : (
+                    <Input
+                      value={form.countryName}
+                      onChange={(e) => setForm((f) => ({ ...f, countryName: e.target.value }))}
+                      placeholder="Country"
+                    />
+                  )}
+                </FieldWrapper>
+              </div>
+            </fieldset>
 
-            <FieldWrapper label="Content Name" required>
-              <Input
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="e.g. Documents"
-              />
-            </FieldWrapper>
+            <fieldset className="rounded-md border p-4">
+              <legend className="rounded bg-sidebar px-2 py-0.5 text-xs font-medium text-sidebar-foreground">
+                Additional Field
+              </legend>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <FieldWrapper label="Clearance Ceth No">
+                  <Input
+                    value={form.clearanceCertNo}
+                    onChange={(e) => setForm((f) => ({ ...f, clearanceCertNo: e.target.value }))}
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="Notification Sub Type" className="lg:col-span-1">
+                  <Input
+                    value={form.notificationSubType}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, notificationSubType: e.target.value }))
+                    }
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="Notification Sub Type1">
+                  <Input
+                    value={form.notificationSubType1}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, notificationSubType1: e.target.value }))
+                    }
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="Notification No">
+                  <Input
+                    value={form.notificationNo}
+                    onChange={(e) => setForm((f) => ({ ...f, notificationNo: e.target.value }))}
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="SrNo">
+                  <Input
+                    value={form.srNo}
+                    onChange={(e) => setForm((f) => ({ ...f, srNo: e.target.value }))}
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="IGST Notification">
+                  <Input
+                    value={form.igstNotification}
+                    onChange={(e) => setForm((f) => ({ ...f, igstNotification: e.target.value }))}
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="IGST SrNo">
+                  <Input
+                    value={form.igstSrNo}
+                    onChange={(e) => setForm((f) => ({ ...f, igstSrNo: e.target.value }))}
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="IGSTC Notification">
+                  <Input
+                    value={form.igstcNotification}
+                    onChange={(e) => setForm((f) => ({ ...f, igstcNotification: e.target.value }))}
+                  />
+                </FieldWrapper>
+                <FieldWrapper label="IGSTC SrNo">
+                  <Input
+                    value={form.igstcSrNo}
+                    onChange={(e) => setForm((f) => ({ ...f, igstcSrNo: e.target.value }))}
+                  />
+                </FieldWrapper>
+              </div>
+            </fieldset>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
@@ -537,13 +769,15 @@ function FieldWrapper({
   label,
   required,
   children,
+  className,
 }: {
   label: string;
   required?: boolean;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className={`flex flex-col gap-1.5 ${className ?? ""}`}>
       <Label className="text-xs font-medium text-muted-foreground">
         {label}
         {required ? <span className="ml-0.5 text-destructive">*</span> : null}

@@ -33,6 +33,7 @@ import { fieldExecutivesResource } from "./fieldExecutives";
 import { consigneesResource } from "./consignees";
 import { shippersResource } from "./shippers";
 import { customersResource } from "./customers";
+import { customerRatesResource } from "./customerRates";
 import { serviceMappingsResource } from "./serviceMappings";
 import { vendorContractsResource } from "./vendorContracts";
 import { localBranchesResource } from "./localBranches";
@@ -67,6 +68,7 @@ export * from "./consignees";
 export * from "./shippers";
 // party aggregate (Phase 3 — Party Masters, Milestone 10B)
 export * from "./customers";
+export * from "./customerRates";
 // operation masters (Phase 3 — Operation Masters)
 export * from "./serviceMappings";
 export * from "./vendorContracts";
@@ -106,6 +108,7 @@ export const masterResources = [
   consigneesResource,
   shippersResource,
   customersResource,
+  customerRatesResource,
   // operation
   serviceMappingsResource,
   vendorContractsResource,
