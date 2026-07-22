@@ -1,13 +1,12 @@
 /**
  * Code + Name lookup pair with:
- *  - inline autocomplete while typing (same data source as the popup)
+ *  - inline autocomplete while typing (default, filter screens)
+ *  - manual search: debounced dropdown while typing + Enter / F2 / 🔍 to commit
  *  - magnifying-glass popup (live RPC dialog or demo MasterLookupDialog)
- *
- * Used by AWB Entry and other transaction screens that need fast keyboard entry
- * without removing the advanced search dialog.
  */
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Loader2, Search } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,13 +14,23 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
 import {
+  lookup,
   useLookup,
   type LookupItem,
   type LookupKey as LiveLookupKey,
 } from "@/lib/masters/core/lookup";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import { ERP_NAV_GROUP, ERP_NAV_ORDER, ERP_NAV_SKIP } from "@/lib/forms/erp-keyboard-nav";
+import {
+  ERP_MANUAL_SEARCH,
+  ERP_NAV_GROUP,
+  ERP_NAV_ORDER,
+  ERP_NAV_SKIP,
+} from "@/lib/forms/erp-keyboard-nav";
+import {
+  isLookupDropdownOutside,
+  LookupDropdownPortal,
+} from "@/components/masters/lookup-dropdown-portal";
 
 export type LookupPairValue = { id?: string; code: string; name: string };
 
@@ -44,7 +53,6 @@ export const DEMO_TO_LIVE_LOOKUP: Partial<Record<LookupKey, LiveLookupKey>> = {
 
 type SearchHit = { id?: string; code: string; name: string; hint?: string | null };
 
-/** Session-scoped cache for repeat inline queries (cleared on full page reload). */
 const SESSION_CACHE = new Map<string, SearchHit[]>();
 const SESSION_CACHE_MAX = 80;
 
@@ -60,8 +68,8 @@ function cacheSet(key: string, rows: SearchHit[]) {
   SESSION_CACHE.set(key, rows);
 }
 
-function filterDemoOptions(lookup: LookupKey, q: string): SearchHit[] {
-  const opts = MASTER_LOOKUPS[lookup]?.options ?? [];
+function filterDemoOptions(lookupKey: LookupKey, q: string): SearchHit[] {
+  const opts = MASTER_LOOKUPS[lookupKey]?.options ?? [];
   const needle = q.trim().toLowerCase();
   if (!needle) return opts.slice(0, 50).map((o) => ({ code: o.code, name: o.name, hint: o.hint }));
   return opts
@@ -73,6 +81,24 @@ function filterDemoOptions(lookup: LookupKey, q: string): SearchHit[] {
     )
     .slice(0, 50)
     .map((o) => ({ code: o.code, name: o.name, hint: o.hint }));
+}
+
+async function fetchLookupHits(
+  lookupKey: LookupKey,
+  live: boolean,
+  liveKey: LiveLookupKey | undefined,
+  q: string,
+): Promise<SearchHit[]> {
+  if (live && liveKey) {
+    const rows = await lookup(liveKey, q, 50);
+    return rows.map((r: LookupItem) => ({
+      id: r.id,
+      code: r.code,
+      name: r.name,
+      hint: r.hint,
+    }));
+  }
+  return filterDemoOptions(lookupKey, q);
 }
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
@@ -87,7 +113,8 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 export function SearchableLookupPair({
   value,
   onChange,
-  lookup,
+  onSelect,
+  lookup: lookupKey,
   minChars = 2,
   debounceMs = 280,
   disabled,
@@ -96,23 +123,27 @@ export function SearchableLookupPair({
   splitCode = false,
   navOrder,
   onCommit,
+  manualSearch = false,
+  emptySearchMessage,
+  noResultsMessage = "No matches found.",
 }: {
   value: LookupPairValue;
   onChange: (v: LookupPairValue) => void;
+  /** Called when a row is committed from search results (not while typing). */
+  onSelect?: (v: LookupPairValue) => void;
   lookup: LookupKey;
-  /** Minimum characters before inline search runs (default 2). */
   minChars?: number;
   debounceMs?: number;
   disabled?: boolean;
   className?: string;
-  /** Smaller inputs/buttons for dense data-entry screens. */
   compact?: boolean;
-  /** Name and code in separate bordered boxes (CourierWala AWB style). */
   splitCode?: boolean;
-  /** ERP keyboard nav order (name field only; code/search skipped). */
   navOrder?: number;
-  /** Called after a value is committed via pick/popup selection. */
   onCommit?: () => void;
+  /** AWB ERP mode: debounced dropdown while typing; Enter / F2 / 🔍 to commit. */
+  manualSearch?: boolean;
+  emptySearchMessage?: string;
+  noResultsMessage?: string;
 }) {
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
@@ -122,39 +153,44 @@ export function SearchableLookupPair({
   const [inlineOpen, setInlineOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const [inlineQuery, setInlineQuery] = useState("");
+  const [manualPopupRows, setManualPopupRows] = useState<SearchHit[] | null>(null);
+  const [manualDropdownRows, setManualDropdownRows] = useState<SearchHit[]>([]);
+  const [manualDropdownOpen, setManualDropdownOpen] = useState(false);
+  const [manualSearching, setManualSearching] = useState(false);
 
-  const liveKey = DEMO_TO_LIVE_LOOKUP[lookup];
+  const liveKey = DEMO_TO_LIVE_LOOKUP[lookupKey];
+  const manualQueryRaw = (value.name || value.code || "").trim();
+  const debouncedManualQuery = useDebouncedValue(manualQueryRaw, debounceMs);
   const debouncedInline = useDebouncedValue(inlineQuery, debounceMs);
-  const canInlineSearch = debouncedInline.trim().length >= minChars;
+  const canInlineSearch = !manualSearch && debouncedInline.trim().length >= minChars;
+  const canDebouncedManualSearch =
+    manualSearch && debouncedManualQuery.length >= minChars;
 
-  const cacheKey = `${live && liveKey ? `live:${liveKey}` : `demo:${lookup}`}::${debouncedInline.trim().toLowerCase()}`;
+  const cacheKey = `${live && liveKey ? `live:${liveKey}` : `demo:${lookupKey}`}::${debouncedInline.trim().toLowerCase()}`;
   const cached = canInlineSearch ? cacheGet(cacheKey) : undefined;
 
-  const { data: liveInlineRows, isFetching: inlineFetching } = useLookup(
-    liveKey ?? "branch",
-    debouncedInline,
-    {
-      enabled: Boolean(live && liveKey && inlineOpen && canInlineSearch && !cached),
-      limit: 50,
-    },
-  );
+  const { data: liveInlineRows } = useLookup(liveKey ?? "branch", debouncedInline, {
+    enabled: Boolean(live && liveKey && inlineOpen && canInlineSearch && !cached && !manualSearch),
+    limit: 50,
+  });
 
   const { data: livePopupRows, isFetching: popupFetching } = useLookup(
     liveKey ?? "branch",
     popupQuery,
     {
-      enabled: Boolean(live && liveKey && popupOpen),
+      enabled: Boolean(live && liveKey && popupOpen && manualPopupRows === null),
       limit: 50,
     },
   );
 
   const demoInlineRows = useMemo(() => {
-    if (live && liveKey) return null;
+    if (manualSearch || (live && liveKey)) return null;
     if (!canInlineSearch) return [];
-    return filterDemoOptions(lookup, debouncedInline);
-  }, [live, liveKey, canInlineSearch, lookup, debouncedInline]);
+    return filterDemoOptions(lookupKey, debouncedInline);
+  }, [manualSearch, live, liveKey, canInlineSearch, lookupKey, debouncedInline]);
 
   const inlineResults: SearchHit[] = useMemo(() => {
+    if (manualSearch) return manualDropdownRows;
     if (!canInlineSearch) return [];
     if (cached) return cached;
     if (live && liveKey) {
@@ -166,16 +202,26 @@ export function SearchableLookupPair({
       }));
     }
     return demoInlineRows ?? [];
-  }, [canInlineSearch, cached, live, liveKey, liveInlineRows, demoInlineRows]);
+  }, [
+    manualSearch,
+    manualDropdownRows,
+    canInlineSearch,
+    cached,
+    live,
+    liveKey,
+    liveInlineRows,
+    demoInlineRows,
+  ]);
 
   useEffect(() => {
-    if (!canInlineSearch || cached) return;
+    if (manualSearch || !canInlineSearch || cached) return;
     if (live && liveKey) {
       if (liveInlineRows) cacheSet(cacheKey, inlineResults);
     } else if (demoInlineRows) {
       cacheSet(cacheKey, demoInlineRows);
     }
   }, [
+    manualSearch,
     canInlineSearch,
     cached,
     live,
@@ -188,30 +234,179 @@ export function SearchableLookupPair({
 
   useEffect(() => {
     setHighlight(0);
-  }, [debouncedInline, inlineOpen]);
+  }, [debouncedInline, inlineOpen, manualDropdownRows, debouncedManualQuery]);
+
+  useEffect(() => {
+    if (!canDebouncedManualSearch) {
+      setManualDropdownOpen(false);
+      setManualDropdownRows([]);
+      return;
+    }
+
+    let cancelled = false;
+    setManualSearching(true);
+    void fetchLookupHits(lookupKey, live, liveKey, debouncedManualQuery)
+      .then((hits) => {
+        if (cancelled) return;
+        if (hits.length === 0) {
+          setManualDropdownRows([]);
+          setManualDropdownOpen(false);
+          return;
+        }
+        setManualDropdownRows(hits);
+        setManualDropdownOpen(true);
+        setHighlight(0);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setManualDropdownRows([]);
+        setManualDropdownOpen(false);
+      })
+      .finally(() => {
+        if (!cancelled) setManualSearching(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canDebouncedManualSearch,
+    debouncedManualQuery,
+    live,
+    liveKey,
+    lookupKey,
+  ]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setInlineOpen(false);
+      if (isLookupDropdownOutside(e.target, wrapRef.current)) {
+        setInlineOpen(false);
+        setManualDropdownOpen(false);
+      }
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const pick = (hit: SearchHit) => {
-    onChange({ id: hit.id, code: hit.code, name: hit.name });
-    setInlineOpen(false);
-    setInlineQuery("");
+  const pick = useCallback(
+    (hit: SearchHit) => {
+      const next = { id: hit.id, code: hit.code, name: hit.name };
+      onChange(next);
+      onSelect?.(next);
+      setInlineOpen(false);
+      setInlineQuery("");
+      setManualDropdownOpen(false);
+      setManualDropdownRows([]);
+      setManualPopupRows(null);
+      setPopupOpen(false);
+      setPopupQuery("");
+      setHighlight(0);
+      onCommit?.();
+    },
+    [onChange, onCommit, onSelect],
+  );
+
+  const searchQuery = useCallback(
+    () => (value.name || value.code || "").trim(),
+    [value.code, value.name],
+  );
+
+  const clearManualDropdown = useCallback(() => {
+    setManualDropdownOpen(false);
+    setManualDropdownRows([]);
     setHighlight(0);
-    onCommit?.();
-  };
+  }, []);
+
+  const runManualSearch = useCallback(
+    async (opts?: { autoSelectSingle?: boolean }) => {
+      const autoSelectSingle = opts?.autoSelectSingle ?? true;
+      const q = searchQuery();
+      if (!q) {
+        if (emptySearchMessage) toast.error(emptySearchMessage);
+        return;
+      }
+      setManualSearching(true);
+      try {
+        const hits = await fetchLookupHits(lookupKey, live, liveKey, q);
+        if (hits.length === 0) {
+          clearManualDropdown();
+          toast.error(noResultsMessage);
+          return;
+        }
+        if (autoSelectSingle && hits.length === 1) {
+          pick(hits[0]);
+          return;
+        }
+        setManualDropdownRows(hits);
+        setManualDropdownOpen(true);
+        setHighlight(0);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Search failed");
+      } finally {
+        setManualSearching(false);
+      }
+    },
+    [
+      clearManualDropdown,
+      emptySearchMessage,
+      live,
+      liveKey,
+      lookupKey,
+      noResultsMessage,
+      pick,
+      searchQuery,
+    ],
+  );
 
   const startInlineFrom = (_field: "code" | "name", text: string) => {
+    if (manualSearch) return;
     setInlineQuery(text);
     setInlineOpen(text.trim().length >= minChars);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (manualSearch) {
+      if (e.key === "F2") {
+        e.preventDefault();
+        void runManualSearch();
+        return;
+      }
+      if (manualDropdownRows.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          if (!manualDropdownOpen) setManualDropdownOpen(true);
+          else setHighlight((h) => Math.min(h + 1, manualDropdownRows.length - 1));
+          return;
+        }
+        if (manualDropdownOpen) {
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlight((h) => Math.max(h - 1, 0));
+            return;
+          }
+          if (e.key === "Enter" && manualDropdownRows[highlight]) {
+            e.preventDefault();
+            pick(manualDropdownRows[highlight]);
+            return;
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            clearManualDropdown();
+            return;
+          }
+        }
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (manualDropdownOpen && manualDropdownRows[highlight]) {
+          pick(manualDropdownRows[highlight]);
+        } else {
+          void runManualSearch();
+        }
+      }
+      return;
+    }
+
     if (!inlineOpen || !canInlineSearch) {
       if (e.key === "Escape") setInlineOpen(false);
       return;
@@ -240,12 +435,14 @@ export function SearchableLookupPair({
       return;
     }
     if (e.key === "Tab" && inlineResults[highlight]) {
-      // Accept highlighted result, then allow default Tab focus move.
       pick(inlineResults[highlight]);
     }
   };
 
-  const showDropdown = inlineOpen && canInlineSearch && inlineResults.length > 0;
+  const showDropdown = manualSearch
+    ? manualDropdownOpen && manualDropdownRows.length > 0
+    : inlineOpen && canInlineSearch && inlineResults.length > 0;
+
   const inputH = compact ? "h-8" : "h-9";
   const codeW = compact ? "w-14" : "w-20";
   const btnSize = compact ? "h-8 w-8" : "h-9 w-9";
@@ -259,6 +456,7 @@ export function SearchableLookupPair({
   const navOrderProps =
     navOrder != null ? ({ [ERP_NAV_ORDER]: String(navOrder) } as const) : undefined;
   const navSkipProps = { [ERP_NAV_SKIP]: "" } as const;
+  const manualSearchProps = manualSearch ? ({ [ERP_MANUAL_SEARCH]: "" } as const) : undefined;
 
   const nameInput = (
     <Input
@@ -267,10 +465,14 @@ export function SearchableLookupPair({
       onChange={(e) => {
         const name = e.target.value;
         onChange({ ...value, id: undefined, name });
-        startInlineFrom("name", name);
+        if (!manualSearch) startInlineFrom("name", name);
       }}
       onFocus={() => {
-        if (value.name.trim().length >= minChars) {
+        if (manualSearch) {
+          if (manualQueryRaw.length >= minChars && manualDropdownRows.length > 0) {
+            setManualDropdownOpen(true);
+          }
+        } else if (value.name.trim().length >= minChars) {
           startInlineFrom("name", value.name);
         }
       }}
@@ -293,10 +495,14 @@ export function SearchableLookupPair({
       onChange={(e) => {
         const code = e.target.value;
         onChange({ ...value, id: undefined, code });
-        startInlineFrom("code", code);
+        if (!manualSearch) startInlineFrom("code", code);
       }}
       onFocus={() => {
-        if (value.code.trim().length >= minChars) {
+        if (manualSearch) {
+          if (manualQueryRaw.length >= minChars && manualDropdownRows.length > 0) {
+            setManualDropdownOpen(true);
+          }
+        } else if (value.code.trim().length >= minChars) {
           startInlineFrom("code", value.code);
         }
       }}
@@ -312,6 +518,10 @@ export function SearchableLookupPair({
     />
   );
 
+  const openSearchPopup = () => {
+    void runManualSearch();
+  };
+
   const searchButton = (
     <Button
       size="icon"
@@ -324,18 +534,41 @@ export function SearchableLookupPair({
       )}
       aria-label="Search"
       onClick={() => {
+        if (manualSearch) {
+          openSearchPopup();
+          return;
+        }
         setInlineOpen(false);
+        setPopupQuery(value.name || value.code || "");
         setPopupOpen(true);
       }}
       {...(navOrder != null ? navSkipProps : {})}
     >
-      <Search className={iconSize} />
+      {manualSearching ? (
+        <Loader2 className={cn(iconSize, "animate-spin")} />
+      ) : (
+        <Search className={iconSize} />
+      )}
     </Button>
   );
 
+  const popupDisplayRows: SearchHit[] =
+    manualPopupRows ??
+    (livePopupRows ?? []).map((r) => ({
+      id: r.id,
+      code: r.code,
+      name: r.name,
+      hint: r.hint,
+    }));
+
   return (
     <>
-      <div ref={wrapRef} className={cn("relative w-full", className)} {...navGroupProps}>
+      <div
+        ref={wrapRef}
+        className={cn("relative w-full", className)}
+        {...navGroupProps}
+        {...manualSearchProps}
+      >
         {splitCode ? (
           <div className="flex w-full min-w-0 items-stretch gap-1">
             <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded border border-input bg-background">
@@ -363,37 +596,38 @@ export function SearchableLookupPair({
         )}
 
         {showDropdown ? (
-          <div
+          <LookupDropdownPortal
+            open
+            anchorRef={wrapRef}
             id={listId}
-            role="listbox"
-            className="absolute left-0 right-9 top-full z-50 mt-1 max-h-64 overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md"
+            insetRight={splitCode ? 36 : 0}
           >
             {inlineResults.map((hit, idx) => (
-                <button
-                  key={`${hit.id ?? hit.code}-${hit.name}-${idx}`}
-                  type="button"
-                  role="option"
-                  aria-selected={idx === highlight}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0",
-                    idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-muted/50",
-                  )}
-                  onMouseEnter={() => setHighlight(idx)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pick(hit);
-                  }}
-                >
-                  <span className="min-w-0 truncate font-medium">
-                    {hit.name}
-                    {hit.hint ? (
-                      <span className="ml-1 font-normal text-muted-foreground">({hit.hint})</span>
-                    ) : null}
-                  </span>
-                  <span className="shrink-0 font-mono text-xs text-muted-foreground">{hit.code}</span>
-                </button>
-              ))}
-          </div>
+              <button
+                key={`${hit.id ?? hit.code}-${hit.name}-${idx}`}
+                type="button"
+                role="option"
+                aria-selected={idx === highlight}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0",
+                  idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-muted/50",
+                )}
+                onMouseEnter={() => setHighlight(idx)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(hit);
+                }}
+              >
+                <span className="min-w-0 truncate font-medium">
+                  {hit.name}
+                  {hit.hint ? (
+                    <span className="ml-1 font-normal text-muted-foreground">({hit.hint})</span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 font-mono text-xs text-muted-foreground">{hit.code}</span>
+              </button>
+            ))}
+          </LookupDropdownPortal>
         ) : null}
       </div>
 
@@ -402,43 +636,44 @@ export function SearchableLookupPair({
           open={popupOpen}
           onOpenChange={(o) => {
             setPopupOpen(o);
-            if (!o) setPopupQuery("");
+            if (!o) {
+              setPopupQuery("");
+              setManualPopupRows(null);
+            }
           }}
         >
           <DialogContent className="max-w-lg">
             <DialogTitle className="text-base font-semibold">
-              Select {MASTER_LOOKUPS[lookup]?.title?.replace(/^Select\s+/i, "") ?? lookup}
+              Select {MASTER_LOOKUPS[lookupKey]?.title?.replace(/^Select\s+/i, "") ?? lookupKey}
             </DialogTitle>
             <Input
               value={popupQuery}
-              onChange={(e) => setPopupQuery(e.target.value)}
+              onChange={(e) => {
+                setPopupQuery(e.target.value);
+                setManualPopupRows(null);
+              }}
               placeholder="Search by code or name…"
               className="mb-2"
             />
             <div className="max-h-72 overflow-auto rounded border">
-              {popupFetching && (livePopupRows ?? []).length === 0 ? (
+              {popupFetching && popupDisplayRows.length === 0 ? (
                 <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Searching…
                 </div>
               ) : null}
-              {(livePopupRows ?? []).map((row) => (
+              {popupDisplayRows.map((row) => (
                 <button
-                  key={row.id}
+                  key={row.id ?? `${row.code}-${row.name}`}
                   type="button"
                   className="flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted/50"
-                  onClick={() => {
-                    onChange({ id: row.id, code: row.code, name: row.name });
-                    setPopupOpen(false);
-                    setPopupQuery("");
-                    onCommit?.();
-                  }}
+                  onClick={() => pick(row)}
                 >
                   <span className="font-medium">{row.name}</span>
                   <span className="text-muted-foreground">{row.code}</span>
                 </button>
               ))}
-              {!popupFetching && (livePopupRows ?? []).length === 0 && (
+              {!popupFetching && popupDisplayRows.length === 0 && (
                 <div className="px-3 py-6 text-center text-sm text-muted-foreground">No matches</div>
               )}
             </div>
@@ -447,12 +682,14 @@ export function SearchableLookupPair({
       ) : (
         <MasterLookupDialog
           open={popupOpen}
-          onOpenChange={setPopupOpen}
-          lookup={lookup}
+          onOpenChange={(o) => {
+            setPopupOpen(o);
+            if (!o) setManualPopupRows(null);
+          }}
+          lookup={lookupKey}
           returnField="code"
           onSelect={(_v, option: LookupOption) => {
-            onChange({ code: option.code, name: option.name });
-            onCommit?.();
+            pick({ code: option.code, name: option.name });
           }}
         />
       )}

@@ -10,6 +10,7 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   erpNavOrder,
+  ERP_MANUAL_SEARCH,
   focusErpFieldByOrder,
   focusNextErpField,
   focusPrevErpField,
@@ -108,6 +109,12 @@ export function ErpFormNavProvider({
       const target = e.target;
       if (!(target instanceof HTMLElement)) return;
       if (!container.contains(target)) return;
+      if (
+        target.closest(`[${ERP_MANUAL_SEARCH}]`) &&
+        (e.key === "Enter" || e.key === "F2")
+      ) {
+        return;
+      }
       if (!shouldEnterAdvanceFocus(target)) return;
 
       if (e.key === "Enter") {

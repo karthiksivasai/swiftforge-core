@@ -2,9 +2,10 @@
  * Reusable party contact memory lookup for AWB Entry (shipper / consignee).
  * Reference-style rich pipe rows + full hydrate on select via get_party_contact.
  */
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Loader2, Search } from "lucide-react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +25,11 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import { ERP_NAV_GROUP, ERP_NAV_ORDER, ERP_NAV_SKIP } from "@/lib/forms/erp-keyboard-nav";
+import { ERP_MANUAL_SEARCH, ERP_NAV_GROUP, ERP_NAV_ORDER, ERP_NAV_SKIP } from "@/lib/forms/erp-keyboard-nav";
+import {
+  isLookupDropdownOutside,
+  LookupDropdownPortal,
+} from "@/components/masters/lookup-dropdown-portal";
 import {
   formatLastUsed,
   getPartyContact,
@@ -196,6 +201,9 @@ export function PartyContactLookup({
   splitCode = false,
   navOrder,
   onCommit,
+  manualSearch = false,
+  emptySearchMessage,
+  noResultsMessage = "No matches found.",
 }: {
   role: PartyContactRole;
   value: CompanyValue;
@@ -208,6 +216,9 @@ export function PartyContactLookup({
   splitCode?: boolean;
   navOrder?: number;
   onCommit?: () => void;
+  manualSearch?: boolean;
+  emptySearchMessage?: string;
+  noResultsMessage?: string;
 }) {
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
@@ -219,13 +230,23 @@ export function PartyContactLookup({
   const [inlineQuery, setInlineQuery] = useState("");
   const [popupPage, setPopupPage] = useState(1);
   const [hydrating, setHydrating] = useState(false);
+  const [manualPopupHits, setManualPopupHits] = useState<PartyContactHit[] | null>(null);
+  const [manualDropdownHits, setManualDropdownHits] = useState<PartyContactHit[]>([]);
+  const [manualDropdownOpen, setManualDropdownOpen] = useState(false);
+  const [manualSearching, setManualSearching] = useState(false);
   const pageSize = 10;
+
+  const manualQueryRaw = (value.name || value.code || "").trim();
+  const debouncedManualQuery = useDebouncedValue(manualQueryRaw, debounceMs);
+  const canDebouncedManualSearch =
+    manualSearch && debouncedManualQuery.length >= minChars;
 
   const debouncedInline = useDebouncedValue(inlineQuery, debounceMs);
   const debouncedPopup = useDebouncedValue(popupQuery, debounceMs);
   const trimmedInlineQuery = inlineQuery.trim();
   const trimmedDebouncedInline = debouncedInline.trim();
-  const canInline = inlineOpen && trimmedInlineQuery.length >= minChars;
+  const canInline =
+    !manualSearch && inlineOpen && trimmedInlineQuery.length >= minChars;
 
   const inlineKeyQ =
     trimmedDebouncedInline.length >= minChars ? trimmedDebouncedInline : null;
@@ -233,7 +254,7 @@ export function PartyContactLookup({
   const { data: liveInline, isFetching: inlineFetching } = useQuery({
     queryKey: ["party-contacts", role, "inline", inlineKeyQ],
     queryFn: () => searchPartyContacts(role, inlineKeyQ, 15),
-    enabled: Boolean(live && canInline),
+    enabled: Boolean(live && canInline && !manualSearch),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
@@ -241,7 +262,7 @@ export function PartyContactLookup({
   const { data: livePopup, isFetching: popupFetching } = useQuery({
     queryKey: ["party-contacts", role, "popup", debouncedPopup.trim() || null],
     queryFn: () => searchPartyContacts(role, debouncedPopup.trim() || null, 100),
-    enabled: Boolean(live && popupOpen),
+    enabled: Boolean(live && popupOpen && manualPopupHits === null && !manualSearch),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
@@ -253,20 +274,62 @@ export function PartyContactLookup({
   }, [canInline, trimmedDebouncedInline, minChars, live, liveInline, role]);
 
   const popupHits: PartyContactHit[] = useMemo(() => {
+    if (manualPopupHits) return manualPopupHits;
     if (live) return livePopup ?? [];
     return filterDemoHits(role, popupQuery);
-  }, [live, livePopup, role, popupQuery]);
+  }, [manualPopupHits, live, livePopup, role, popupQuery]);
 
   const popupTotalPages = Math.max(1, Math.ceil(popupHits.length / pageSize));
   const popupPageSafe = Math.min(popupPage, popupTotalPages);
   const popupSlice = popupHits.slice((popupPageSafe - 1) * pageSize, popupPageSafe * pageSize);
 
-  useEffect(() => setHighlight(0), [debouncedInline, inlineOpen]);
+  useEffect(() => setHighlight(0), [debouncedInline, inlineOpen, debouncedManualQuery]);
   useEffect(() => setPopupPage(1), [debouncedPopup, popupOpen]);
 
   useEffect(() => {
+    if (!canDebouncedManualSearch) {
+      setManualDropdownOpen(false);
+      setManualDropdownHits([]);
+      return;
+    }
+
+    let cancelled = false;
+    setManualSearching(true);
+    void (live
+      ? searchPartyContacts(role, debouncedManualQuery, 100)
+      : Promise.resolve(filterDemoHits(role, debouncedManualQuery))
+    )
+      .then((hits) => {
+        if (cancelled) return;
+        if (hits.length === 0) {
+          setManualDropdownHits([]);
+          setManualDropdownOpen(false);
+          return;
+        }
+        setManualDropdownHits(hits);
+        setManualDropdownOpen(true);
+        setHighlight(0);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setManualDropdownHits([]);
+        setManualDropdownOpen(false);
+      })
+      .finally(() => {
+        if (!cancelled) setManualSearching(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canDebouncedManualSearch, debouncedManualQuery, live, role]);
+
+  useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setInlineOpen(false);
+      if (isLookupDropdownOutside(e.target, wrapRef.current)) {
+        setInlineOpen(false);
+        setManualDropdownOpen(false);
+      }
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -284,19 +347,106 @@ export function PartyContactLookup({
       setInlineOpen(false);
       setPopupOpen(false);
       setInlineQuery("");
+      setManualPopupHits(null);
+      setManualDropdownOpen(false);
+      setManualDropdownHits([]);
       onCommit?.();
     } finally {
       setHydrating(false);
     }
   };
 
+  const searchQuery = useCallback(
+    () => (value.name || value.code || "").trim(),
+    [value.code, value.name],
+  );
+
+  const clearManualDropdown = useCallback(() => {
+    setManualDropdownOpen(false);
+    setManualDropdownHits([]);
+    setHighlight(0);
+  }, []);
+
+  const runManualSearch = useCallback(async () => {
+    const q = searchQuery();
+    if (!q) {
+      if (emptySearchMessage) toast.error(emptySearchMessage);
+      return;
+    }
+    setManualSearching(true);
+    try {
+      const hits = live
+        ? await searchPartyContacts(role, q, 100)
+        : filterDemoHits(role, q);
+      if (hits.length === 0) {
+        clearManualDropdown();
+        toast.error(noResultsMessage);
+        return;
+      }
+      if (hits.length === 1) {
+        await pick(hits[0]);
+        return;
+      }
+      setManualDropdownHits(hits);
+      setManualDropdownOpen(true);
+      setHighlight(0);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Search failed");
+    } finally {
+      setManualSearching(false);
+    }
+  }, [clearManualDropdown, emptySearchMessage, live, noResultsMessage, pick, role, searchQuery]);
+
   const startInline = (text: string) => {
+    if (manualSearch) return;
     setInlineQuery(text);
     const trimmed = text.trim();
     setInlineOpen(trimmed.length >= minChars);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (manualSearch) {
+      if (e.key === "F2") {
+        e.preventDefault();
+        void runManualSearch();
+        return;
+      }
+      if (manualDropdownHits.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          if (!manualDropdownOpen) setManualDropdownOpen(true);
+          else setHighlight((h) => Math.min(h + 1, manualDropdownHits.length - 1));
+          return;
+        }
+        if (manualDropdownOpen) {
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlight((h) => Math.max(h - 1, 0));
+            return;
+          }
+          if (e.key === "Enter" && manualDropdownHits[highlight]) {
+            e.preventDefault();
+            void pick(manualDropdownHits[highlight]);
+            return;
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            clearManualDropdown();
+            return;
+          }
+        }
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (manualDropdownOpen && manualDropdownHits[highlight]) {
+          void pick(manualDropdownHits[highlight]);
+        } else {
+          void runManualSearch();
+        }
+      }
+      return;
+    }
+
     if (!inlineOpen) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -324,7 +474,10 @@ export function PartyContactLookup({
   };
 
   const title = role === "shipper" ? "Shipper" : "Consignee";
-  const showDropdown = inlineOpen && canInline && inlineHits.length > 0;
+  const dropdownHits = manualSearch && manualDropdownOpen ? manualDropdownHits : inlineHits;
+  const showDropdown = manualSearch
+    ? manualDropdownOpen && manualDropdownHits.length > 0
+    : inlineOpen && canInline && inlineHits.length > 0;
   const inputH = compact ? "h-8" : "h-9";
   const codeW = compact ? "w-14" : "w-20";
   const btnSize = compact ? "h-8 w-8" : "h-9 w-9";
@@ -338,6 +491,7 @@ export function PartyContactLookup({
   const navOrderProps =
     navOrder != null ? ({ [ERP_NAV_ORDER]: String(navOrder) } as const) : undefined;
   const navSkipProps = { [ERP_NAV_SKIP]: "" } as const;
+  const manualSearchProps = manualSearch ? ({ [ERP_MANUAL_SEARCH]: "" } as const) : undefined;
 
   const nameInput = (
     <Input
@@ -346,7 +500,14 @@ export function PartyContactLookup({
       onChange={(e) => {
         const name = e.target.value;
         onCompanyChange({ ...value, id: undefined, name });
-        startInline(name);
+        if (!manualSearch) startInline(name);
+      }}
+      onFocus={() => {
+        if (manualSearch) {
+          if (manualQueryRaw.length >= minChars && manualDropdownHits.length > 0) {
+            setManualDropdownOpen(true);
+          }
+        }
       }}
       onKeyDown={onKeyDown}
       className={cn("min-w-0 flex-1", inputH, flatInput)}
@@ -366,7 +527,14 @@ export function PartyContactLookup({
       onChange={(e) => {
         const code = e.target.value;
         onCompanyChange({ ...value, id: undefined, code });
-        startInline(code || value.name);
+        if (!manualSearch) startInline(code || value.name);
+      }}
+      onFocus={() => {
+        if (manualSearch) {
+          if (manualQueryRaw.length >= minChars && manualDropdownHits.length > 0) {
+            setManualDropdownOpen(true);
+          }
+        }
       }}
       onKeyDown={onKeyDown}
       className={cn(splitCode ? "w-full" : codeW, inputH, flatInput)}
@@ -391,13 +559,17 @@ export function PartyContactLookup({
       )}
       aria-label={`Search ${title}`}
       onClick={() => {
+        if (manualSearch) {
+          void runManualSearch();
+          return;
+        }
         setInlineOpen(false);
         setPopupQuery(value.name || value.code || "");
         setPopupOpen(true);
       }}
       {...(navOrder != null ? navSkipProps : {})}
     >
-      {hydrating ? (
+      {hydrating || manualSearching ? (
         <Loader2 className={cn(iconSize, "animate-spin")} />
       ) : (
         <Search className={iconSize} />
@@ -407,7 +579,7 @@ export function PartyContactLookup({
 
   return (
     <>
-      <div ref={wrapRef} className="relative w-full" {...navGroupProps}>
+      <div ref={wrapRef} className="relative w-full" {...navGroupProps} {...manualSearchProps}>
         {splitCode ? (
           <div className="flex w-full min-w-0 items-stretch gap-1">
             <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded border border-input bg-background">
@@ -435,12 +607,14 @@ export function PartyContactLookup({
         )}
 
         {showDropdown ? (
-          <div
+          <LookupDropdownPortal
+            open
+            anchorRef={wrapRef}
             id={listId}
-            role="listbox"
-            className="absolute left-0 top-full z-50 mt-1 max-h-80 w-[min(52rem,calc(100vw-2rem))] overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md"
+            insetRight={splitCode ? 36 : 0}
+            className="max-h-80"
           >
-            {inlineHits.map((hit, idx) => (
+            {dropdownHits.map((hit, idx) => (
                 <button
                   key={hit.id}
                   type="button"
@@ -468,7 +642,7 @@ export function PartyContactLookup({
                   </div>
                 </button>
               ))}
-          </div>
+          </LookupDropdownPortal>
         ) : null}
       </div>
 
@@ -476,7 +650,10 @@ export function PartyContactLookup({
         open={popupOpen}
         onOpenChange={(o) => {
           setPopupOpen(o);
-          if (!o) setPopupQuery("");
+          if (!o) {
+            setPopupQuery("");
+            setManualPopupHits(null);
+          }
         }}
       >
         <DialogContent className="flex max-h-[85vh] max-w-5xl flex-col gap-3 overflow-hidden">

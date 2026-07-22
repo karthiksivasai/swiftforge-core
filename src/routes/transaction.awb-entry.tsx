@@ -3036,7 +3036,7 @@ function AwbEntryPage() {
     setForm((f) => ({ ...f, [side]: { ...f[side], ...patch } }));
   };
 
-  const handleClientChange = async (v: LookupPair) => {
+  const handleClientNameDraft = (v: LookupPair) => {
     const cleared = !v.id && !v.code.trim() && !v.name.trim();
     if (cleared) {
       clientLoadSeqRef.current += 1;
@@ -3045,7 +3045,10 @@ function AwbEntryPage() {
       setForm((f) => ({ ...f, clientName: emptyPair(), paymentType: "" }));
       return;
     }
+    setForm((f) => ({ ...f, clientName: v }));
+  };
 
+  const handleClientSelect = async (v: LookupPair) => {
     setForm((f) => ({ ...f, clientName: v }));
 
     if (!authed) return;
@@ -3082,7 +3085,6 @@ function AwbEntryPage() {
           currency: profile.defaults.currency || f.proforma?.currency || "INR",
         },
       }));
-
     } catch (e) {
       if (seq !== clientLoadSeqRef.current) return;
       toast.error(toErrorMessage(e, "Failed to load client profile"));
@@ -3303,7 +3305,8 @@ function AwbEntryPage() {
                         <FieldWrapper borderLabel lookupSplit label="Client Name" required>
                           <ClientNameLookupInput
                             value={form.clientName}
-                            onChange={(v) => void handleClientChange(v)}
+                            onDraftChange={handleClientNameDraft}
+                            onSelect={(v) => void handleClientSelect(v)}
                             disabled={clientLoading}
                           />
                         </FieldWrapper>
@@ -5437,6 +5440,9 @@ function PartySection({
             onCompanyChange={(v) => onChange({ companyName: v })}
             compact
             splitCode
+            manualSearch
+            emptySearchMessage="Please enter a company name."
+            noResultsMessage="No matches found."
             navOrder={nav.company}
             onCommit={onCommit}
             onSelectContact={(c) =>
@@ -5663,6 +5669,8 @@ function ServicesSection({
               destinationId={form.consignee.origin.id}
               compact
               splitCode
+              manualSearch
+              noResultsMessage="No service found."
               navOrder={AWB_NAV.SERVICE}
               onCommit={onCommit}
             />
@@ -6040,6 +6048,10 @@ function LookupPairInput({
   disabled,
   navOrder,
   onCommit: onCommitProp,
+  onSelect,
+  emptySearchMessage,
+  noResultsMessage,
+  minChars,
 }: {
   value: LookupPair;
   onChange: (v: LookupPair) => void;
@@ -6047,6 +6059,10 @@ function LookupPairInput({
   disabled?: boolean;
   navOrder?: number;
   onCommit?: () => void;
+  onSelect?: (v: LookupPair) => void;
+  emptySearchMessage?: string;
+  noResultsMessage?: string;
+  minChars?: number;
 }) {
   const defaultCommit = useErpNavCommit();
   const onCommit = onCommitProp ?? defaultCommit;
@@ -6054,23 +6070,30 @@ function LookupPairInput({
     <SearchableLookupPair
       value={value}
       onChange={onChange}
+      onSelect={onSelect}
       lookup={lookup}
       disabled={disabled}
       compact
       splitCode
+      manualSearch
+      minChars={minChars}
       navOrder={navOrder}
       onCommit={onCommit}
+      emptySearchMessage={emptySearchMessage}
+      noResultsMessage={noResultsMessage}
     />
   );
 }
 
 function ClientNameLookupInput({
   value,
-  onChange,
+  onDraftChange,
+  onSelect,
   disabled,
 }: {
   value: LookupPair;
-  onChange: (v: LookupPair) => void;
+  onDraftChange: (v: LookupPair) => void;
+  onSelect: (v: LookupPair) => void;
   disabled?: boolean;
 }) {
   const { focusFieldByOrder } = useErpFormNav();
@@ -6078,9 +6101,13 @@ function ClientNameLookupInput({
     <LookupPairInput
       lookup="customer"
       value={value}
-      onChange={onChange}
+      onChange={onDraftChange}
+      onSelect={onSelect}
       disabled={disabled}
+      minChars={1}
       navOrder={AWB_NAV.CLIENT}
+      emptySearchMessage="Please enter a client name."
+      noResultsMessage="No client found."
       onCommit={() => focusFieldByOrder(AWB_NAV.SHIPPER_ORIGIN)}
     />
   );
