@@ -21,6 +21,7 @@ import {
 } from "@/lib/masters/core/lookup";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { ERP_NAV_GROUP, ERP_NAV_ORDER, ERP_NAV_SKIP } from "@/lib/forms/erp-keyboard-nav";
 
 export type LookupPairValue = { id?: string; code: string; name: string };
 
@@ -91,6 +92,10 @@ export function SearchableLookupPair({
   debounceMs = 280,
   disabled,
   className,
+  compact = false,
+  splitCode = false,
+  navOrder,
+  onCommit,
 }: {
   value: LookupPairValue;
   onChange: (v: LookupPairValue) => void;
@@ -100,6 +105,14 @@ export function SearchableLookupPair({
   debounceMs?: number;
   disabled?: boolean;
   className?: string;
+  /** Smaller inputs/buttons for dense data-entry screens. */
+  compact?: boolean;
+  /** Name and code in separate bordered boxes (CourierWala AWB style). */
+  splitCode?: boolean;
+  /** ERP keyboard nav order (name field only; code/search skipped). */
+  navOrder?: number;
+  /** Called after a value is committed via pick/popup selection. */
+  onCommit?: () => void;
 }) {
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
@@ -107,7 +120,6 @@ export function SearchableLookupPair({
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupQuery, setPopupQuery] = useState("");
   const [inlineOpen, setInlineOpen] = useState(false);
-  const [activeField, setActiveField] = useState<"code" | "name" | null>(null);
   const [highlight, setHighlight] = useState(0);
   const [inlineQuery, setInlineQuery] = useState("");
 
@@ -174,12 +186,6 @@ export function SearchableLookupPair({
     inlineResults,
   ]);
 
-  const isSearching =
-    inlineOpen &&
-    canInlineSearch &&
-    !cached &&
-    ((live && liveKey && inlineFetching) || (!live && inlineQuery !== debouncedInline));
-
   useEffect(() => {
     setHighlight(0);
   }, [debouncedInline, inlineOpen]);
@@ -196,12 +202,11 @@ export function SearchableLookupPair({
     onChange({ id: hit.id, code: hit.code, name: hit.name });
     setInlineOpen(false);
     setInlineQuery("");
-    setActiveField(null);
     setHighlight(0);
+    onCommit?.();
   };
 
-  const startInlineFrom = (field: "code" | "name", text: string) => {
-    setActiveField(field);
+  const startInlineFrom = (_field: "code" | "name", text: string) => {
     setInlineQuery(text);
     setInlineOpen(text.trim().length >= minChars);
   };
@@ -240,71 +245,122 @@ export function SearchableLookupPair({
     }
   };
 
-  const showDropdown = inlineOpen && canInlineSearch;
+  const showDropdown = inlineOpen && canInlineSearch && inlineResults.length > 0;
+  const inputH = compact ? "h-8" : "h-9";
+  const codeW = compact ? "w-14" : "w-20";
+  const btnSize = compact ? "h-8 w-8" : "h-9 w-9";
+  const iconSize = compact ? "h-3.5 w-3.5" : "h-4 w-4";
+  const flatInput = compact
+    ? "border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+    : "border-0 bg-transparent shadow-none focus-visible:ring-0";
+
+  const navGroupProps =
+    navOrder != null ? ({ [ERP_NAV_GROUP]: "" } as const) : undefined;
+  const navOrderProps =
+    navOrder != null ? ({ [ERP_NAV_ORDER]: String(navOrder) } as const) : undefined;
+  const navSkipProps = { [ERP_NAV_SKIP]: "" } as const;
+
+  const nameInput = (
+    <Input
+      value={value.name}
+      disabled={disabled}
+      onChange={(e) => {
+        const name = e.target.value;
+        onChange({ ...value, id: undefined, name });
+        startInlineFrom("name", name);
+      }}
+      onFocus={() => {
+        if (value.name.trim().length >= minChars) {
+          startInlineFrom("name", value.name);
+        }
+      }}
+      onKeyDown={onKeyDown}
+      className={cn("min-w-0 flex-1", inputH, flatInput)}
+      placeholder="Name"
+      role="combobox"
+      aria-expanded={showDropdown}
+      aria-controls={listId}
+      aria-autocomplete="list"
+      autoComplete="off"
+      {...navOrderProps}
+    />
+  );
+
+  const codeInput = (
+    <Input
+      value={value.code}
+      disabled={disabled}
+      onChange={(e) => {
+        const code = e.target.value;
+        onChange({ ...value, id: undefined, code });
+        startInlineFrom("code", code);
+      }}
+      onFocus={() => {
+        if (value.code.trim().length >= minChars) {
+          startInlineFrom("code", value.code);
+        }
+      }}
+      onKeyDown={onKeyDown}
+      className={cn(splitCode ? "w-full" : codeW, inputH, flatInput)}
+      placeholder="Code"
+      role="combobox"
+      aria-expanded={showDropdown}
+      aria-controls={listId}
+      aria-autocomplete="list"
+      autoComplete="off"
+      {...(navOrder != null ? navSkipProps : {})}
+    />
+  );
+
+  const searchButton = (
+    <Button
+      size="icon"
+      variant="outline"
+      type="button"
+      disabled={disabled}
+      className={cn(
+        "shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground",
+        btnSize,
+      )}
+      aria-label="Search"
+      onClick={() => {
+        setInlineOpen(false);
+        setPopupOpen(true);
+      }}
+      {...(navOrder != null ? navSkipProps : {})}
+    >
+      <Search className={iconSize} />
+    </Button>
+  );
 
   return (
     <>
-      <div ref={wrapRef} className={cn("relative", className)}>
-        <div className="flex gap-1">
-          <Input
-            value={value.code}
-            disabled={disabled}
-            onChange={(e) => {
-              const code = e.target.value;
-              onChange({ ...value, id: undefined, code });
-              startInlineFrom("code", code);
-            }}
-            onFocus={() => {
-              if (value.code.trim().length >= minChars) {
-                startInlineFrom("code", value.code);
-              }
-            }}
-            onKeyDown={onKeyDown}
-            className="w-20"
-            placeholder="Code"
-            role="combobox"
-            aria-expanded={showDropdown}
-            aria-controls={listId}
-            aria-autocomplete="list"
-            autoComplete="off"
-          />
-          <Input
-            value={value.name}
-            disabled={disabled}
-            onChange={(e) => {
-              const name = e.target.value;
-              onChange({ ...value, id: undefined, name });
-              startInlineFrom("name", name);
-            }}
-            onFocus={() => {
-              if (value.name.trim().length >= minChars) {
-                startInlineFrom("name", value.name);
-              }
-            }}
-            onKeyDown={onKeyDown}
-            className="min-w-0 flex-1"
-            placeholder="Name"
-            role="combobox"
-            aria-expanded={showDropdown}
-            aria-controls={listId}
-            aria-autocomplete="list"
-            autoComplete="off"
-          />
-          <Button
-            size="icon"
-            variant="outline"
-            type="button"
-            disabled={disabled}
-            className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-            aria-label="Search"
-            onClick={() => {
-              setInlineOpen(false);
-              setPopupOpen(true);
-            }}
-          >
-            <Search className="h-4 w-4" />
-          </Button>
-        </div>
+      <div ref={wrapRef} className={cn("relative w-full", className)} {...navGroupProps}>
+        {splitCode ? (
+          <div className="flex w-full min-w-0 items-stretch gap-1">
+            <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded border border-input bg-background">
+              {nameInput}
+            </div>
+            <div className="lookup-code flex w-[5.75rem] shrink-0 items-stretch gap-1">
+              <div
+                className={cn(
+                  "overflow-hidden rounded border border-input bg-background",
+                  inputH,
+                  codeW,
+                )}
+              >
+                {codeInput}
+              </div>
+              {searchButton}
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-1">
+            {nameInput}
+            {codeInput}
+            {searchButton}
+          </div>
+        )}
 
         {showDropdown ? (
           <div
@@ -312,15 +368,7 @@ export function SearchableLookupPair({
             role="listbox"
             className="absolute left-0 right-9 top-full z-50 mt-1 max-h-64 overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md"
           >
-            {isSearching ? (
-              <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Searching…
-              </div>
-            ) : inlineResults.length === 0 ? (
-              <div className="px-3 py-3 text-sm text-muted-foreground">No results found</div>
-            ) : (
-              inlineResults.map((hit, idx) => (
+            {inlineResults.map((hit, idx) => (
                 <button
                   key={`${hit.id ?? hit.code}-${hit.name}-${idx}`}
                   type="button"
@@ -344,13 +392,7 @@ export function SearchableLookupPair({
                   </span>
                   <span className="shrink-0 font-mono text-xs text-muted-foreground">{hit.code}</span>
                 </button>
-              ))
-            )}
-            {activeField ? (
-              <div className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-                ↑↓ navigate · Enter select · Esc close · Tab accept
-              </div>
-            ) : null}
+              ))}
           </div>
         ) : null}
       </div>
@@ -389,6 +431,7 @@ export function SearchableLookupPair({
                     onChange({ id: row.id, code: row.code, name: row.name });
                     setPopupOpen(false);
                     setPopupQuery("");
+                    onCommit?.();
                   }}
                 >
                   <span className="font-medium">{row.name}</span>
@@ -407,9 +450,10 @@ export function SearchableLookupPair({
           onOpenChange={setPopupOpen}
           lookup={lookup}
           returnField="code"
-          onSelect={(_v, option: LookupOption) =>
-            onChange({ code: option.code, name: option.name })
-          }
+          onSelect={(_v, option: LookupOption) => {
+            onChange({ code: option.code, name: option.name });
+            onCommit?.();
+          }}
         />
       )}
     </>

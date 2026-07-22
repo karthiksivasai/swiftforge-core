@@ -1,5 +1,5 @@
 import { createFileRoute, useBlocker } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Download,
@@ -59,6 +59,14 @@ import {
 import { SearchableLookupPair } from "@/components/masters/searchable-lookup-pair";
 import { PartyContactLookup } from "@/components/transactions/party-contact-lookup";
 import { VendorServiceLookup } from "@/components/transactions/vendor-service-lookup";
+import { ErpFormNavProvider, ErpNavDateInput, ErpNavInput, useErpFormNav, useErpNavCommit, useErpSelectHandler } from "@/components/forms/erp-form-nav-context";
+import { AWB_NAV } from "@/lib/forms/awb-entry-nav-order";
+import {
+  AWB_REQUIRED_NAV_ORDERS,
+  isAwbLookupSelected,
+  validateAwbNavField,
+} from "@/lib/forms/awb-entry-required-fields";
+import { erpNavOrder, erpNavSkip, getErpNavOrderFromElement } from "@/lib/forms/erp-keyboard-nav";
 import type { LookupKey } from "@/lib/master-lookups";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
@@ -1256,6 +1264,8 @@ function AwbEntryPage() {
   const [kycSearchField, setKycSearchField] = useState<SearchField>("awbNo");
   const [kycSearchInput, setKycSearchInput] = useState("");
   const kycFileRef = useRef<HTMLInputElement | null>(null);
+  const awbNavRef = useRef<HTMLFieldSetElement>(null);
+  const [navInvalidOrders, setNavInvalidOrders] = useState<Set<number>>(() => new Set());
   const [formSetupOpen, setFormSetupOpen] = useState(false);
   const [formSetupSettings, setFormSetupSettings] =
     useState<AwbFormSetupSettings>(defaultAwbFormSetup);
@@ -2024,6 +2034,9 @@ function AwbEntryPage() {
     if (!authed && !form.awbNo.trim()) return toast.error("AWB No is required");
     if (!form.clientName.code.trim() && !form.clientName.name.trim())
       return toast.error("Client Name is required");
+    if (!isAwbLookupSelected(form.shipper.origin)) return toast.error("Origin is required");
+    if (!isAwbLookupSelected(form.shipper.companyName))
+      return toast.error("Shipper Company Name is required");
     if (
       !formSetupSettings.consigneeNotRequired &&
       !form.consignee.origin.name.trim() &&
@@ -2032,21 +2045,15 @@ function AwbEntryPage() {
       return toast.error("Destination is required");
     }
     if (
-      !formSetupSettings.allowConsigneeNameBlank &&
       !formSetupSettings.consigneeNotRequired &&
-      !form.consignee.companyName.name.trim() &&
-      !form.consignee.contactName.trim()
+      !isAwbLookupSelected(form.consignee.companyName)
     ) {
-      return toast.error("Consignee Name is required");
+      return toast.error("Consignee Company Name is required");
     }
     if (!form.product.code.trim()) return toast.error("Product is required");
+    if (!isAwbLookupSelected(form.service)) return toast.error("Service is required");
     if (!formSetupSettings.airlineNotRequired && !form.airline.trim())
       return toast.error("Airline is required");
-    if (form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim()) {
-      if (!form.service.code.trim() && !form.service.name.trim()) {
-        return toast.error("Service is required when Vendor is selected");
-      }
-    }
 
     const payload = normalizeForm({
       ...form,
@@ -3076,9 +3083,6 @@ function AwbEntryPage() {
         },
       }));
 
-      if (hydrate.paymentTypeMissing) {
-        toast.warning("No default payment type configured for this client.");
-      }
     } catch (e) {
       if (seq !== clientLoadSeqRef.current) return;
       toast.error(toErrorMessage(e, "Failed to load client profile"));
@@ -3087,25 +3091,74 @@ function AwbEntryPage() {
     }
   };
 
+  const clientSelected = Boolean(form.clientName.id || form.clientName.code.trim());
+
   const paymentTypeReadOnly =
     !formSetupSettings.allowPaymentTypeOverride &&
-    Boolean(form.clientName.id || form.clientName.code.trim()) &&
-    Boolean(form.paymentType);
+    clientSelected &&
+    Boolean(loadedClientProfile?.paymentType?.trim());
+
+  const consigneeFieldsRequired = !formSetupSettings.consigneeNotRequired;
+
+  const validateAwbNavAdvance = useCallback(
+    (anchor: HTMLElement) => {
+      const container = awbNavRef.current;
+      if (!container) return true;
+      const order = getErpNavOrderFromElement(anchor, container);
+      if (order == null || !AWB_REQUIRED_NAV_ORDERS.has(order)) return true;
+      return validateAwbNavField(order, form, {
+        consigneeNotRequired: formSetupSettings.consigneeNotRequired,
+      });
+    },
+    [form, formSetupSettings.consigneeNotRequired],
+  );
+
+  const handleAwbNavAdvanceBlocked = useCallback((anchor: HTMLElement) => {
+    const container = awbNavRef.current;
+    if (!container) return;
+    const order = getErpNavOrderFromElement(anchor, container);
+    if (order == null) return;
+    setNavInvalidOrders((prev) => {
+      if (prev.has(order)) return prev;
+      const next = new Set(prev);
+      next.add(order);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    setNavInvalidOrders((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      let changed = false;
+      for (const order of prev) {
+        if (
+          validateAwbNavField(order, form, {
+            consigneeNotRequired: formSetupSettings.consigneeNotRequired,
+          })
+        ) {
+          next.delete(order);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [form, formSetupSettings.consigneeNotRequired]);
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-5 px-4 py-6 md:px-8 md:py-8">
+    <div className="flex w-full min-w-0 flex-col gap-1.5 px-3 py-2 md:gap-2 md:px-4 md:py-3">
       <MasterBreadcrumb trail={["Transaction", showForm ? "AWB Entry" : "AWB Entry List"]} />
 
       {showForm ? (
-        <Card className="min-w-0 overflow-hidden border p-0">
+        <Card className="min-w-0 border shadow-none p-0">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col gap-1.5 border-b bg-muted/30 px-2.5 py-1.5 lg:flex-row lg:items-center lg:justify-between">
               <TabsList className="h-auto gap-1 bg-transparent p-0">
                 {(["awb", "proforma", "forwarding", "kyc"] as const).map((tab) => (
                   <TabsTrigger
                     key={tab}
                     value={tab}
-                    className="rounded-full px-4 py-1.5 capitalize data-[state=active]:bg-sidebar data-[state=active]:text-sidebar-foreground data-[state=active]:shadow-none"
+                    className="rounded-full px-2.5 py-0.5 text-xs capitalize data-[state=active]:bg-sidebar data-[state=active]:text-sidebar-foreground data-[state=active]:shadow-none"
                   >
                     {tab === "awb"
                       ? "AWB"
@@ -3152,7 +3205,7 @@ function AwbEntryPage() {
                     <Copy className="h-4 w-4" />
                   </IconButton>
                   <Select value="awbNo" disabled>
-                    <SelectTrigger className="h-9 w-[8.5rem]">
+                    <SelectTrigger className="h-8 w-[8.5rem] text-xs">
                       <SelectValue>AWB No</SelectValue>
                     </SelectTrigger>
                   </Select>
@@ -3163,23 +3216,29 @@ function AwbEntryPage() {
                       if (e.key === "Enter") handleFormToolbarSearch();
                     }}
                     placeholder="Search"
-                    className="h-9 w-36"
+                    className="h-8 w-36 text-xs"
                   />
                   <Button
                     size="icon"
-                    className="h-9 w-9 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                    className="h-8 w-8 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                     onClick={handleFormToolbarSearch}
                     aria-label="Search AWB"
                   >
-                    <Search className="h-4 w-4" />
+                    <Search className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               </TooltipProvider>
             </div>
 
             <TabsContent value="awb" className="mt-0">
-              <fieldset disabled={isReadOnly} className="min-w-0 border-0 p-0 disabled:opacity-90">
-                <div className="flex flex-wrap gap-x-6 gap-y-2 border-b bg-muted/10 px-4 py-2 text-xs text-muted-foreground">
+              <fieldset disabled={isReadOnly} ref={awbNavRef} className="min-w-0 border-0 p-0 disabled:opacity-90">
+                <ErpFormNavProvider
+                  containerRef={awbNavRef}
+                  enabled={!isReadOnly}
+                  validateBeforeAdvance={validateAwbNavAdvance}
+                  onAdvanceBlocked={handleAwbNavAdvanceBlocked}
+                >
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 border-b bg-muted/10 px-2.5 py-0.5 text-[12px] leading-tight text-muted-foreground">
                   <span>
                     AWB UserID:{" "}
                     <span className="font-medium text-foreground">{form.awbUserId}</span>
@@ -3198,74 +3257,65 @@ function AwbEntryPage() {
                   <span>Flight No: {form.flightNo || "—"}</span>
                 </div>
 
-                <div className="p-4 md:p-6">
-                  <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
-                    <FieldWrapper label="AWB No.">
-                      <div className="flex items-center gap-2">
-                        <Input
+                <div className="p-2 md:p-2.5">
+                  <div className="mb-2 rounded border border-border bg-card p-2 pt-2.5">
+                    <div className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-2 lg:grid-cols-12 lg:gap-x-2">
+                      <FieldWrapper borderLabel label="AWB No." className="lg:col-span-2">
+                        <ErpNavInput
+                          order={AWB_NAV.AWB_NO}
                           value={form.awbNo}
-                          disabled={!!editing || isReadOnly}
-                          onChange={(e) => setForm((f) => ({ ...f, awbNo: e.target.value }))}
-                          className="flex-1"
+                          disabled={!!editing || isReadOnly || clientSelected}
+                          onValueChange={(v) => setForm((f) => ({ ...f, awbNo: v }))}
+                          className="h-8 px-1.5 text-[13px]"
                         />
-                        {formStatus ? (
-                          <Badge
-                            variant={
-                              formStatus === "BOOKED"
-                                ? "default"
-                                : formStatus === "CANCELLED"
-                                  ? "destructive"
-                                  : "secondary"
-                            }
-                            className="shrink-0"
-                          >
-                            {formStatus}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </FieldWrapper>
-                    <FieldWrapper label="Book Date">
-                      <Input
-                        type="date"
-                        value={form.bookDate}
-                        onChange={(e) => setForm((f) => ({ ...f, bookDate: e.target.value }))}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper label="Time">
-                      <Input
-                        value={form.bookTime}
-                        onChange={(e) =>
-                          setForm((f) => ({
-                            ...f,
-                            bookTime: e.target.value.replace(/\D/g, "").slice(0, 4),
-                          }))
-                        }
-                        placeholder="HHmm"
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper label="Reference No.">
-                      <Input
-                        value={form.referenceNo}
-                        onChange={(e) => setForm((f) => ({ ...f, referenceNo: e.target.value }))}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper label="Client Name" required>
-                      <div className="space-y-1">
-                        <LookupPairInput
-                          lookup="customer"
-                          value={form.clientName}
-                          onChange={(v) => void handleClientChange(v)}
-                          disabled={clientLoading}
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="Book Date" className="lg:col-span-2">
+                        <ErpNavDateInput
+                          order={AWB_NAV.BOOK_DATE}
+                          value={form.bookDate}
+                          onValueChange={(v) => setForm((f) => ({ ...f, bookDate: v }))}
+                          className="h-8 px-1.5 text-[13px]"
                         />
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="Time" className="lg:col-span-1">
+                        <ErpNavInput
+                          order={AWB_NAV.TIME}
+                          value={form.bookTime}
+                          onValueChange={(v) =>
+                            setForm((f) => ({
+                              ...f,
+                              bookTime: v.replace(/\D/g, "").slice(0, 4),
+                            }))
+                          }
+                          placeholder="HHmm"
+                          className="h-8 px-1.5 text-[13px]"
+                        />
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="Reference No." className="lg:col-span-2">
+                        <ErpNavInput
+                          order={AWB_NAV.REFERENCE}
+                          value={form.referenceNo}
+                          onValueChange={(v) => setForm((f) => ({ ...f, referenceNo: v }))}
+                          className="h-8 px-1.5 text-[13px]"
+                        />
+                      </FieldWrapper>
+                      <div className="min-w-0 lg:col-span-3">
+                        <FieldWrapper borderLabel lookupSplit label="Client Name" required>
+                          <ClientNameLookupInput
+                            value={form.clientName}
+                            onChange={(v) => void handleClientChange(v)}
+                            disabled={clientLoading}
+                          />
+                        </FieldWrapper>
                         {clientLoading ? (
-                          <p className="text-xs text-muted-foreground">Loading client profile…</p>
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">Loading client profile…</p>
                         ) : loadedClientProfile?.paymentType ? (
-                          <p className="text-xs text-muted-foreground">
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">
                             Payment Type from Client Master: {loadedClientProfile.paymentType}
                           </p>
                         ) : null}
                       </div>
-                    </FieldWrapper>
+                    </div>
                   </div>
 
                   {editing?.id && (formStatus === "BOOKED" || showShipmentDocumentsCenter) ? (
@@ -3281,31 +3331,37 @@ function AwbEntryPage() {
                     />
                   ) : null}
 
-                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                  <div className="mt-0.5 grid grid-cols-1 items-start gap-2 pt-2 md:grid-cols-2 xl:grid-cols-3 xl:gap-2.5">
                     <PartySection
                       title="Shipper Details"
                       party={form.shipper}
                       onChange={(p) => patchParty("shipper", p)}
                       originLookup="destination"
+                      originRequired
+                      invalidNavOrders={navInvalidOrders}
                     />
                     <PartySection
                       title="Consignee Details"
                       party={form.consignee}
                       onChange={(p) => patchParty("consignee", p)}
                       originLookup="destination"
-                      destinationRequired={!formSetupSettings.consigneeNotRequired}
+                      originRequired={consigneeFieldsRequired}
+                      companyRequired={consigneeFieldsRequired}
+                      invalidNavOrders={navInvalidOrders}
                     />
                     <ServicesSection
                       form={form}
                       setForm={setForm}
                       airlineRequired={!formSetupSettings.airlineNotRequired}
+                      invalidNavOrders={navInvalidOrders}
                     />
                   </div>
 
-                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <div className="flex items-end gap-2">
+                  <div className="mt-1 grid grid-cols-1 gap-1.5 md:grid-cols-3">
+                    <div className="flex items-end gap-1.5">
                       <Button
-                        className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-600/90"
+                        size="sm"
+                        className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
                         onClick={() =>
                           toast.info("Customer charges will be enabled with backend wiring")
                         }
@@ -3315,13 +3371,14 @@ function AwbEntryPage() {
                       <Input
                         value={form.customerChargesTotal}
                         readOnly
-                        className="bg-muted/30"
+                        className="h-8 bg-muted/30 px-1.5 text-[13px]"
                         placeholder="Total Amount"
                       />
                     </div>
-                    <div className="flex items-end gap-2">
+                    <div className="flex items-end gap-1.5">
                       <Button
-                        className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-600/90"
+                        size="sm"
+                        className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
                         onClick={() =>
                           toast.info("Vendor charges will be enabled with backend wiring")
                         }
@@ -3331,13 +3388,14 @@ function AwbEntryPage() {
                       <Input
                         value={form.vendorChargesTotal}
                         readOnly
-                        className="bg-muted/30"
+                        className="h-8 bg-muted/30 px-1.5 text-[13px]"
                         placeholder="Total Amount"
                       />
                     </div>
                     <div className="flex items-end">
                       <Button
-                        className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+                        size="sm"
+                        className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
                         onClick={() =>
                           toast.info("Rate compare will be enabled with backend wiring")
                         }
@@ -3453,7 +3511,7 @@ function AwbEntryPage() {
                       </div>
                       <div className="mt-3 flex justify-end">
                         <Button
-                          className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                          className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                           onClick={addPiecesLine}
                         >
                           <Plus className="mr-1 h-4 w-4" />
@@ -3698,7 +3756,7 @@ function AwbEntryPage() {
                         </FieldWrapper>
                         <div className="flex items-end">
                           <Button
-                            className="w-full bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                            className="w-full bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                             onClick={addChargeLine}
                           >
                             <Plus className="mr-1 h-4 w-4" />
@@ -3780,98 +3838,16 @@ function AwbEntryPage() {
                   </Collapsible>
 
                   <FormSection title="Shipment Details" className="mt-4">
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-                      <FieldWrapper label="Payment Type">
-                        <Select
-                          value={form.paymentType || undefined}
-                          onValueChange={(v) => setForm((f) => ({ ...f, paymentType: v }))}
-                          disabled={isReadOnly || paymentTypeReadOnly || clientLoading}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {PAYMENT_TYPES.map((p) => (
-                              <SelectItem key={p} value={p}>
-                                {p}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {paymentTypeReadOnly ? (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Locked to Client Master. Enable “Allow Payment Type Override” in Form
-                            Setup to edit.
-                          </p>
-                        ) : null}
-                      </FieldWrapper>
-                      <FieldWrapper label="Content">
-                        <Input
-                          value={form.content}
-                          onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper label="Instruction">
-                        <Input
-                          value={form.instruction}
-                          onChange={(e) => setForm((f) => ({ ...f, instruction: e.target.value }))}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper label="Field Executive">
-                        <LookupPairInput
-                          lookup="fieldExecutive"
-                          value={form.fieldExecutive}
-                          onChange={(v) => setForm((f) => ({ ...f, fieldExecutive: v }))}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper label="Cash Receipt No.">
-                        <Input
-                          value={form.cashReceiptNo}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, cashReceiptNo: e.target.value }))
-                          }
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper label="Amount Received">
-                        <Input
-                          value={form.amountReceived}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, amountReceived: e.target.value }))
-                          }
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper label="Balance Amount">
-                        <Input
-                          value={form.balanceAmount}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, balanceAmount: e.target.value }))
-                          }
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper label="Cash Receipt Date">
-                        <Input
-                          type="date"
-                          value={form.cashReceiptDate}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, cashReceiptDate: e.target.value }))
-                          }
-                        />
-                      </FieldWrapper>
-                      <div className="flex items-end pb-1">
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            id="lock"
-                            checked={form.lock}
-                            onCheckedChange={(c) => setForm((f) => ({ ...f, lock: c === true }))}
-                          />
-                          <label htmlFor="lock" className="text-sm text-muted-foreground">
-                            Lock
-                          </label>
-                        </div>
-                      </div>
-                    </div>
+                    <ShipmentDetailsFields
+                      form={form}
+                      setForm={setForm}
+                      paymentTypeReadOnly={paymentTypeReadOnly}
+                      clientLoading={clientLoading}
+                      isReadOnly={isReadOnly}
+                    />
                   </FormSection>
                 </div>
+                </ErpFormNavProvider>
               </fieldset>
               {editing?.id &&
               (showShipmentDocumentsCenter || vendorShippingActive || vendorBookingBusy) ? (
@@ -4265,7 +4241,7 @@ function AwbEntryPage() {
                     <div className="flex items-end lg:col-span-2">
                       <Button
                         type="button"
-                        className="w-full bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                        className="w-full bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                         onClick={addProformaLine}
                       >
                         <Plus className="mr-1 h-4 w-4" />
@@ -4576,7 +4552,7 @@ function AwbEntryPage() {
                         </FieldWrapper>
                         <div className="flex items-end lg:col-span-2">
                           <Button
-                            className="w-full bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                            className="w-full bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                             onClick={addVendorChargeLine}
                           >
                             <Plus className="mr-1 h-4 w-4" />
@@ -4728,7 +4704,7 @@ function AwbEntryPage() {
                     />
                     <Button
                       size="icon"
-                      className="h-9 w-9 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                      className="h-9 w-9 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                       aria-label="Search KYC"
                     >
                       <Search className="h-4 w-4" />
@@ -4868,7 +4844,7 @@ function AwbEntryPage() {
                   </Button>
                   <Button
                     type="button"
-                    className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                    className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                     onClick={addProformaUnit}
                   >
                     Add
@@ -4911,7 +4887,7 @@ function AwbEntryPage() {
               <div className="flex justify-end gap-2 px-6 pb-6">
                 <Button
                   onClick={handleFormSetupSave}
-                  className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                  className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                 >
                   Save
                 </Button>
@@ -4958,7 +4934,7 @@ function AwbEntryPage() {
               <div className="flex justify-end gap-2 px-6 pb-6">
                 <Button
                   onClick={handleEntrySearch}
-                  className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                  className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                 >
                   Search
                 </Button>
@@ -5056,7 +5032,7 @@ function AwbEntryPage() {
                 />
                 <Button
                   size="icon"
-                  className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                  className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                   onClick={handleSearch}
                   aria-label="Search"
                 >
@@ -5358,8 +5334,14 @@ function FormSection({
   className?: string;
 }) {
   return (
-    <div className={cn("relative rounded-md border p-4 pt-6", className)}>
-      <span className="absolute -top-2.5 left-3 bg-card px-2 text-sm font-medium text-foreground">
+    <div
+      className={cn(
+        "relative min-w-0 rounded border border-border bg-card p-2.5 pt-5 shadow-none",
+        className,
+      )}
+    >
+      {/* Centered on the top border — do not use nested <fieldset>/<legend> (breaks inside the page fieldset). */}
+      <span className="absolute left-2.5 top-1 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[14px] font-semibold leading-none text-sidebar-foreground">
         {title}
       </span>
       {children}
@@ -5372,30 +5354,91 @@ function PartySection({
   party,
   onChange,
   originLookup,
-  destinationRequired,
+  originRequired,
+  companyRequired = true,
+  invalidNavOrders,
 }: {
   title: string;
   party: PartyDetails;
   onChange: (patch: Partial<PartyDetails>) => void;
   originLookup: LookupKey;
-  destinationRequired?: boolean;
+  originRequired?: boolean;
+  companyRequired?: boolean;
+  invalidNavOrders?: Set<number>;
 }) {
-  const originLabel = title.includes("Consignee") ? "Destination" : "Origin";
+  const onCommit = useErpNavCommit();
+  const isConsignee = title.includes("Consignee");
+  const originLabel = isConsignee ? "Destination" : "Origin";
+  const nav = isConsignee
+    ? {
+        origin: AWB_NAV.CONSIGNEE_DESTINATION,
+        company: AWB_NAV.CONSIGNEE_COMPANY,
+        contact: AWB_NAV.CONSIGNEE_CONTACT,
+        address1: AWB_NAV.CONSIGNEE_ADDRESS1,
+        address2: AWB_NAV.CONSIGNEE_ADDRESS2,
+        pincode: AWB_NAV.CONSIGNEE_PINCODE,
+        city: AWB_NAV.CONSIGNEE_CITY,
+        state: AWB_NAV.CONSIGNEE_STATE,
+        telephone: AWB_NAV.CONSIGNEE_TELEPHONE,
+        mobile: AWB_NAV.CONSIGNEE_MOBILE,
+        email: AWB_NAV.CONSIGNEE_EMAIL,
+        country: AWB_NAV.CONSIGNEE_COUNTRY,
+        iec: AWB_NAV.CONSIGNEE_IEC,
+        docType: AWB_NAV.CONSIGNEE_DOC_TYPE,
+        docNo: AWB_NAV.CONSIGNEE_DOC_NO,
+      }
+    : {
+        origin: AWB_NAV.SHIPPER_ORIGIN,
+        company: AWB_NAV.SHIPPER_COMPANY,
+        contact: AWB_NAV.SHIPPER_CONTACT,
+        address1: AWB_NAV.SHIPPER_ADDRESS1,
+        address2: AWB_NAV.SHIPPER_ADDRESS2,
+        pincode: AWB_NAV.SHIPPER_PINCODE,
+        city: AWB_NAV.SHIPPER_CITY,
+        state: AWB_NAV.SHIPPER_STATE,
+        telephone: AWB_NAV.SHIPPER_TELEPHONE,
+        mobile: AWB_NAV.SHIPPER_MOBILE,
+        email: AWB_NAV.SHIPPER_EMAIL,
+        country: AWB_NAV.SHIPPER_COUNTRY,
+        iec: AWB_NAV.SHIPPER_IEC,
+        docType: AWB_NAV.SHIPPER_DOC_TYPE,
+        docNo: AWB_NAV.SHIPPER_DOC_NO,
+      };
+  const onDocTypeChange = useErpSelectHandler((v: string) => onChange({ documentType: v }));
+  const inputClass = "h-8 px-1.5 text-[13px]";
+
   return (
     <FormSection title={title}>
-      <div className="grid grid-cols-1 gap-3">
-        <FieldWrapper label={originLabel} required={destinationRequired}>
+      <div className="grid grid-cols-1 content-start gap-1.5">
+        <FieldWrapper
+          borderLabel
+          lookupSplit
+          label={originLabel}
+          required={originRequired}
+          invalid={invalidNavOrders?.has(nav.origin)}
+        >
           <LookupPairInput
             lookup={originLookup}
             value={party.origin}
             onChange={(v) => onChange({ origin: v })}
+            navOrder={nav.origin}
           />
         </FieldWrapper>
-        <FieldWrapper label="Company Name">
+        <FieldWrapper
+          borderLabel
+          lookupSplit
+          label="Company Name"
+          required={companyRequired}
+          invalid={invalidNavOrders?.has(nav.company)}
+        >
           <PartyContactLookup
-            role={title.includes("Shipper") ? "shipper" : "consignee"}
+            role={isConsignee ? "consignee" : "shipper"}
             value={party.companyName}
             onCompanyChange={(v) => onChange({ companyName: v })}
+            compact
+            splitCode
+            navOrder={nav.company}
+            onCommit={onCommit}
             onSelectContact={(c) =>
               onChange({
                 companyName: { id: c.id, code: c.code, name: c.name },
@@ -5420,61 +5463,108 @@ function PartySection({
             }
           />
         </FieldWrapper>
-        <FieldWrapper label="Contact Name">
-          <Input
-            value={party.contactName}
-            onChange={(e) => onChange({ contactName: e.target.value })}
+        <div className="grid grid-cols-2 gap-2">
+          <FieldWrapper borderLabel label="Contact Name">
+            <ErpNavInput
+              order={nav.contact}
+              className={inputClass}
+              value={party.contactName}
+              onValueChange={(v) => onChange({ contactName: v })}
+            />
+          </FieldWrapper>
+          <FieldWrapper borderLabel label="Address 1">
+            <ErpNavInput
+              order={nav.address1}
+              className={inputClass}
+              value={party.address1}
+              onValueChange={(v) => onChange({ address1: v })}
+            />
+          </FieldWrapper>
+        </div>
+        <FieldWrapper borderLabel label="Address 2">
+          <ErpNavInput
+            order={nav.address2}
+            className={inputClass}
+            value={party.address2}
+            onValueChange={(v) => onChange({ address2: v })}
           />
         </FieldWrapper>
-        <FieldWrapper label="Address 1">
-          <Input value={party.address1} onChange={(e) => onChange({ address1: e.target.value })} />
-        </FieldWrapper>
-        <FieldWrapper label="Address 2">
-          <Input value={party.address2} onChange={(e) => onChange({ address2: e.target.value })} />
-        </FieldWrapper>
         <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper label="Pincode">
-            <Input value={party.pincode} onChange={(e) => onChange({ pincode: e.target.value })} />
+          <FieldWrapper borderLabel label="Pincode">
+            <ErpNavInput
+              order={nav.pincode}
+              className={inputClass}
+              value={party.pincode}
+              onValueChange={(v) => onChange({ pincode: v })}
+            />
           </FieldWrapper>
-          <FieldWrapper label="City">
-            <Input value={party.city} onChange={(e) => onChange({ city: e.target.value })} />
+          <FieldWrapper borderLabel label="City">
+            <ErpNavInput
+              order={nav.city}
+              className={inputClass}
+              value={party.city}
+              onValueChange={(v) => onChange({ city: v })}
+            />
           </FieldWrapper>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper label="State">
-            <Input value={party.state} onChange={(e) => onChange({ state: e.target.value })} />
+          <FieldWrapper borderLabel label="State">
+            <ErpNavInput
+              order={nav.state}
+              className={inputClass}
+              value={party.state}
+              onValueChange={(v) => onChange({ state: v })}
+            />
           </FieldWrapper>
-          <FieldWrapper label="Telephone">
-            <Input
+          <FieldWrapper borderLabel label="Telephone">
+            <ErpNavInput
+              order={nav.telephone}
+              className={inputClass}
               value={party.telephone}
-              onChange={(e) => onChange({ telephone: e.target.value })}
+              onValueChange={(v) => onChange({ telephone: v })}
             />
           </FieldWrapper>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper label="Mobile No.">
-            <Input
+          <FieldWrapper borderLabel label="Mobile No.">
+            <ErpNavInput
+              order={nav.mobile}
+              className={inputClass}
               value={party.mobileNo}
-              onChange={(e) => onChange({ mobileNo: e.target.value })}
+              onValueChange={(v) => onChange({ mobileNo: v })}
             />
           </FieldWrapper>
-          <FieldWrapper label="E-Mail">
-            <Input value={party.email} onChange={(e) => onChange({ email: e.target.value })} />
+          <FieldWrapper borderLabel label="E-Mail">
+            <ErpNavInput
+              order={nav.email}
+              className={inputClass}
+              value={party.email}
+              onValueChange={(v) => onChange({ email: v })}
+            />
           </FieldWrapper>
         </div>
-        <FieldWrapper label="Country">
-          <Input value={party.country} onChange={(e) => onChange({ country: e.target.value })} />
-        </FieldWrapper>
-        <FieldWrapper label="IEC No">
-          <Input value={party.iecNo} onChange={(e) => onChange({ iecNo: e.target.value })} />
-        </FieldWrapper>
         <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper label="Document Type">
-            <Select
-              value={party.documentType || undefined}
-              onValueChange={(v) => onChange({ documentType: v })}
-            >
-              <SelectTrigger>
+          <FieldWrapper borderLabel label="Country">
+            <ErpNavInput
+              order={nav.country}
+              className={inputClass}
+              value={party.country}
+              onValueChange={(v) => onChange({ country: v })}
+            />
+          </FieldWrapper>
+          <FieldWrapper borderLabel label="IEC No">
+            <ErpNavInput
+              order={nav.iec}
+              className={inputClass}
+              value={party.iecNo}
+              onValueChange={(v) => onChange({ iecNo: v })}
+            />
+          </FieldWrapper>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <FieldWrapper borderLabel label="Document Type">
+            <Select value={party.documentType || undefined} onValueChange={onDocTypeChange}>
+              <SelectTrigger className={inputClass} {...erpNavOrder(nav.docType)}>
                 <SelectValue placeholder="Select" />
               </SelectTrigger>
               <SelectContent>
@@ -5486,10 +5576,12 @@ function PartySection({
               </SelectContent>
             </Select>
           </FieldWrapper>
-          <FieldWrapper label="Document No.">
-            <Input
+          <FieldWrapper borderLabel label="Document No.">
+            <ErpNavInput
+              order={nav.docNo}
+              className={inputClass}
               value={party.documentNo}
-              onChange={(e) => onChange({ documentNo: e.target.value })}
+              onValueChange={(v) => onChange({ documentNo: v })}
             />
           </FieldWrapper>
         </div>
@@ -5502,25 +5594,38 @@ function ServicesSection({
   form,
   setForm,
   airlineRequired,
+  invalidNavOrders,
 }: {
   form: AwbFullForm;
   setForm: React.Dispatch<React.SetStateAction<AwbFullForm>>;
   airlineRequired?: boolean;
+  invalidNavOrders?: Set<number>;
 }) {
+  const onCommit = useErpNavCommit();
   const hasVendor = Boolean(
     form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim(),
   );
+  const inputClass = "h-8 px-1.5 text-[13px]";
+  const skip = erpNavSkip();
+
   return (
     <FormSection title="Services Details">
-      <div className="grid grid-cols-1 gap-3">
-        <FieldWrapper label="Product" required>
+      <div className="grid grid-cols-1 content-start gap-1.5">
+        <FieldWrapper
+          borderLabel
+          lookupSplit
+          label="Product"
+          required
+          invalid={invalidNavOrders?.has(AWB_NAV.PRODUCT)}
+        >
           <LookupPairInput
             lookup="product"
             value={form.product}
             onChange={(v) => setForm((f) => ({ ...f, product: v }))}
+            navOrder={AWB_NAV.PRODUCT}
           />
         </FieldWrapper>
-        <FieldWrapper label="Vendor">
+        <FieldWrapper borderLabel lookupSplit label="Vendor">
           <LookupPairInput
             lookup="vendor"
             value={form.vendor}
@@ -5528,45 +5633,62 @@ function ServicesSection({
               setForm((f) => ({
                 ...f,
                 vendor: v,
-                // Changing vendor invalidates the previous service mapping.
                 service: emptyPair(),
               }))
             }
+            navOrder={AWB_NAV.VENDOR}
           />
         </FieldWrapper>
-        <FieldWrapper label="Airline" required={airlineRequired}>
-          <Input
+        <FieldWrapper borderLabel label="Airline" required={airlineRequired}>
+          <ErpNavInput
+            order={AWB_NAV.AIRLINE}
+            className={inputClass}
             value={form.airline}
-            onChange={(e) => setForm((f) => ({ ...f, airline: e.target.value }))}
+            onValueChange={(v) => setForm((f) => ({ ...f, airline: v }))}
           />
         </FieldWrapper>
-        <FieldWrapper label="Service" required={hasVendor}>
-          <VendorServiceLookup
-            vendor={form.vendor}
-            value={form.service}
-            onChange={(v) => setForm((f) => ({ ...f, service: v }))}
-            productId={form.product.id}
-            destinationId={form.consignee.origin.id}
-          />
+        <div className="min-w-0">
+          <FieldWrapper
+            borderLabel
+            lookupSplit
+            label="Service"
+            required
+            invalid={invalidNavOrders?.has(AWB_NAV.SERVICE)}
+          >
+            <VendorServiceLookup
+              vendor={form.vendor}
+              value={form.service}
+              onChange={(v) => setForm((f) => ({ ...f, service: v }))}
+              productId={form.product.id}
+              destinationId={form.consignee.origin.id}
+              compact
+              splitCode
+              navOrder={AWB_NAV.SERVICE}
+              onCommit={onCommit}
+            />
+          </FieldWrapper>
           {hasVendor ? null : (
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">
               Select a Vendor to load mapped services.
             </p>
           )}
-        </FieldWrapper>
-        <div className="grid grid-cols-[1fr_5rem] gap-2">
-          <FieldWrapper label="Shipment Value">
-            <Input
+        </div>
+        <FieldWrapper borderLabel label="Shipment Value">
+          <div className="flex w-full min-w-0 items-stretch">
+            <ErpNavInput
+              order={AWB_NAV.SHIPMENT_VALUE}
+              className={`min-w-0 flex-1 ${inputClass}`}
               value={form.shipmentValue}
-              onChange={(e) => setForm((f) => ({ ...f, shipmentValue: e.target.value }))}
+              onValueChange={(v) => setForm((f) => ({ ...f, shipmentValue: v }))}
             />
-          </FieldWrapper>
-          <FieldWrapper label=" ">
             <Select
               value={form.shipmentCurrency}
               onValueChange={(v) => setForm((f) => ({ ...f, shipmentCurrency: v }))}
             >
-              <SelectTrigger>
+              <SelectTrigger
+                className="h-8 w-16 shrink-0 rounded-none border-0 border-l border-input px-1 text-[13px] shadow-none focus:ring-0"
+                {...skip}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -5577,85 +5699,101 @@ function ServicesSection({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+        </FieldWrapper>
+        <div className="grid grid-cols-2 gap-2">
+          <FieldWrapper borderLabel label="Pieces">
+            <div className="flex w-full min-w-0 items-stretch">
+              <ErpNavInput
+                order={AWB_NAV.PIECES}
+                className={`min-w-0 flex-1 ${inputClass}`}
+                value={form.pieces}
+                onValueChange={(v) => setForm((f) => ({ ...f, pieces: v }))}
+              />
+              <Select
+                value={form.piecesUnit}
+                onValueChange={(v) => setForm((f) => ({ ...f, piecesUnit: v }))}
+              >
+                <SelectTrigger
+                  className="h-8 w-16 shrink-0 rounded-none border-0 border-l border-input px-1 text-[13px] shadow-none focus:ring-0"
+                  {...skip}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PIECE_UNITS.map((u) => (
+                    <SelectItem key={u} value={u}>
+                      {u}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </FieldWrapper>
+          <FieldWrapper borderLabel label="Actual Weight">
+            <div className="flex w-full min-w-0 items-stretch">
+              <ErpNavInput
+                order={AWB_NAV.ACTUAL_WEIGHT}
+                className={`min-w-0 flex-1 ${inputClass}`}
+                value={form.actualWeight}
+                onValueChange={(v) => setForm((f) => ({ ...f, actualWeight: v }))}
+              />
+              <Select
+                value={form.weightUnit}
+                onValueChange={(v) => setForm((f) => ({ ...f, weightUnit: v }))}
+              >
+                <SelectTrigger
+                  className="h-8 w-14 shrink-0 rounded-none border-0 border-l border-input px-1 text-[13px] shadow-none focus:ring-0"
+                  {...skip}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WEIGHT_UNITS.map((u) => (
+                    <SelectItem key={u} value={u}>
+                      {u}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </FieldWrapper>
         </div>
-        <div className="grid grid-cols-[1fr_5rem] gap-2">
-          <FieldWrapper label="Pieces">
-            <Input
-              value={form.pieces}
-              onChange={(e) => setForm((f) => ({ ...f, pieces: e.target.value }))}
+        <div className="grid grid-cols-2 gap-2">
+          <FieldWrapper borderLabel label="Volumetric Weight">
+            <ErpNavInput
+              order={AWB_NAV.VOL_WEIGHT}
+              className={inputClass}
+              value={form.volWeight}
+              onValueChange={(v) => setForm((f) => ({ ...f, volWeight: v }))}
             />
           </FieldWrapper>
-          <FieldWrapper label=" ">
-            <Select
-              value={form.piecesUnit}
-              onValueChange={(v) => setForm((f) => ({ ...f, piecesUnit: v }))}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PIECE_UNITS.map((u) => (
-                  <SelectItem key={u} value={u}>
-                    {u}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FieldWrapper>
-        </div>
-        <div className="grid grid-cols-[1fr_5rem] gap-2">
-          <FieldWrapper label="Actual Weight">
-            <Input
-              value={form.actualWeight}
-              onChange={(e) => setForm((f) => ({ ...f, actualWeight: e.target.value }))}
+          <FieldWrapper borderLabel label="Charge Weight">
+            <ErpNavInput
+              order={AWB_NAV.CHARGE_WEIGHT}
+              className={inputClass}
+              value={form.chargeWeight}
+              onValueChange={(v) => setForm((f) => ({ ...f, chargeWeight: v }))}
             />
           </FieldWrapper>
-          <FieldWrapper label=" ">
-            <Select
-              value={form.weightUnit}
-              onValueChange={(v) => setForm((f) => ({ ...f, weightUnit: v }))}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {WEIGHT_UNITS.map((u) => (
-                  <SelectItem key={u} value={u}>
-                    {u}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FieldWrapper>
         </div>
-        <FieldWrapper label="Volumetric Weight">
-          <Input
-            value={form.volWeight}
-            onChange={(e) => setForm((f) => ({ ...f, volWeight: e.target.value }))}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Charge Weight">
-          <Input
-            value={form.chargeWeight}
-            onChange={(e) => setForm((f) => ({ ...f, chargeWeight: e.target.value }))}
-          />
-        </FieldWrapper>
-        <div className="flex flex-wrap gap-4 pt-1">
+        <div className="flex flex-nowrap items-center gap-x-2.5 gap-y-0.5 pt-0.5">
           {(
             [
-              ["commercial", "Commercial"],
-              ["oda", "ODA"],
-              ["medicalCharges", "Medical Charges"],
+              ["commercial", "Commercial", AWB_NAV.COMMERCIAL],
+              ["oda", "ODA", AWB_NAV.ODA],
+              ["medicalCharges", "Medical Charges", AWB_NAV.MEDICAL],
             ] as const
-          ).map(([key, label]) => (
-            <div key={key} className="flex items-center gap-2">
+          ).map(([key, label, order]) => (
+            <div key={key} className="flex items-center gap-1">
               <Checkbox
                 id={key}
                 checked={form[key]}
                 onCheckedChange={(c) => setForm((f) => ({ ...f, [key]: c === true }))}
+                className="h-3.5 w-3.5"
+                {...erpNavOrder(order)}
               />
-              <label htmlFor={key} className="text-sm text-muted-foreground">
+              <label htmlFor={key} className="whitespace-nowrap text-[12px] text-muted-foreground">
                 {label}
               </label>
             </div>
@@ -5663,6 +5801,114 @@ function ServicesSection({
         </div>
       </div>
     </FormSection>
+  );
+}
+
+function ShipmentDetailsFields({
+  form,
+  setForm,
+  paymentTypeReadOnly,
+  clientLoading,
+  isReadOnly,
+}: {
+  form: AwbFullForm;
+  setForm: React.Dispatch<React.SetStateAction<AwbFullForm>>;
+  paymentTypeReadOnly: boolean;
+  clientLoading: boolean;
+  isReadOnly: boolean;
+}) {
+  const onPaymentTypeChange = useErpSelectHandler((v: string) =>
+    setForm((f) => ({ ...f, paymentType: v })),
+  );
+
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <FieldWrapper label="Payment Type">
+        <Select
+          value={form.paymentType || undefined}
+          onValueChange={onPaymentTypeChange}
+          disabled={isReadOnly || paymentTypeReadOnly || clientLoading}
+        >
+          <SelectTrigger {...erpNavOrder(AWB_NAV.PAYMENT_TYPE)}>
+            <SelectValue placeholder="Select" />
+          </SelectTrigger>
+          <SelectContent>
+            {PAYMENT_TYPES.map((p) => (
+              <SelectItem key={p} value={p}>
+                {p}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {paymentTypeReadOnly ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Locked to Client Master. Enable “Allow Payment Type Override” in Form Setup to edit.
+          </p>
+        ) : null}
+      </FieldWrapper>
+      <FieldWrapper label="Content">
+        <ErpNavInput
+          order={AWB_NAV.CONTENT}
+          value={form.content}
+          onValueChange={(v) => setForm((f) => ({ ...f, content: v }))}
+        />
+      </FieldWrapper>
+      <FieldWrapper label="Instruction">
+        <ErpNavInput
+          order={AWB_NAV.INSTRUCTION}
+          value={form.instruction}
+          onValueChange={(v) => setForm((f) => ({ ...f, instruction: v }))}
+        />
+      </FieldWrapper>
+      <FieldWrapper label="Field Executive">
+        <LookupPairInput
+          lookup="fieldExecutive"
+          value={form.fieldExecutive}
+          onChange={(v) => setForm((f) => ({ ...f, fieldExecutive: v }))}
+          navOrder={AWB_NAV.FIELD_EXECUTIVE}
+        />
+      </FieldWrapper>
+      <FieldWrapper label="Cash Receipt No.">
+        <ErpNavInput
+          order={AWB_NAV.CASH_RECEIPT_NO}
+          value={form.cashReceiptNo}
+          onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptNo: v }))}
+        />
+      </FieldWrapper>
+      <FieldWrapper label="Amount Received">
+        <ErpNavInput
+          order={AWB_NAV.AMOUNT_RECEIVED}
+          value={form.amountReceived}
+          onValueChange={(v) => setForm((f) => ({ ...f, amountReceived: v }))}
+        />
+      </FieldWrapper>
+      <FieldWrapper label="Balance Amount">
+        <ErpNavInput
+          order={AWB_NAV.BALANCE_AMOUNT}
+          value={form.balanceAmount}
+          onValueChange={(v) => setForm((f) => ({ ...f, balanceAmount: v }))}
+        />
+      </FieldWrapper>
+      <FieldWrapper label="Cash Receipt Date">
+        <ErpNavDateInput
+          order={AWB_NAV.CASH_RECEIPT_DATE}
+          value={form.cashReceiptDate}
+          onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptDate: v }))}
+        />
+      </FieldWrapper>
+      <div className="flex items-end pb-1">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="lock"
+            checked={form.lock}
+            onCheckedChange={(c) => setForm((f) => ({ ...f, lock: c === true }))}
+          />
+          <label htmlFor="lock" className="text-sm text-muted-foreground">
+            Lock
+          </label>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -5695,7 +5941,7 @@ function AwbFormFooter({
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div>
         {showPrevious && onPrevious ? (
-          <Button variant="secondary" onClick={onPrevious} disabled={saving}>
+          <Button size="sm" variant="secondary" className="h-8 text-xs" onClick={onPrevious} disabled={saving}>
             Previous
           </Button>
         ) : null}
@@ -5703,37 +5949,40 @@ function AwbFormFooter({
       <div className="flex flex-wrap gap-2">
         {!readOnly ? (
           <Button
+            size="sm"
             onClick={onSave}
             disabled={saving}
-            className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
           >
             Save
           </Button>
         ) : null}
         {canBook && onBook && !readOnly ? (
           <Button
+            size="sm"
             onClick={onBook}
             disabled={saving}
-            className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+            className="h-8 bg-sidebar text-xs text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
           >
             Book
           </Button>
         ) : null}
         {canCancelShipment && onCancelShipment ? (
-          <Button variant="destructive" onClick={onCancelShipment} disabled={saving}>
+          <Button size="sm" variant="destructive" className="h-8 text-xs" onClick={onCancelShipment} disabled={saving}>
             Cancel Shipment
           </Button>
         ) : null}
         {onNext ? (
           <Button
-            className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+            size="sm"
+            className="h-8 bg-sidebar text-xs text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
             onClick={onNext}
             disabled={saving}
           >
             Next
           </Button>
         ) : null}
-        <Button variant="outline" onClick={onCancel} disabled={saving}>
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={onCancel} disabled={saving}>
           Close
         </Button>
       </div>
@@ -5789,13 +6038,50 @@ function LookupPairInput({
   onChange,
   lookup,
   disabled,
+  navOrder,
+  onCommit: onCommitProp,
 }: {
   value: LookupPair;
   onChange: (v: LookupPair) => void;
   lookup: LookupKey;
   disabled?: boolean;
+  navOrder?: number;
+  onCommit?: () => void;
 }) {
+  const defaultCommit = useErpNavCommit();
+  const onCommit = onCommitProp ?? defaultCommit;
   return (
-    <SearchableLookupPair value={value} onChange={onChange} lookup={lookup} disabled={disabled} />
+    <SearchableLookupPair
+      value={value}
+      onChange={onChange}
+      lookup={lookup}
+      disabled={disabled}
+      compact
+      splitCode
+      navOrder={navOrder}
+      onCommit={onCommit}
+    />
+  );
+}
+
+function ClientNameLookupInput({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: LookupPair;
+  onChange: (v: LookupPair) => void;
+  disabled?: boolean;
+}) {
+  const { focusFieldByOrder } = useErpFormNav();
+  return (
+    <LookupPairInput
+      lookup="customer"
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      navOrder={AWB_NAV.CLIENT}
+      onCommit={() => focusFieldByOrder(AWB_NAV.SHIPPER_ORIGIN)}
+    />
   );
 }

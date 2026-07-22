@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { ERP_NAV_GROUP, ERP_NAV_ORDER, ERP_NAV_SKIP } from "@/lib/forms/erp-keyboard-nav";
 import {
   filterDemoVendorServices,
   listVendorServices,
@@ -36,6 +37,10 @@ export function VendorServiceLookup({
   destinationId,
   debounceMs = 250,
   disabled,
+  compact = false,
+  splitCode = false,
+  navOrder,
+  onCommit,
 }: {
   vendor: LookupPairValue;
   value: LookupPairValue;
@@ -45,6 +50,10 @@ export function VendorServiceLookup({
   destinationId?: string | null;
   debounceMs?: number;
   disabled?: boolean;
+  compact?: boolean;
+  splitCode?: boolean;
+  navOrder?: number;
+  onCommit?: () => void;
 }) {
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
@@ -137,6 +146,7 @@ export function VendorServiceLookup({
     setInlineOpen(false);
     setPopupOpen(false);
     setInlineQuery("");
+    onCommit?.();
   };
 
   const openInline = (text: string) => {
@@ -176,112 +186,183 @@ export function VendorServiceLookup({
     ? "Select a Vendor first"
     : "No services are configured for this vendor.";
 
-  const searching =
-    inlineOpen &&
-    live &&
-    inlineFetching &&
-    inlineQuery !== debouncedInline;
+  const showInlineDropdown = inlineOpen && hasVendor && inlineHits.length > 0;
+
+  const navGroupProps =
+    navOrder != null ? ({ [ERP_NAV_GROUP]: "" } as const) : undefined;
+  const navOrderProps =
+    navOrder != null ? ({ [ERP_NAV_ORDER]: String(navOrder) } as const) : undefined;
+  const navSkipProps = { [ERP_NAV_SKIP]: "" } as const;
 
   return (
     <>
-      <div ref={wrapRef} className="relative">
-        <div className="flex gap-1">
-          <Input
-            value={value.code}
-            disabled={locked}
-            onChange={(e) => {
-              const code = e.target.value;
-              onChange({ ...value, id: undefined, code });
-              openInline(code);
-            }}
-            onFocus={() => openInline(value.code || "")}
-            onKeyDown={onKeyDown}
-            className="w-20"
-            placeholder="Code"
-            autoComplete="off"
-            role="combobox"
-            aria-expanded={inlineOpen}
-            aria-controls={listId}
-          />
-          <Input
-            value={value.name}
-            disabled={locked}
-            onChange={(e) => {
-              const name = e.target.value;
-              onChange({ ...value, id: undefined, name });
-              openInline(name);
-            }}
-            onFocus={() => openInline(value.name || "")}
-            onKeyDown={onKeyDown}
-            className="min-w-0 flex-1"
-            placeholder={hasVendor ? "Service" : "Select vendor first"}
-            autoComplete="off"
-            role="combobox"
-            aria-expanded={inlineOpen}
-            aria-controls={listId}
-          />
-          <Button
-            size="icon"
-            variant="outline"
-            type="button"
-            disabled={locked}
-            className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-            aria-label="Search services"
-            onClick={() => {
-              setInlineOpen(false);
-              setPopupQuery("");
-              setPopupOpen(true);
-            }}
-          >
-            <Search className="h-4 w-4" />
-          </Button>
-        </div>
+      <div ref={wrapRef} className="relative w-full" {...navGroupProps}>
+        {splitCode ? (
+          <div className="flex w-full min-w-0 items-stretch gap-1">
+            <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded border border-input bg-background">
+              <Input
+                value={value.name}
+                disabled={locked}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  onChange({ ...value, id: undefined, name });
+                  openInline(name);
+                }}
+                onFocus={() => openInline(value.name || "")}
+                onKeyDown={onKeyDown}
+                className={cn(
+                  "min-w-0 flex-1",
+                  compact ? "h-8 border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0" : "h-9 border-0 bg-transparent shadow-none focus-visible:ring-0",
+                )}
+                placeholder={hasVendor ? "Service" : "Select vendor first"}
+                autoComplete="off"
+                role="combobox"
+                aria-expanded={inlineOpen}
+                aria-controls={listId}
+                {...navOrderProps}
+              />
+            </div>
+            <div className="lookup-code flex w-[5.75rem] shrink-0 items-stretch gap-1">
+              <div
+                className={cn(
+                  "overflow-hidden rounded border border-input bg-background",
+                  compact ? "h-8 w-14" : "h-9 w-20",
+                )}
+              >
+                <Input
+                  value={value.code}
+                  disabled={locked}
+                  onChange={(e) => {
+                    const code = e.target.value;
+                    onChange({ ...value, id: undefined, code });
+                    openInline(code);
+                  }}
+                  onFocus={() => openInline(value.code || "")}
+                  onKeyDown={onKeyDown}
+                  className={cn(
+                    "w-full",
+                    compact ? "h-8 border-0 bg-transparent px-1 text-[13px] shadow-none focus-visible:ring-0" : "h-9 border-0 bg-transparent shadow-none focus-visible:ring-0",
+                  )}
+                  placeholder="Code"
+                  autoComplete="off"
+                  role="combobox"
+                  aria-expanded={inlineOpen}
+                  aria-controls={listId}
+                  {...(navOrder != null ? navSkipProps : {})}
+                />
+              </div>
+              <Button
+                size="icon"
+                variant="outline"
+                type="button"
+                disabled={locked}
+                className={cn(
+                  "shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground",
+                  compact ? "h-8 w-8" : "h-9 w-9",
+                )}
+                aria-label="Search services"
+                onClick={() => {
+                  setInlineOpen(false);
+                  setPopupQuery("");
+                  setPopupOpen(true);
+                }}
+                {...(navOrder != null ? navSkipProps : {})}
+              >
+                <Search className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-1">
+            <Input
+              value={value.name}
+              disabled={locked}
+              onChange={(e) => {
+                const name = e.target.value;
+                onChange({ ...value, id: undefined, name });
+                openInline(name);
+              }}
+              onFocus={() => openInline(value.name || "")}
+              onKeyDown={onKeyDown}
+              className={cn("min-w-0 flex-1", compact ? "h-8 px-1.5 text-[13px]" : "h-9")}
+              placeholder={hasVendor ? "Service" : "Select vendor first"}
+              autoComplete="off"
+              role="combobox"
+              aria-expanded={inlineOpen}
+              aria-controls={listId}
+              {...navOrderProps}
+            />
+            <Input
+              value={value.code}
+              disabled={locked}
+              onChange={(e) => {
+                const code = e.target.value;
+                onChange({ ...value, id: undefined, code });
+                openInline(code);
+              }}
+              onFocus={() => openInline(value.code || "")}
+              onKeyDown={onKeyDown}
+              className={cn(compact ? "h-8 w-14 px-1 text-[13px]" : "h-9 w-20")}
+              placeholder="Code"
+              autoComplete="off"
+              role="combobox"
+              aria-expanded={inlineOpen}
+              aria-controls={listId}
+            />
+            <Button
+              size="icon"
+              variant="outline"
+              type="button"
+              disabled={locked}
+              className={cn(
+                "shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground",
+                compact ? "h-8 w-8" : "h-9 w-9",
+              )}
+              aria-label="Search services"
+              onClick={() => {
+                setInlineOpen(false);
+                setPopupQuery("");
+                setPopupOpen(true);
+              }}
+            >
+              <Search className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
+            </Button>
+          </div>
+        )}
 
-        {inlineOpen && hasVendor ? (
+        {showInlineDropdown ? (
           <div
             id={listId}
             role="listbox"
             className="absolute left-0 right-9 top-full z-50 mt-1 max-h-64 overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md"
           >
-            {searching ? (
-              <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading services…
-              </div>
-            ) : inlineHits.length === 0 ? (
-              <div className="px-3 py-3 text-sm text-muted-foreground">{emptyMsg}</div>
-            ) : (
-              inlineHits.map((hit, idx) => (
-                <button
-                  key={hit.id}
-                  type="button"
-                  role="option"
-                  aria-selected={idx === highlight}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0",
-                    idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-muted/50",
-                  )}
-                  onMouseEnter={() => setHighlight(idx)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pick(hit);
-                  }}
-                >
-                  <span className="min-w-0 truncate font-medium">
-                    {hit.name}
-                    {hit.hint ? (
-                      <span className="ml-1 font-normal text-muted-foreground">({hit.hint})</span>
-                    ) : null}
-                  </span>
-                  <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                    {hit.code}
-                  </span>
-                </button>
-              ))
-            )}
-            <div className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-              ↑↓ navigate · Enter select · Esc close
-            </div>
+            {inlineHits.map((hit, idx) => (
+              <button
+                key={hit.id}
+                type="button"
+                role="option"
+                aria-selected={idx === highlight}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0",
+                  idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-muted/50",
+                )}
+                onMouseEnter={() => setHighlight(idx)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(hit);
+                }}
+              >
+                <span className="min-w-0 truncate font-medium">
+                  {hit.name}
+                  {hit.hint ? (
+                    <span className="ml-1 font-normal text-muted-foreground">({hit.hint})</span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                  {hit.code}
+                </span>
+              </button>
+            ))}
           </div>
         ) : null}
       </div>

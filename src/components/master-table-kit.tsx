@@ -24,17 +24,94 @@ export const PAGE_SIZE = 10;
 export function FieldWrapper({
   label,
   required,
+  invalid,
   children,
   className,
+  dense,
+  borderLabel,
+  lookupSplit,
 }: {
   label: string;
   required?: boolean;
+  invalid?: boolean;
   children: React.ReactNode;
   className?: string;
+  /** Tighter label/input spacing for high-density forms (e.g. AWB Entry). */
+  dense?: boolean;
+  /** CourierWala-style: label sits on the field’s top border. */
+  borderLabel?: boolean;
+  /** Name + separate code box (label sits on name field only). */
+  lookupSplit?: boolean;
 }) {
+  const invalidLookupSplitClass = invalid
+    ? "[&_.lookup-name]:border-destructive [&_.lookup-name]:ring-1 [&_.lookup-name]:ring-destructive"
+    : undefined;
+
+  if (borderLabel && lookupSplit) {
+    const blank = !label.trim();
+    return (
+      <div className={cn("relative min-w-0", className)}>
+        <div className="pt-1.5">
+          <div className={cn("relative", invalidLookupSplitClass)}>
+            {!blank ? (
+              <Label
+                className={cn(
+                  "pointer-events-none absolute left-1.5 top-0 z-10 -translate-y-1/2 bg-card px-0.5 text-[12px] font-medium leading-none",
+                  invalid ? "text-destructive" : "text-foreground",
+                )}
+              >
+                {label}
+                {required ? <span className="ml-0.5 text-destructive">*</span> : null}
+              </Label>
+            ) : null}
+            {children}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (borderLabel) {
+    const blank = !label.trim();
+    return (
+      <div className={cn("relative min-w-0 pt-1.5", className)}>
+        <div
+          className={cn(
+            "relative flex h-8 w-full min-w-0 items-stretch overflow-visible rounded border bg-background",
+            invalid ? "border-destructive ring-1 ring-destructive" : "border-input",
+            // Flatten nested controls so the group reads as one outlined field
+            "[&_input]:h-8 [&_input]:min-h-8 [&_input]:rounded-none [&_input]:border-0 [&_input]:bg-transparent [&_input]:px-1.5 [&_input]:text-[13px] [&_input]:shadow-none [&_input]:focus-visible:ring-0",
+            "[&_button[role=combobox]]:h-8 [&_button[role=combobox]]:rounded-none [&_button[role=combobox]]:border-0 [&_button[role=combobox]]:bg-transparent [&_button[role=combobox]]:px-1.5 [&_button[role=combobox]]:text-[13px] [&_button[role=combobox]]:shadow-none [&_button[role=combobox]]:focus:ring-0",
+            "[&_button[aria-label=Search]]:h-8 [&_button[aria-label=Search]]:w-8 [&_button[aria-label=Search]]:shrink-0 [&_button[aria-label=Search]]:rounded-none [&_button[aria-label=Search]]:border-0 [&_button[aria-label=Search]]:border-l [&_button[aria-label=Search]]:border-input",
+            "[&>.relative]:min-w-0 [&>.relative]:flex-1 [&_.flex.gap-1]:gap-0",
+            "[&_.flex_input:nth-child(2)]:border-l [&_.flex_input:nth-child(2)]:border-input",
+          )}
+        >
+          {!blank ? (
+            <Label
+              className={cn(
+                "pointer-events-none absolute left-1.5 top-0 z-10 -translate-y-1/2 bg-card px-0.5 text-[12px] font-medium leading-none",
+                invalid ? "text-destructive" : "text-foreground",
+              )}
+            >
+              {label}
+              {required ? <span className="ml-0.5 text-destructive">*</span> : null}
+            </Label>
+          ) : null}
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`flex flex-col gap-1.5 ${className ?? ""}`}>
-      <Label className="text-xs font-medium text-muted-foreground">
+    <div className={cn("flex flex-col", dense ? "gap-0.5" : "gap-1.5", className)}>
+      <Label
+        className={cn(
+          "font-medium text-muted-foreground",
+          dense ? "text-[11px] leading-none" : "text-xs",
+        )}
+      >
         {label}
         {required ? <span className="ml-0.5 text-destructive">*</span> : null}
       </Label>

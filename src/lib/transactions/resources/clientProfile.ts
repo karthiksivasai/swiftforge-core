@@ -83,7 +83,6 @@ export type AwbClientHydrate = {
   instruction: string;
   fieldExecutive: ClientLookupPair;
   shipper: {
-    companyName: ClientLookupPair;
     contactName: string;
     address1: string;
     address2: string;
@@ -289,16 +288,16 @@ export async function loadClientProfile(ref: ClientLookupRef): Promise<ClientPro
 
 /** Map a loaded profile into AWB Entry form fields. */
 export function clientProfileToAwbHydrate(profile: ClientProfile): AwbClientHydrate {
-  const paymentType = normalizeClientPaymentType(profile.paymentType);
+  const normalized = normalizeClientPaymentType(profile.paymentType);
+  const paymentType = normalized || "Cash";
   const hasGst = Boolean(profile.gstNo);
   return {
     clientName: { id: profile.id, code: profile.code, name: profile.name },
     paymentType,
-    paymentTypeMissing: !paymentType,
+    paymentTypeMissing: !normalized,
     instruction: profile.instructions,
     fieldExecutive: profile.fieldExecutive,
     shipper: {
-      companyName: { id: profile.id, code: profile.code, name: profile.name },
       contactName: profile.contactPerson,
       address1: profile.address1,
       address2: profile.address2,

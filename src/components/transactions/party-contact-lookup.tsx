@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { ERP_NAV_GROUP, ERP_NAV_ORDER, ERP_NAV_SKIP } from "@/lib/forms/erp-keyboard-nav";
 import {
   formatLastUsed,
   getPartyContact,
@@ -191,6 +192,10 @@ export function PartyContactLookup({
   minChars = 1,
   debounceMs = 300,
   disabled,
+  compact = false,
+  splitCode = false,
+  navOrder,
+  onCommit,
 }: {
   role: PartyContactRole;
   value: CompanyValue;
@@ -199,6 +204,10 @@ export function PartyContactLookup({
   minChars?: number;
   debounceMs?: number;
   disabled?: boolean;
+  compact?: boolean;
+  splitCode?: boolean;
+  navOrder?: number;
+  onCommit?: () => void;
 }) {
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
@@ -214,11 +223,12 @@ export function PartyContactLookup({
 
   const debouncedInline = useDebouncedValue(inlineQuery, debounceMs);
   const debouncedPopup = useDebouncedValue(popupQuery, debounceMs);
-  const canInline =
-    inlineOpen && (inlineQuery.trim().length === 0 || debouncedInline.trim().length >= minChars);
+  const trimmedInlineQuery = inlineQuery.trim();
+  const trimmedDebouncedInline = debouncedInline.trim();
+  const canInline = inlineOpen && trimmedInlineQuery.length >= minChars;
 
   const inlineKeyQ =
-    inlineQuery.trim().length === 0 ? null : debouncedInline.trim() || null;
+    trimmedDebouncedInline.length >= minChars ? trimmedDebouncedInline : null;
 
   const { data: liveInline, isFetching: inlineFetching } = useQuery({
     queryKey: ["party-contacts", role, "inline", inlineKeyQ],
@@ -237,10 +247,10 @@ export function PartyContactLookup({
   });
 
   const inlineHits: PartyContactHit[] = useMemo(() => {
-    if (!canInline) return [];
+    if (!canInline || trimmedDebouncedInline.length < minChars) return [];
     if (live) return liveInline ?? [];
-    return filterDemoHits(role, inlineQuery.trim().length === 0 ? "" : debouncedInline);
-  }, [canInline, live, liveInline, role, inlineQuery, debouncedInline]);
+    return filterDemoHits(role, trimmedDebouncedInline);
+  }, [canInline, trimmedDebouncedInline, minChars, live, liveInline, role]);
 
   const popupHits: PartyContactHit[] = useMemo(() => {
     if (live) return livePopup ?? [];
@@ -274,6 +284,7 @@ export function PartyContactLookup({
       setInlineOpen(false);
       setPopupOpen(false);
       setInlineQuery("");
+      onCommit?.();
     } finally {
       setHydrating(false);
     }
@@ -281,7 +292,8 @@ export function PartyContactLookup({
 
   const startInline = (text: string) => {
     setInlineQuery(text);
-    setInlineOpen(true);
+    const trimmed = text.trim();
+    setInlineOpen(trimmed.length >= minChars);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -312,68 +324,115 @@ export function PartyContactLookup({
   };
 
   const title = role === "shipper" ? "Shipper" : "Consignee";
-  const showDropdown = inlineOpen;
-  const searching =
-    showDropdown &&
-    live &&
-    inlineFetching &&
-    inlineQuery.trim().length > 0 &&
-    inlineQuery !== debouncedInline;
+  const showDropdown = inlineOpen && canInline && inlineHits.length > 0;
+  const inputH = compact ? "h-8" : "h-9";
+  const codeW = compact ? "w-14" : "w-20";
+  const btnSize = compact ? "h-8 w-8" : "h-9 w-9";
+  const iconSize = compact ? "h-3.5 w-3.5" : "h-4 w-4";
+  const flatInput = compact
+    ? "border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+    : "border-0 bg-transparent shadow-none focus-visible:ring-0";
+
+  const navGroupProps =
+    navOrder != null ? ({ [ERP_NAV_GROUP]: "" } as const) : undefined;
+  const navOrderProps =
+    navOrder != null ? ({ [ERP_NAV_ORDER]: String(navOrder) } as const) : undefined;
+  const navSkipProps = { [ERP_NAV_SKIP]: "" } as const;
+
+  const nameInput = (
+    <Input
+      value={value.name}
+      disabled={disabled || hydrating}
+      onChange={(e) => {
+        const name = e.target.value;
+        onCompanyChange({ ...value, id: undefined, name });
+        startInline(name);
+      }}
+      onKeyDown={onKeyDown}
+      className={cn("min-w-0 flex-1", inputH, flatInput)}
+      placeholder="Company Name"
+      autoComplete="off"
+      role="combobox"
+      aria-expanded={showDropdown}
+      aria-controls={listId}
+      {...navOrderProps}
+    />
+  );
+
+  const codeInput = (
+    <Input
+      value={value.code}
+      disabled={disabled || hydrating}
+      onChange={(e) => {
+        const code = e.target.value;
+        onCompanyChange({ ...value, id: undefined, code });
+        startInline(code || value.name);
+      }}
+      onKeyDown={onKeyDown}
+      className={cn(splitCode ? "w-full" : codeW, inputH, flatInput)}
+      placeholder="Code"
+      autoComplete="off"
+      role="combobox"
+      aria-expanded={showDropdown}
+      aria-controls={listId}
+      {...(navOrder != null ? navSkipProps : {})}
+    />
+  );
+
+  const searchButton = (
+    <Button
+      size="icon"
+      variant="outline"
+      type="button"
+      disabled={disabled || hydrating}
+      className={cn(
+        "shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground",
+        btnSize,
+      )}
+      aria-label={`Search ${title}`}
+      onClick={() => {
+        setInlineOpen(false);
+        setPopupQuery(value.name || value.code || "");
+        setPopupOpen(true);
+      }}
+      {...(navOrder != null ? navSkipProps : {})}
+    >
+      {hydrating ? (
+        <Loader2 className={cn(iconSize, "animate-spin")} />
+      ) : (
+        <Search className={iconSize} />
+      )}
+    </Button>
+  );
 
   return (
     <>
-      <div ref={wrapRef} className="relative">
-        <div className="flex gap-1">
-          <Input
-            value={value.code}
-            disabled={disabled || hydrating}
-            onChange={(e) => {
-              const code = e.target.value;
-              onCompanyChange({ ...value, id: undefined, code });
-              startInline(code || value.name);
-            }}
-            onFocus={() => startInline(value.code || value.name || "")}
-            onKeyDown={onKeyDown}
-            className="w-20"
-            placeholder="Code"
-            autoComplete="off"
-            role="combobox"
-            aria-expanded={showDropdown}
-            aria-controls={listId}
-          />
-          <Input
-            value={value.name}
-            disabled={disabled || hydrating}
-            onChange={(e) => {
-              const name = e.target.value;
-              onCompanyChange({ ...value, id: undefined, name });
-              startInline(name);
-            }}
-            onFocus={() => startInline(value.name || "")}
-            onKeyDown={onKeyDown}
-            className="min-w-0 flex-1"
-            placeholder="Company Name"
-            autoComplete="off"
-            role="combobox"
-            aria-expanded={showDropdown}
-            aria-controls={listId}
-          />
-          <Button
-            size="icon"
-            variant="outline"
-            type="button"
-            disabled={disabled || hydrating}
-            className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-            aria-label={`Search ${title}`}
-            onClick={() => {
-              setInlineOpen(false);
-              setPopupQuery(value.name || value.code || "");
-              setPopupOpen(true);
-            }}
-          >
-            {hydrating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-          </Button>
-        </div>
+      <div ref={wrapRef} className="relative w-full" {...navGroupProps}>
+        {splitCode ? (
+          <div className="flex w-full min-w-0 items-stretch gap-1">
+            <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded border border-input bg-background">
+              {nameInput}
+            </div>
+            <div className="lookup-code flex w-[5.75rem] shrink-0 items-stretch gap-1">
+              <div
+                className={cn(
+                  "overflow-hidden rounded border border-input bg-background",
+                  inputH,
+                  codeW,
+                )}
+              >
+                {codeInput}
+              </div>
+              {searchButton}
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-1">
+            {nameInput}
+            {codeInput}
+            {searchButton}
+          </div>
+        )}
 
         {showDropdown ? (
           <div
@@ -381,19 +440,7 @@ export function PartyContactLookup({
             role="listbox"
             className="absolute left-0 top-full z-50 mt-1 max-h-80 w-[min(52rem,calc(100vw-2rem))] overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md"
           >
-            {searching ? (
-              <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Searching…
-              </div>
-            ) : inlineHits.length === 0 ? (
-              <div className="px-3 py-3 text-sm text-muted-foreground">
-                {inlineQuery.trim()
-                  ? "No results found"
-                  : "No recent contacts — type to search"}
-              </div>
-            ) : (
-              inlineHits.map((hit, idx) => (
+            {inlineHits.map((hit, idx) => (
                 <button
                   key={hit.id}
                   type="button"
@@ -420,11 +467,7 @@ export function PartyContactLookup({
                     {hit.email ? <span>{hit.email}</span> : null}
                   </div>
                 </button>
-              ))
-            )}
-            <div className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-              ↑↓ navigate · Enter select · Esc close · Tab accept
-            </div>
+              ))}
           </div>
         ) : null}
       </div>
