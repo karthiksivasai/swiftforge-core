@@ -16,11 +16,16 @@ import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-
 import {
   lookup,
   useLookup,
+  LOOKUP_MAX_LIMIT,
   type LookupItem,
   type LookupKey as LiveLookupKey,
 } from "@/lib/masters/core/lookup";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import {
+  lookupHitSearchFields,
+  rankLookupResults,
+} from "@/lib/search/ranked-lookup-search";
 import {
   ERP_MANUAL_SEARCH,
   ERP_NAV_GROUP,
@@ -39,6 +44,7 @@ export type LookupPairValue = { id?: string; code: string; name: string };
 export const DEMO_TO_LIVE_LOOKUP: Partial<Record<LookupKey, LiveLookupKey>> = {
   customer: "customer",
   destination: "destination",
+  internationalDestination: "international-destination",
   shipper: "shipper",
   product: "product",
   vendor: "vendor",
@@ -53,6 +59,8 @@ export const DEMO_TO_LIVE_LOOKUP: Partial<Record<LookupKey, LiveLookupKey>> = {
 };
 
 type SearchHit = { id?: string; code: string; name: string; hint?: string | null };
+
+const RANKED_LOOKUP_DISPLAY_LIMIT = 50;
 
 const SESSION_CACHE = new Map<string, SearchHit[]>();
 const SESSION_CACHE_MAX = 80;
@@ -71,17 +79,14 @@ function cacheSet(key: string, rows: SearchHit[]) {
 
 function filterDemoOptions(lookupKey: LookupKey, q: string): SearchHit[] {
   const opts = MASTER_LOOKUPS[lookupKey]?.options ?? [];
-  const needle = q.trim().toLowerCase();
-  if (!needle) return opts.slice(0, 50).map((o) => ({ code: o.code, name: o.name, hint: o.hint }));
-  return opts
-    .filter(
-      (o) =>
-        o.code.toLowerCase().includes(needle) ||
-        o.name.toLowerCase().includes(needle) ||
-        (o.hint ?? "").toLowerCase().includes(needle),
-    )
-    .slice(0, 50)
-    .map((o) => ({ code: o.code, name: o.name, hint: o.hint }));
+  const hits = opts.map((o) => ({ code: o.code, name: o.name, hint: o.hint }));
+  return rankLookupResults(hits, q, lookupHitSearchFields, {
+    limit: RANKED_LOOKUP_DISPLAY_LIMIT,
+  }).map((o) => ({ code: o.code, name: o.name, hint: o.hint }));
+}
+
+function rankSearchHits(hits: SearchHit[], q: string, limit = RANKED_LOOKUP_DISPLAY_LIMIT): SearchHit[] {
+  return rankLookupResults(hits, q, lookupHitSearchFields, { limit });
 }
 
 async function fetchLookupHits(
@@ -91,13 +96,14 @@ async function fetchLookupHits(
   q: string,
 ): Promise<SearchHit[]> {
   if (live && liveKey) {
-    const rows = await lookup(liveKey, q, 50);
-    return rows.map((r: LookupItem) => ({
+    const rows = await lookup(liveKey, q, LOOKUP_MAX_LIMIT);
+    const hits = rows.map((r: LookupItem) => ({
       id: r.id,
       code: r.code,
       name: r.name,
       hint: r.hint,
     }));
+    return rankSearchHits(hits, q);
   }
   return filterDemoOptions(lookupKey, q);
 }
@@ -173,7 +179,7 @@ export function SearchableLookupPair({
 
   const { data: liveInlineRows } = useLookup(liveKey ?? "branch", debouncedInline, {
     enabled: Boolean(live && liveKey && inlineOpen && canInlineSearch && !cached && !manualSearch),
-    limit: 50,
+    limit: LOOKUP_MAX_LIMIT,
   });
 
   const { data: livePopupRows, isFetching: popupFetching } = useLookup(
@@ -181,7 +187,7 @@ export function SearchableLookupPair({
     popupQuery,
     {
       enabled: Boolean(live && liveKey && popupOpen && manualPopupRows === null),
-      limit: 50,
+      limit: LOOKUP_MAX_LIMIT,
     },
   );
 
@@ -196,12 +202,13 @@ export function SearchableLookupPair({
     if (!canInlineSearch) return [];
     if (cached) return cached;
     if (live && liveKey) {
-      return (liveInlineRows ?? []).map((r: LookupItem) => ({
+      const hits = (liveInlineRows ?? []).map((r: LookupItem) => ({
         id: r.id,
         code: r.code,
         name: r.name,
         hint: r.hint,
       }));
+      return rankSearchHits(hits, debouncedInline);
     }
     return demoInlineRows ?? [];
   }, [
@@ -523,28 +530,43 @@ export function SearchableLookupPair({
     <Input
       value={value.code}
       disabled={disabled}
-      onChange={(e) => {
-        const code = e.target.value;
-        onChange({ ...value, id: undefined, code });
-        if (!manualSearch) startInlineFrom("code", code);
-      }}
-      onFocus={() => {
-        if (manualSearch) {
-          if (manualQueryRaw.length >= minChars && manualDropdownRows.length > 0) {
-            setManualDropdownOpen(true);
-          }
-        } else if (value.code.trim().length >= minChars) {
-          startInlineFrom("code", value.code);
-        }
-      }}
-      onKeyDown={onKeyDown}
-      className={cn(splitCode ? "w-full" : codeW, inputH, flatInput)}
+      readOnly={splitCode}
+      onChange={
+        splitCode
+          ? undefined
+          : (e) => {
+              const code = e.target.value;
+              onChange({ ...value, id: undefined, code });
+              if (!manualSearch) startInlineFrom("code", code);
+            }
+      }
+      onFocus={
+        splitCode
+          ? undefined
+          : () => {
+              if (manualSearch) {
+                if (manualQueryRaw.length >= minChars && manualDropdownRows.length > 0) {
+                  setManualDropdownOpen(true);
+                }
+              } else if (value.code.trim().length >= minChars) {
+                startInlineFrom("code", value.code);
+              }
+            }
+      }
+      onKeyDown={splitCode ? undefined : onKeyDown}
+      className={cn(
+        splitCode ? "w-full" : codeW,
+        inputH,
+        flatInput,
+        splitCode && "cursor-default bg-muted/30 text-foreground",
+      )}
       placeholder="Code"
-      role="combobox"
-      aria-expanded={showDropdown}
-      aria-controls={listId}
-      aria-autocomplete="list"
+      role={splitCode ? undefined : "combobox"}
+      aria-expanded={splitCode ? undefined : showDropdown}
+      aria-controls={splitCode ? undefined : listId}
+      aria-autocomplete={splitCode ? undefined : "list"}
       autoComplete="off"
+      tabIndex={splitCode ? -1 : undefined}
       {...(navOrder != null ? navSkipProps : {})}
     />
   );
@@ -585,14 +607,16 @@ export function SearchableLookupPair({
     </Button>
   );
 
-  const popupDisplayRows: SearchHit[] =
-    manualPopupRows ??
-    (livePopupRows ?? []).map((r) => ({
+  const popupDisplayRows: SearchHit[] = useMemo(() => {
+    if (manualPopupRows) return manualPopupRows;
+    const hits = (livePopupRows ?? []).map((r) => ({
       id: r.id,
       code: r.code,
       name: r.name,
       hint: r.hint,
     }));
+    return rankSearchHits(hits, popupQuery);
+  }, [livePopupRows, manualPopupRows, popupQuery]);
 
   return (
     <>

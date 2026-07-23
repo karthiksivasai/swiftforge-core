@@ -2,6 +2,8 @@
 // Used by <SearchField lookup="..." /> across forms so users can pick
 // a value from the same list the corresponding master page manages.
 
+import { INTERNATIONAL_DESTINATIONS } from "@/lib/destinations-international-data";
+
 export type LookupOption = { code: string; name: string; hint?: string };
 
 export type LookupKey =
@@ -12,6 +14,7 @@ export type LookupKey =
   | "industry"
   | "country"
   | "destination"
+  | "internationalDestination"
   | "zone"
   | "pinCode"
   | "vendor"
@@ -167,6 +170,11 @@ const DESTINATIONS: LookupOption[] = [
   { code: "DXB", name: "Dubai" },
   { code: "SIN", name: "Singapore" },
 ];
+
+const INTERNATIONAL_DESTINATION_OPTIONS: LookupOption[] = INTERNATIONAL_DESTINATIONS.map((d) => ({
+  code: d.code,
+  name: d.name,
+}));
 
 const ZONES: LookupOption[] = [
   { code: "1", name: "INTERNATIONAL ZONE 1" },
@@ -328,6 +336,10 @@ export const MASTER_LOOKUPS: Record<LookupKey, { title: string; options: LookupO
   industry: { title: "Select Industry", options: INDUSTRIES },
   country: { title: "Select Country", options: COUNTRIES },
   destination: { title: "Select Destination", options: DESTINATIONS },
+  internationalDestination: {
+    title: "Select Destination",
+    options: INTERNATIONAL_DESTINATION_OPTIONS,
+  },
   zone: { title: "Select Zone", options: ZONES },
   pinCode: { title: "Select Pin Code", options: PIN_CODES, hintLabel: "State" },
   vendor: { title: "Select Vendor", options: VENDORS },

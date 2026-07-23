@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "import:postal-pincodes": "node scripts/import-postal-pincodes.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {

@@ -23,6 +23,10 @@ import {
   listVendorServices,
   type VendorServiceHit,
 } from "@/lib/transactions/resources/vendorServices";
+import {
+  lookupHitSearchFields,
+  rankLookupResults,
+} from "@/lib/search/ranked-lookup-search";
 
 export type LookupPairValue = { id?: string; code: string; name: string };
 
@@ -33,6 +37,10 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
     return () => window.clearTimeout(t);
   }, [value, delayMs]);
   return debounced;
+}
+
+function rankVendorServiceHits(hits: VendorServiceHit[], q: string, limit = 100): VendorServiceHit[] {
+  return rankLookupResults(hits, q, lookupHitSearchFields, { limit });
 }
 
 export function VendorServiceLookup({
@@ -142,14 +150,14 @@ export function VendorServiceLookup({
 
   const inlineHits: VendorServiceHit[] = useMemo(() => {
     if (!hasVendor || !inlineOpen) return [];
-    if (live) return liveInline ?? [];
+    if (live) return rankVendorServiceHits(liveInline ?? [], debouncedInline);
     return filterDemoVendorServices(vendor.code, vendor.name, debouncedInline);
   }, [hasVendor, inlineOpen, live, liveInline, vendor.code, vendor.name, debouncedInline]);
 
   const popupHits: VendorServiceHit[] = useMemo(() => {
     if (!hasVendor) return [];
     if (manualPopupHits) return manualPopupHits;
-    if (live) return livePopup ?? [];
+    if (live) return rankVendorServiceHits(livePopup ?? [], popupQuery);
     return filterDemoVendorServices(vendor.code, vendor.name, popupQuery);
   }, [hasVendor, manualPopupHits, live, livePopup, vendor.code, vendor.name, popupQuery]);
 
@@ -178,12 +186,13 @@ export function VendorServiceLookup({
     )
       .then((hits) => {
         if (cancelled || seqAtStart !== explicitSearchSeqRef.current) return;
-        if (hits.length === 0) {
+        const ranked = rankVendorServiceHits(hits, debouncedManualQuery);
+        if (ranked.length === 0) {
           setManualDropdownHits([]);
           setManualDropdownOpen(false);
           return;
         }
-        setManualDropdownHits(hits);
+        setManualDropdownHits(ranked);
         setManualDropdownOpen(true);
         setHighlight(0);
       })
@@ -284,7 +293,10 @@ export function VendorServiceLookup({
       setManualSearching(true);
       try {
         const hits = live
-          ? await listVendorServices({ ...vendorArgs, q, limit: 100 })
+          ? rankVendorServiceHits(
+              await listVendorServices({ ...vendorArgs, q, limit: 100 }),
+              q,
+            )
           : filterDemoVendorServices(vendor.code, vendor.name, q);
         if (seq !== explicitSearchSeqRef.current) return;
         if (hits.length === 0) {
@@ -468,30 +480,14 @@ export function VendorServiceLookup({
                 <Input
                   value={value.code}
                   disabled={inputDisabled}
-                  onChange={(e) => {
-                    const code = e.target.value;
-                    onChange({ ...value, id: undefined, code });
-                    if (!manualSearch) openInline(code);
-                  }}
-                  onFocus={() => {
-                    if (manualSearch) {
-                      if (manualQueryRaw.length >= 1 && manualDropdownHits.length > 0) {
-                        setManualDropdownOpen(true);
-                      }
-                    } else {
-                      openInline(value.code || "");
-                    }
-                  }}
-                  onKeyDown={onKeyDown}
+                  readOnly
                   className={cn(
-                    "w-full",
-                    compact ? "h-8 border-0 bg-transparent px-1 text-[13px] shadow-none focus-visible:ring-0" : "h-9 border-0 bg-transparent shadow-none focus-visible:ring-0",
+                    "w-full cursor-default bg-muted/30 text-foreground",
+                    compact ? "h-8 border-0 px-1 text-[13px] shadow-none focus-visible:ring-0" : "h-9 border-0 shadow-none focus-visible:ring-0",
                   )}
                   placeholder="Code"
                   autoComplete="off"
-                  role="combobox"
-                  aria-expanded={inlineOpen}
-                  aria-controls={listId}
+                  tabIndex={-1}
                   {...(navOrder != null ? navSkipProps : {})}
                 />
               </div>

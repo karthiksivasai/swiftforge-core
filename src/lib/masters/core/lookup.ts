@@ -20,6 +20,7 @@ export type LookupKey =
   | "zone"
   | "state"
   | "destination"
+  | "international-destination"
   | "pin-code"
   | "country-pincode"
   | "area"
@@ -64,10 +65,22 @@ export async function lookup(
   q?: string,
   limit: number = LOOKUP_DEFAULT_LIMIT,
 ): Promise<LookupItem[]> {
+  const trimmed = q && q.trim() ? q.trim() : null;
+  const cappedLimit = Math.min(Math.max(1, limit), LOOKUP_MAX_LIMIT);
+
+  if (key === "international-destination") {
+    const { data, error } = await supabase.rpc("lookup_international_destinations", {
+      p_q: trimmed,
+      p_limit: cappedLimit,
+    });
+    if (error) throw new Error(error.message);
+    return (data ?? []) as LookupItem[];
+  }
+
   const { data, error } = await supabase.rpc("lookup", {
     p_key: key,
-    p_q: q && q.trim() ? q.trim() : null,
-    p_limit: Math.min(Math.max(1, limit), LOOKUP_MAX_LIMIT),
+    p_q: trimmed,
+    p_limit: cappedLimit,
   });
   if (error) throw new Error(error.message);
   return (data ?? []) as LookupItem[];

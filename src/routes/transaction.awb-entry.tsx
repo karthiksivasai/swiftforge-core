@@ -59,6 +59,7 @@ import {
 import { SearchableLookupPair } from "@/components/masters/searchable-lookup-pair";
 import { PartyContactLookup } from "@/components/transactions/party-contact-lookup";
 import { VendorServiceLookup } from "@/components/transactions/vendor-service-lookup";
+import { PincodeAutocomplete } from "@/components/pincode-autocomplete";
 import { ErpFormNavProvider, ErpNavDateInput, ErpNavInput, useErpFormNav, useErpNavCommit, useErpSelectHandler } from "@/components/forms/erp-form-nav-context";
 import { AWB_NAV } from "@/lib/forms/awb-entry-nav-order";
 import {
@@ -3347,7 +3348,7 @@ function AwbEntryPage() {
                       title="Consignee Details"
                       party={form.consignee}
                       onChange={(p) => patchParty("consignee", p)}
-                      originLookup="destination"
+                      originLookup="internationalDestination"
                       originRequired={consigneeFieldsRequired}
                       companyRequired={consigneeFieldsRequired}
                       invalidNavOrders={navInvalidOrders}
@@ -5497,11 +5498,21 @@ function PartySection({
         </FieldWrapper>
         <div className="grid grid-cols-2 gap-2">
           <FieldWrapper borderLabel label="Pincode">
-            <ErpNavInput
-              order={nav.pincode}
+            <PincodeAutocomplete
+              navOrder={nav.pincode}
               className={inputClass}
               value={party.pincode}
+              countryCode="IN"
               onValueChange={(v) => onChange({ pincode: v })}
+              onSelect={(item) =>
+                onChange({
+                  pincode: item.pincode,
+                  city: item.city,
+                  state: item.state,
+                  country: item.country,
+                })
+              }
+              onCommit={onCommit}
             />
           </FieldWrapper>
           <FieldWrapper borderLabel label="City">

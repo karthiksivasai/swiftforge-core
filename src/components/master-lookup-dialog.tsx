@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { lookupHitSearchFields, rankLookupResults } from "@/lib/search/ranked-lookup-search";
 
 export type LookupReturn = "code" | "name" | "code-name";
 
@@ -19,14 +20,7 @@ export function MasterLookupDialog({ open, onOpenChange, lookup, onSelect, retur
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return cfg.options;
-    return cfg.options.filter(
-      (o) =>
-        o.code.toLowerCase().includes(q) ||
-        o.name.toLowerCase().includes(q) ||
-        (o.hint ?? "").toLowerCase().includes(q),
-    );
+    return rankLookupResults(cfg.options, query, lookupHitSearchFields);
   }, [cfg.options, query]);
 
   const handlePick = (o: LookupOption) => {

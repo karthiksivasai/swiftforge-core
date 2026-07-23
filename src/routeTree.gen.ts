@@ -38,6 +38,7 @@ import { Route as ReportsArReportRouteImport } from './routes/reports.ar-report'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as PublicTrackRouteImport } from './routes/public.track'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
+import { Route as ApiPincodesRouteImport } from './routes/api/pincodes'
 import { Route as ReportsRunIndexRouteImport } from './routes/reports.run.index'
 import { Route as UtilityUsersUserSetupRouteImport } from './routes/utility.users.user-setup'
 import { Route as UtilityUsersLoggedinUsersRouteImport } from './routes/utility.users.loggedin-users'
@@ -249,6 +250,11 @@ const PublicTrackRoute = PublicTrackRouteImport.update({
 const MasterSplatRoute = MasterSplatRouteImport.update({
   id: '/master/$',
   path: '/master/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPincodesRoute = ApiPincodesRouteImport.update({
+  id: '/api/pincodes',
+  path: '/api/pincodes',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReportsRunIndexRoute = ReportsRunIndexRouteImport.update({
@@ -606,6 +612,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/demo': typeof DemoRoute
   '/login': typeof LoginRoute
+  '/api/pincodes': typeof ApiPincodesRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
@@ -699,6 +706,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/demo': typeof DemoRoute
   '/login': typeof LoginRoute
+  '/api/pincodes': typeof ApiPincodesRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
@@ -793,6 +801,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/demo': typeof DemoRoute
   '/login': typeof LoginRoute
+  '/api/pincodes': typeof ApiPincodesRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
@@ -888,6 +897,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/demo'
     | '/login'
+    | '/api/pincodes'
     | '/master/$'
     | '/public/track'
     | '/reports/$'
@@ -981,6 +991,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/demo'
     | '/login'
+    | '/api/pincodes'
     | '/master/$'
     | '/public/track'
     | '/reports/$'
@@ -1074,6 +1085,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/demo'
     | '/login'
+    | '/api/pincodes'
     | '/master/$'
     | '/public/track'
     | '/reports/$'
@@ -1168,6 +1180,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   DemoRoute: typeof DemoRoute
   LoginRoute: typeof LoginRoute
+  ApiPincodesRoute: typeof ApiPincodesRoute
   MasterSplatRoute: typeof MasterSplatRoute
   PublicTrackRoute: typeof PublicTrackRoute
   ReportsSplatRoute: typeof ReportsSplatRoute
@@ -1460,6 +1473,13 @@ declare module '@tanstack/react-router' {
       path: '/master/$'
       fullPath: '/master/$'
       preLoaderRoute: typeof MasterSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/pincodes': {
+      id: '/api/pincodes'
+      path: '/api/pincodes'
+      fullPath: '/api/pincodes'
+      preLoaderRoute: typeof ApiPincodesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reports/run/': {
@@ -1904,6 +1924,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   DemoRoute: DemoRoute,
   LoginRoute: LoginRoute,
+  ApiPincodesRoute: ApiPincodesRoute,
   MasterSplatRoute: MasterSplatRoute,
   PublicTrackRoute: PublicTrackRoute,
   ReportsSplatRoute: ReportsSplatRoute,

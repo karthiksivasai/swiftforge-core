@@ -39,6 +39,11 @@ import {
   type PartyContactRole,
 } from "@/lib/transactions/resources/partyContacts";
 import { MASTER_LOOKUPS, type LookupKey } from "@/lib/master-lookups";
+import {
+  lookupHitSearchFields,
+  rankLookupResults,
+  type RankedSearchField,
+} from "@/lib/search/ranked-lookup-search";
 
 export type PartyContactSelection = {
   id?: string;
@@ -149,21 +154,40 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
+function partyContactSearchFields(hit: PartyContactHit): RankedSearchField {
+  return {
+    code: hit.code,
+    name: hit.name,
+    extra: [
+      hit.contact_name,
+      hit.city,
+      hit.mobile,
+      hit.pin_code,
+      hit.document_no,
+      hit.geo_code,
+      hit.address1,
+    ],
+  };
+}
+
+function rankPartyContactHits(
+  hits: PartyContactHit[],
+  q: string,
+  limit = 15,
+): PartyContactHit[] {
+  return rankLookupResults(hits, q, partyContactSearchFields, { limit });
+}
+
 function filterDemoHits(role: PartyContactRole, q: string): PartyContactHit[] {
   const key: LookupKey = role === "shipper" ? "shipper" : "customer";
   const opts = MASTER_LOOKUPS[key]?.options ?? [];
-  const needle = q.trim().toLowerCase();
-  const filtered = !needle
-    ? opts.slice(0, 10)
-    : opts
-        .filter(
-          (o) =>
-            o.name.toLowerCase().includes(needle) ||
-            o.code.toLowerCase().includes(needle) ||
-            (o.hint ?? "").toLowerCase().includes(needle),
-        )
-        .slice(0, 15);
-  return filtered.map((o, i) => ({
+  const rankedOpts = rankLookupResults(
+    opts.map((o) => ({ code: o.code, name: o.name, hint: o.hint })),
+    q,
+    lookupHitSearchFields,
+    { limit: 15 },
+  );
+  return rankedOpts.map((o, i) => ({
     id: `demo-${role}-${o.code}-${i}`,
     code: o.code,
     name: o.name,
@@ -271,13 +295,13 @@ export function PartyContactLookup({
 
   const inlineHits: PartyContactHit[] = useMemo(() => {
     if (!canInline || trimmedDebouncedInline.length < minChars) return [];
-    if (live) return liveInline ?? [];
+    if (live) return rankPartyContactHits(liveInline ?? [], trimmedDebouncedInline);
     return filterDemoHits(role, trimmedDebouncedInline);
   }, [canInline, trimmedDebouncedInline, minChars, live, liveInline, role]);
 
   const popupHits: PartyContactHit[] = useMemo(() => {
     if (manualPopupHits) return manualPopupHits;
-    if (live) return livePopup ?? [];
+    if (live) return rankPartyContactHits(livePopup ?? [], popupQuery, 100);
     return filterDemoHits(role, popupQuery);
   }, [manualPopupHits, live, livePopup, role, popupQuery]);
 
@@ -304,12 +328,13 @@ export function PartyContactLookup({
     )
       .then((hits) => {
         if (cancelled || seqAtStart !== explicitSearchSeqRef.current) return;
-        if (hits.length === 0) {
+        const ranked = rankPartyContactHits(hits, debouncedManualQuery, 100);
+        if (ranked.length === 0) {
           setManualDropdownHits([]);
           setManualDropdownOpen(false);
           return;
         }
-        setManualDropdownHits(hits);
+        setManualDropdownHits(ranked);
         setManualDropdownOpen(true);
         setHighlight(0);
       })
@@ -410,7 +435,7 @@ export function PartyContactLookup({
       setManualSearching(true);
       try {
         const hits = live
-          ? await searchPartyContacts(role, q, 100)
+          ? rankPartyContactHits(await searchPartyContacts(role, q, 100), q, 100)
           : filterDemoHits(role, q);
         if (seq !== explicitSearchSeqRef.current) return;
         if (hits.length === 0) {
@@ -567,25 +592,40 @@ export function PartyContactLookup({
     <Input
       value={value.code}
       disabled={disabled || hydrating}
-      onChange={(e) => {
-        const code = e.target.value;
-        onCompanyChange({ ...value, id: undefined, code });
-        if (!manualSearch) startInline(code || value.name);
-      }}
-      onFocus={() => {
-        if (manualSearch) {
-          if (manualQueryRaw.length >= minChars && manualDropdownHits.length > 0) {
-            setManualDropdownOpen(true);
-          }
-        }
-      }}
-      onKeyDown={onKeyDown}
-      className={cn(splitCode ? "w-full" : codeW, inputH, flatInput)}
+      readOnly={splitCode}
+      onChange={
+        splitCode
+          ? undefined
+          : (e) => {
+              const code = e.target.value;
+              onCompanyChange({ ...value, id: undefined, code });
+              if (!manualSearch) startInline(code || value.name);
+            }
+      }
+      onFocus={
+        splitCode
+          ? undefined
+          : () => {
+              if (manualSearch) {
+                if (manualQueryRaw.length >= minChars && manualDropdownHits.length > 0) {
+                  setManualDropdownOpen(true);
+                }
+              }
+            }
+      }
+      onKeyDown={splitCode ? undefined : onKeyDown}
+      className={cn(
+        splitCode ? "w-full" : codeW,
+        inputH,
+        flatInput,
+        splitCode && "cursor-default bg-muted/30 text-foreground",
+      )}
       placeholder="Code"
       autoComplete="off"
-      role="combobox"
-      aria-expanded={showDropdown}
-      aria-controls={listId}
+      role={splitCode ? undefined : "combobox"}
+      aria-expanded={splitCode ? undefined : showDropdown}
+      aria-controls={splitCode ? undefined : listId}
+      tabIndex={splitCode ? -1 : undefined}
       {...(navOrder != null ? navSkipProps : {})}
     />
   );

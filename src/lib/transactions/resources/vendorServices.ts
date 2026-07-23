@@ -5,6 +5,10 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { supabase } from "@/integrations/supabase/client";
+import {
+  lookupHitSearchFields,
+  rankLookupResults,
+} from "@/lib/search/ranked-lookup-search";
 
 export type VendorServiceHit = {
   id: string;
@@ -148,14 +152,9 @@ export function filterDemoVendorServices(
     DEMO_VENDOR_SERVICES[vendorName.trim()] ??
     DEMO_VENDOR_SERVICES[vendorName.trim().toUpperCase()] ??
     [];
-  const needle = (q ?? "").trim().toLowerCase();
-  const filtered = !needle
-    ? rows
-    : rows.filter(
-        (r) =>
-          r.code.toLowerCase().includes(needle) || r.name.toLowerCase().includes(needle),
-      );
-  return filtered.map((r, i) => ({
+  const needle = (q ?? "").trim();
+  const ranked = rankLookupResults(rows, needle, lookupHitSearchFields, { limit: rows.length });
+  return ranked.map((r, i) => ({
     id: `demo-${key}-${r.code}-${i}`,
     code: r.code,
     name: r.name,

@@ -10,7 +10,7 @@
  * is what to show for it (the screens keep the label alongside the id so the
  * trigger stays populated on edit without an extra fetch).
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,11 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { useLookup, type LookupItem, type LookupKey } from "@/lib/masters/core/lookup";
+import { useLookup, LOOKUP_MAX_LIMIT, type LookupItem, type LookupKey } from "@/lib/masters/core/lookup";
+import {
+  lookupHitSearchFields,
+  rankLookupResults,
+} from "@/lib/search/ranked-lookup-search";
 
 /** A pickable entity with the same shape the lookup RPC returns. */
 export type EntityOption = { id: string; code: string | null; name: string; hint?: string | null };
@@ -48,8 +52,17 @@ export function LookupCombobox({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const { data, isFetching } = useLookup(lookupKey, query, { enabled: open });
-  const items = data ?? [];
+  const { data, isFetching } = useLookup(lookupKey, query, {
+    enabled: open,
+    limit: LOOKUP_MAX_LIMIT,
+  });
+  const items = useMemo(
+    () =>
+      rankLookupResults(data ?? [], query, (item) => lookupHitSearchFields(item), {
+        limit: 50,
+      }),
+    [data, query],
+  );
 
   return (
     <Popover
