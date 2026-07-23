@@ -72,7 +72,8 @@ export function usePincodeAutocomplete({
   });
 
   const results: PincodeRecord[] = useMemo(() => query.data ?? [], [query.data]);
-  const showDropdown = open && focused && trimmed.length >= minPrefixLength;
+  const showDropdown =
+    open && focused && trimmed.length >= minPrefixLength && results.length > 0;
   const isLoading = query.isFetching && canSearch;
   const hasQueried = canSearch && !query.isFetching && query.fetchStatus !== "idle";
   const noResults = showDropdown && hasQueried && results.length === 0;

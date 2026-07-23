@@ -111,7 +111,7 @@ export function ErpFormNavProvider({
       if (!container.contains(target)) return;
       if (
         target.closest(`[${ERP_MANUAL_SEARCH}]`) &&
-        (e.key === "Enter" || e.key === "F2")
+        (e.key === "Enter" || e.key === "F2" || e.key === "Tab")
       ) {
         return;
       }

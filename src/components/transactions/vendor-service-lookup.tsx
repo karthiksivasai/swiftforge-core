@@ -27,6 +27,13 @@ import {
   lookupHitSearchFields,
   rankLookupResults,
 } from "@/lib/search/ranked-lookup-search";
+import {
+  AWB_LOOKUP_DEBOUNCE_MS,
+  AWB_LOOKUP_NO_RESULTS,
+  AWB_LOOKUP_RESULT_LIMIT,
+  LookupAutocompleteServiceRow,
+  handleLookupCommitKeyDown,
+} from "@/components/masters/lookup-autocomplete-ui";
 
 export type LookupPairValue = { id?: string; code: string; name: string };
 
@@ -49,7 +56,7 @@ export function VendorServiceLookup({
   onChange,
   productId,
   destinationId,
-  debounceMs = 250,
+  debounceMs = AWB_LOOKUP_DEBOUNCE_MS,
   disabled,
   compact = false,
   splitCode = false,
@@ -57,7 +64,7 @@ export function VendorServiceLookup({
   onCommit,
   manualSearch = false,
   emptySearchMessage,
-  noResultsMessage = "No service found.",
+  noResultsMessage = AWB_LOOKUP_NO_RESULTS,
 }: {
   vendor: LookupPairValue;
   value: LookupPairValue;
@@ -78,6 +85,7 @@ export function VendorServiceLookup({
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const explicitSearchSeqRef = useRef(0);
+  const manualQueryEditedRef = useRef(false);
   const hasVendor = Boolean(vendor.id || vendor.code.trim() || vendor.name.trim());
   const locked = disabled || !hasVendor;
 
@@ -94,7 +102,7 @@ export function VendorServiceLookup({
   const manualQueryRaw = (value.name || value.code || "").trim();
   const debouncedManualQuery = useDebouncedValue(manualQueryRaw, debounceMs);
   const canDebouncedManualSearch =
-    manualSearch && hasVendor && debouncedManualQuery.length >= 1;
+    manualSearch && hasVendor && manualQueryEditedRef.current && debouncedManualQuery.length >= 1;
 
   const debouncedInline = useDebouncedValue(inlineQuery, debounceMs);
   const debouncedPopup = useDebouncedValue(popupQuery, debounceMs);
@@ -165,14 +173,18 @@ export function VendorServiceLookup({
 
   useEffect(() => {
     if (!canDebouncedManualSearch) {
-      setManualDropdownOpen(false);
-      setManualDropdownHits([]);
+      if (!manualSearch || debouncedManualQuery.length < 1) {
+        setManualDropdownOpen(false);
+        setManualDropdownHits([]);
+      }
       return;
     }
 
     let cancelled = false;
     const seqAtStart = explicitSearchSeqRef.current;
     setManualSearching(true);
+    setManualDropdownHits([]);
+    setManualDropdownOpen(false);
     void (live
       ? listVendorServices({
           vendorId: vendor.id || null,
@@ -186,14 +198,9 @@ export function VendorServiceLookup({
     )
       .then((hits) => {
         if (cancelled || seqAtStart !== explicitSearchSeqRef.current) return;
-        const ranked = rankVendorServiceHits(hits, debouncedManualQuery);
-        if (ranked.length === 0) {
-          setManualDropdownHits([]);
-          setManualDropdownOpen(false);
-          return;
-        }
+        const ranked = rankVendorServiceHits(hits, debouncedManualQuery, AWB_LOOKUP_RESULT_LIMIT);
         setManualDropdownHits(ranked);
-        setManualDropdownOpen(true);
+        setManualDropdownOpen(ranked.length > 0);
         setHighlight(0);
       })
       .catch(() => {
@@ -212,6 +219,7 @@ export function VendorServiceLookup({
     canDebouncedManualSearch,
     debouncedManualQuery,
     live,
+    manualSearch,
     vendor.id,
     vendor.code,
     vendor.name,
@@ -232,6 +240,7 @@ export function VendorServiceLookup({
 
   const pick = (hit: VendorServiceHit) => {
     onChange({ id: hit.id, code: hit.code, name: hit.name });
+    manualQueryEditedRef.current = false;
     setInlineOpen(false);
     setPopupOpen(false);
     setInlineQuery("");
@@ -247,10 +256,16 @@ export function VendorServiceLookup({
   );
 
   const clearManualDropdown = useCallback(() => {
+    manualQueryEditedRef.current = false;
     setManualDropdownOpen(false);
     setManualDropdownHits([]);
     setHighlight(0);
   }, []);
+
+  const commitTypedAndAdvance = useCallback(() => {
+    clearManualDropdown();
+    onCommit?.();
+  }, [clearManualDropdown, onCommit]);
 
   const applyManualHits = useCallback(
     (hits: VendorServiceHit[], opts?: { autoSelectSingle?: boolean }) => {
@@ -332,48 +347,64 @@ export function VendorServiceLookup({
   const openInline = (text: string) => {
     if (manualSearch || !hasVendor) return;
     setInlineQuery(text);
-    setInlineOpen(true);
+    setInlineOpen(text.trim().length >= 1);
+  };
+
+  const openManualTypeahead = (text: string) => {
+    manualQueryEditedRef.current = true;
+    if (text.trim().length < 1) {
+      setManualDropdownOpen(false);
+      setManualDropdownHits([]);
+    }
+  };
+
+  const onNameChange = (name: string) => {
+    onChange({ ...value, id: undefined, name });
+    if (manualSearch) openManualTypeahead(name);
+    else openInline(name);
+  };
+
+  const onFocusManual = () => {
+    if (
+      manualQueryEditedRef.current &&
+      manualQueryRaw.length >= 1 &&
+      manualDropdownHits.length > 0
+    ) {
+      setManualDropdownOpen(true);
+    }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (manualSearch) {
-      if (e.key === "F2") {
-        e.preventDefault();
-        triggerExplicitSearch();
-        return;
-      }
-      if (manualDropdownHits.length > 0) {
+      if (manualDropdownVisible) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          if (!manualDropdownOpen) setManualDropdownOpen(true);
-          else setHighlight((h) => Math.min(h + 1, manualDropdownHits.length - 1));
+          setHighlight((h) => Math.min(h + 1, manualDropdownHits.length - 1));
           return;
         }
-        if (manualDropdownOpen) {
-          if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setHighlight((h) => Math.max(h - 1, 0));
-            return;
-          }
-          if (e.key === "Enter" && manualDropdownHits[highlight]) {
-            e.preventDefault();
-            pick(manualDropdownHits[highlight]);
-            return;
-          }
-          if (e.key === "Escape") {
-            e.preventDefault();
-            clearManualDropdown();
-            return;
-          }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setHighlight((h) => Math.max(h - 1, 0));
+          return;
         }
       }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        if (manualDropdownOpen && manualDropdownHits[highlight]) {
-          pick(manualDropdownHits[highlight]);
-        } else {
-          void runManualSearch();
-        }
+
+      if (
+        handleLookupCommitKeyDown(e, {
+          dropdownOpen: manualDropdownVisible,
+          resultsAvailable: manualDropdownHits.length > 0,
+          highlightedIndex: highlight,
+          onPickHighlighted: () => {
+            const hit = manualDropdownHits[highlight];
+            if (hit) pick(hit);
+          },
+          onCommitTyped: commitTypedAndAdvance,
+          onDismissDropdown: clearManualDropdown,
+          onBrowseSearch: triggerExplicitSearch,
+          manualSearchMode: true,
+        })
+      ) {
+        return;
       }
       return;
     }
@@ -389,18 +420,24 @@ export function VendorServiceLookup({
       setHighlight((h) => Math.max(h - 1, 0));
       return;
     }
-    if (e.key === "Enter" && inlineHits[highlight]) {
-      e.preventDefault();
-      pick(inlineHits[highlight]);
+
+    if (
+      handleLookupCommitKeyDown(e, {
+        dropdownOpen: inlineOpen,
+        resultsAvailable: inlineHits.length > 0,
+        highlightedIndex: highlight,
+        onPickHighlighted: () => {
+          const hit = inlineHits[highlight];
+          if (hit) pick(hit);
+        },
+        onCommitTyped: () => {
+          setInlineOpen(false);
+          onCommit?.();
+        },
+        onDismissDropdown: () => setInlineOpen(false),
+      })
+    ) {
       return;
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      setInlineOpen(false);
-      return;
-    }
-    if (e.key === "Tab" && inlineHits[highlight]) {
-      pick(inlineHits[highlight]);
     }
   };
 
@@ -408,8 +445,14 @@ export function VendorServiceLookup({
     ? "Select a Vendor first"
     : "No services are configured for this vendor.";
 
+  const manualQueryActive =
+    manualSearch && manualQueryEditedRef.current && manualQueryRaw.length >= 1;
+  const activeHighlightQuery = manualSearch ? debouncedManualQuery : debouncedInline;
+  const manualDropdownVisible =
+    manualSearch && manualDropdownOpen && manualQueryActive && manualDropdownHits.length > 0;
+
   const showInlineDropdown = manualSearch
-    ? manualDropdownOpen && manualDropdownHits.length > 0
+    ? manualDropdownVisible
     : inlineOpen && hasVendor && inlineHits.length > 0;
   const dropdownHits = manualSearch && manualDropdownOpen ? manualDropdownHits : inlineHits;
 
@@ -443,19 +486,10 @@ export function VendorServiceLookup({
               <Input
                 value={value.name}
                 disabled={inputDisabled}
-                onChange={(e) => {
-                  const name = e.target.value;
-                  onChange({ ...value, id: undefined, name });
-                  if (!manualSearch) openInline(name);
-                }}
+                onChange={(e) => onNameChange(e.target.value)}
                 onFocus={() => {
-                  if (manualSearch) {
-                    if (manualQueryRaw.length >= 1 && manualDropdownHits.length > 0) {
-                      setManualDropdownOpen(true);
-                    }
-                  } else {
-                    openInline(value.name || "");
-                  }
+                  if (manualSearch) onFocusManual();
+                  else openInline(value.name || "");
                 }}
                 onKeyDown={onKeyDown}
                 className={cn(
@@ -465,7 +499,7 @@ export function VendorServiceLookup({
                 placeholder={hasVendor ? "Service" : "Select vendor first"}
                 autoComplete="off"
                 role="combobox"
-                aria-expanded={inlineOpen}
+                aria-expanded={showInlineDropdown}
                 aria-controls={listId}
                 {...navOrderProps}
               />
@@ -523,19 +557,10 @@ export function VendorServiceLookup({
             <Input
               value={value.name}
               disabled={locked}
-              onChange={(e) => {
-                const name = e.target.value;
-                onChange({ ...value, id: undefined, name });
-                if (!manualSearch) openInline(name);
-              }}
+              onChange={(e) => onNameChange(e.target.value)}
               onFocus={() => {
-                if (manualSearch) {
-                  if (manualQueryRaw.length >= 1 && manualDropdownHits.length > 0) {
-                    setManualDropdownOpen(true);
-                  }
-                } else {
-                  openInline(value.name || "");
-                }
+                if (manualSearch) onFocusManual();
+                else openInline(value.name || "");
               }}
               onKeyDown={onKeyDown}
               className={cn("min-w-0 flex-1", compact ? "h-8 px-1.5 text-[13px]" : "h-9")}
@@ -552,16 +577,12 @@ export function VendorServiceLookup({
               onChange={(e) => {
                 const code = e.target.value;
                 onChange({ ...value, id: undefined, code });
-                if (!manualSearch) openInline(code);
+                if (manualSearch) openManualTypeahead(code);
+                else openInline(code);
               }}
               onFocus={() => {
-                if (manualSearch) {
-                  if (manualQueryRaw.length >= 1 && manualDropdownHits.length > 0) {
-                    setManualDropdownOpen(true);
-                  }
-                } else {
-                  openInline(value.code || "");
-                }
+                if (manualSearch) onFocusManual();
+                else openInline(value.code || "");
               }}
               onKeyDown={onKeyDown}
               className={cn(compact ? "h-8 w-14 px-1 text-[13px]" : "h-9 w-20")}
@@ -608,7 +629,7 @@ export function VendorServiceLookup({
                 role="option"
                 aria-selected={idx === highlight}
                 className={cn(
-                  "flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0",
+                  "flex w-full border-b px-3 py-2 text-left last:border-b-0",
                   idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-muted/50",
                 )}
                 onMouseEnter={() => setHighlight(idx)}
@@ -617,15 +638,13 @@ export function VendorServiceLookup({
                   pick(hit);
                 }}
               >
-                <span className="min-w-0 truncate font-medium">
-                  {hit.name}
-                  {hit.hint ? (
-                    <span className="ml-1 font-normal text-muted-foreground">({hit.hint})</span>
-                  ) : null}
-                </span>
-                <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                  {hit.code}
-                </span>
+                <LookupAutocompleteServiceRow
+                  name={hit.name}
+                  code={hit.code}
+                  hint={hit.hint}
+                  query={activeHighlightQuery}
+                  highlighted={idx === highlight}
+                />
               </button>
             ))}
           </LookupDropdownPortal>

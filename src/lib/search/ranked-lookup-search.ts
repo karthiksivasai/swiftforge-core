@@ -10,6 +10,9 @@ export const RANK_EXACT_NAME = 900;
 export const RANK_NAME_PREFIX = 800;
 export const RANK_CODE_PREFIX = 700;
 export const RANK_WORD_PREFIX = 600;
+export const RANK_NAME_CONTAINS = 400;
+export const RANK_CODE_CONTAINS = 300;
+export const RANK_EXTRA_CONTAINS = 200;
 export const RANK_CONTAINS = 100;
 
 const RANK_NO_MATCH = 0;
@@ -51,8 +54,9 @@ export function scoreRankedSearch(item: RankedSearchField, rawQuery: string): nu
     if (tokenize(extra).some((word) => word.startsWith(query))) return RANK_WORD_PREFIX;
   }
 
-  if (code.includes(query) || name.includes(query)) return RANK_CONTAINS;
-  if (extras.some((extra) => extra.includes(query))) return RANK_CONTAINS;
+  if (name.includes(query)) return RANK_NAME_CONTAINS;
+  if (code.includes(query)) return RANK_CODE_CONTAINS;
+  if (extras.some((extra) => extra.includes(query))) return RANK_EXTRA_CONTAINS;
 
   return RANK_NO_MATCH;
 }

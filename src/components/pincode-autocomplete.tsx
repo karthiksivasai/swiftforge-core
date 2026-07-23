@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { LOOKUP_DROPDOWN_ATTR } from "@/components/masters/lookup-dropdown-portal";
+import { handleLookupCommitKeyDown } from "@/components/masters/lookup-autocomplete-ui";
 import { usePincodeAutocomplete } from "@/hooks/use-pincode-autocomplete";
 import { erpNavOrder } from "@/lib/forms/erp-keyboard-nav";
 import {
@@ -99,7 +100,6 @@ export function PincodeAutocomplete({
     highlight,
     results,
     isLoading,
-    noResults,
     debouncedPrefix,
     close,
     handleFocus,
@@ -139,22 +139,26 @@ export function PincodeAutocomplete({
       }
       return;
     }
-    if (event.key === "Enter") {
-      if (showDropdown && results[highlight]) {
-        event.preventDefault();
-        commitSelection(results[highlight]);
+
+    if (showDropdown) {
+      if (
+        handleLookupCommitKeyDown(event, {
+          dropdownOpen: showDropdown,
+          resultsAvailable: results.length > 0,
+          highlightedIndex: highlight,
+          onPickHighlighted: () => {
+            const row = results[highlight];
+            if (row) commitSelection(row);
+          },
+          onCommitTyped: () => {
+            close();
+            onCommit?.();
+          },
+          onDismissDropdown: close,
+        })
+      ) {
+        return;
       }
-      return;
-    }
-    if (event.key === "Escape") {
-      if (showDropdown) {
-        event.preventDefault();
-        close();
-      }
-      return;
-    }
-    if (event.key === "Tab" && showDropdown && results[highlight]) {
-      commitSelection(results[highlight]);
     }
   };
 
@@ -204,21 +208,17 @@ export function PincodeAutocomplete({
             "animate-in fade-in-0 zoom-in-95 duration-150",
           )}
         >
-          {noResults ? (
-            <div className="px-3 py-3 text-sm text-muted-foreground">No matching pincodes found.</div>
-          ) : (
-            results.map((row, index) => (
-              <PincodeOptionRow
-                key={`${row.id}-${row.pincode}`}
-                row={row}
-                prefix={debouncedPrefix}
-                active={index === highlight}
-                index={index}
-                onMouseEnter={() => setHighlight(index)}
-                onSelect={() => commitSelection(row)}
-              />
-            ))
-          )}
+          {results.map((row, index) => (
+            <PincodeOptionRow
+              key={`${row.id}-${row.pincode}`}
+              row={row}
+              prefix={debouncedPrefix}
+              active={index === highlight}
+              index={index}
+              onMouseEnter={() => setHighlight(index)}
+              onSelect={() => commitSelection(row)}
+            />
+          ))}
         </div>
       ) : null}
     </div>

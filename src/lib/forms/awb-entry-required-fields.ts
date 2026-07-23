@@ -12,7 +12,7 @@ export const AWB_REQUIRED_NAV_ORDERS = new Set<number>([
 ]);
 
 export function isAwbLookupSelected(pair: LookupPair): boolean {
-  return Boolean(pair.id || pair.code.trim());
+  return Boolean(pair.id || pair.code.trim() || pair.name.trim());
 }
 
 export function validateAwbNavField(
@@ -37,7 +37,7 @@ export function validateAwbNavField(
       if (opts?.consigneeNotRequired) return true;
       return isAwbLookupSelected(form.consignee.companyName);
     case AWB_NAV.PRODUCT:
-      return Boolean(form.product.code.trim());
+      return Boolean(form.product.code.trim() || form.product.name.trim());
     case AWB_NAV.SERVICE:
       return isAwbLookupSelected(form.service);
     default:

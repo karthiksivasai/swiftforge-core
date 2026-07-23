@@ -58,6 +58,10 @@ import {
   TablePager,
 } from "@/components/master-table-kit";
 import { SearchableLookupPair } from "@/components/masters/searchable-lookup-pair";
+import {
+  AWB_LOOKUP_NO_RESULTS,
+  type LookupDisplayVariant,
+} from "@/components/masters/lookup-autocomplete-ui";
 import { PartyContactLookup } from "@/components/transactions/party-contact-lookup";
 import { VendorServiceLookup } from "@/components/transactions/vendor-service-lookup";
 import { PincodeAutocomplete } from "@/components/pincode-autocomplete";
@@ -5537,7 +5541,7 @@ function PartySection({
             splitCode
             manualSearch
             emptySearchMessage="Please enter a company name."
-            noResultsMessage="No matches found."
+            noResultsMessage={AWB_LOOKUP_NO_RESULTS}
             navOrder={nav.company}
             onCommit={onCommit}
             onSelectContact={(c) =>
@@ -5775,7 +5779,7 @@ function ServicesSection({
               compact
               splitCode
               manualSearch
-              noResultsMessage="No service found."
+              noResultsMessage={AWB_LOOKUP_NO_RESULTS}
               navOrder={AWB_NAV.SERVICE}
               onCommit={onCommit}
             />
@@ -6184,8 +6188,9 @@ function LookupPairInput({
   onCommit: onCommitProp,
   onSelect,
   emptySearchMessage,
-  noResultsMessage,
-  minChars,
+  noResultsMessage = AWB_LOOKUP_NO_RESULTS,
+  minChars = 1,
+  displayVariant,
 }: {
   value: LookupPair;
   onChange: (v: LookupPair) => void;
@@ -6197,6 +6202,7 @@ function LookupPairInput({
   emptySearchMessage?: string;
   noResultsMessage?: string;
   minChars?: number;
+  displayVariant?: LookupDisplayVariant;
 }) {
   const defaultCommit = useErpNavCommit();
   const onCommit = onCommitProp ?? defaultCommit;
@@ -6215,6 +6221,7 @@ function LookupPairInput({
       onCommit={onCommit}
       emptySearchMessage={emptySearchMessage}
       noResultsMessage={noResultsMessage}
+      displayVariant={displayVariant}
     />
   );
 }
@@ -6238,10 +6245,9 @@ function ClientNameLookupInput({
       onChange={onDraftChange}
       onSelect={onSelect}
       disabled={disabled}
-      minChars={1}
+      displayVariant="client"
       navOrder={AWB_NAV.CLIENT}
       emptySearchMessage="Please enter a client name."
-      noResultsMessage="No client found."
       onCommit={() => focusFieldByOrder(AWB_NAV.SHIPPER_ORIGIN)}
     />
   );

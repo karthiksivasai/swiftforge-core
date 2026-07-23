@@ -61,4 +61,19 @@ describe("ranked lookup search", () => {
       scoreRankedSearch({ code: "AU", name: "Australia" }, "us"),
     );
   });
+
+  it("ranks name contains matches for partial text in Australia", () => {
+    const results = rankLookupResults(COUNTRIES, "str", toFields);
+    expect(results[0]?.name).toBe("Australia");
+  });
+
+  it("ranks exact three-letter code AUS above name-prefix matches when code field uses AUS", () => {
+    const withAusCode = [
+      { code: "AUS", name: "Australia" },
+      { code: "AUT", name: "Austria" },
+      { code: "ARG", name: "Argentina" },
+    ];
+    const results = rankLookupResults(withAusCode, "AUS", toFields);
+    expect(results[0]?.code).toBe("AUS");
+  });
 });

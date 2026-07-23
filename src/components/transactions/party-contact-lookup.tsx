@@ -44,6 +44,13 @@ import {
   rankLookupResults,
   type RankedSearchField,
 } from "@/lib/search/ranked-lookup-search";
+import {
+  AWB_LOOKUP_DEBOUNCE_MS,
+  AWB_LOOKUP_NO_RESULTS,
+  AWB_LOOKUP_RESULT_LIMIT,
+  LookupAutocompleteCompanyRow,
+  handleLookupCommitKeyDown,
+} from "@/components/masters/lookup-autocomplete-ui";
 
 export type PartyContactSelection = {
   id?: string;
@@ -220,7 +227,7 @@ export function PartyContactLookup({
   onCompanyChange,
   onSelectContact,
   minChars = 1,
-  debounceMs = 300,
+  debounceMs = AWB_LOOKUP_DEBOUNCE_MS,
   disabled,
   compact = false,
   splitCode = false,
@@ -228,7 +235,7 @@ export function PartyContactLookup({
   onCommit,
   manualSearch = false,
   emptySearchMessage,
-  noResultsMessage = "No matches found.",
+  noResultsMessage = AWB_LOOKUP_NO_RESULTS,
 }: {
   role: PartyContactRole;
   value: CompanyValue;
@@ -249,6 +256,7 @@ export function PartyContactLookup({
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const explicitSearchSeqRef = useRef(0);
+  const manualQueryEditedRef = useRef(false);
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupQuery, setPopupQuery] = useState("");
   const [inlineOpen, setInlineOpen] = useState(false);
@@ -264,7 +272,8 @@ export function PartyContactLookup({
 
   const manualQueryRaw = (value.name || value.code || "").trim();
   const debouncedManualQuery = useDebouncedValue(manualQueryRaw, debounceMs);
-  const canDebouncedManualSearch = false;
+  const canDebouncedManualSearch =
+    manualSearch && manualQueryEditedRef.current && debouncedManualQuery.length >= minChars;
 
   const debouncedInline = useDebouncedValue(inlineQuery, debounceMs);
   const debouncedPopup = useDebouncedValue(popupQuery, debounceMs);
@@ -313,28 +322,27 @@ export function PartyContactLookup({
 
   useEffect(() => {
     if (!canDebouncedManualSearch) {
-      setManualDropdownOpen(false);
-      setManualDropdownHits([]);
+      if (!manualSearch || debouncedManualQuery.length < minChars) {
+        setManualDropdownOpen(false);
+        setManualDropdownHits([]);
+      }
       return;
     }
 
     let cancelled = false;
     const seqAtStart = explicitSearchSeqRef.current;
     setManualSearching(true);
+    setManualDropdownHits([]);
+    setManualDropdownOpen(false);
     void (live
       ? searchPartyContacts(role, debouncedManualQuery, 100)
       : Promise.resolve(filterDemoHits(role, debouncedManualQuery))
     )
       .then((hits) => {
         if (cancelled || seqAtStart !== explicitSearchSeqRef.current) return;
-        const ranked = rankPartyContactHits(hits, debouncedManualQuery, 100);
-        if (ranked.length === 0) {
-          setManualDropdownHits([]);
-          setManualDropdownOpen(false);
-          return;
-        }
+        const ranked = rankPartyContactHits(hits, debouncedManualQuery, AWB_LOOKUP_RESULT_LIMIT);
         setManualDropdownHits(ranked);
-        setManualDropdownOpen(true);
+        setManualDropdownOpen(ranked.length > 0);
         setHighlight(0);
       })
       .catch(() => {
@@ -349,7 +357,7 @@ export function PartyContactLookup({
     return () => {
       cancelled = true;
     };
-  }, [canDebouncedManualSearch, debouncedManualQuery, live, role]);
+  }, [canDebouncedManualSearch, debouncedManualQuery, live, manualSearch, minChars, role]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -371,6 +379,7 @@ export function PartyContactLookup({
         if (hydrated) full = hydrated;
       }
       onSelectContact(hitToSelection(full));
+      manualQueryEditedRef.current = false;
       setInlineOpen(false);
       setPopupOpen(false);
       setInlineQuery("");
@@ -389,10 +398,16 @@ export function PartyContactLookup({
   );
 
   const clearManualDropdown = useCallback(() => {
+    manualQueryEditedRef.current = false;
     setManualDropdownOpen(false);
     setManualDropdownHits([]);
     setHighlight(0);
   }, []);
+
+  const commitTypedAndAdvance = useCallback(() => {
+    clearManualDropdown();
+    onCommit?.();
+  }, [clearManualDropdown, onCommit]);
 
   const applyManualHits = useCallback(
     async (hits: PartyContactHit[], opts?: { autoSelectSingle?: boolean }) => {
@@ -473,44 +488,35 @@ export function PartyContactLookup({
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (manualSearch) {
-      if (e.key === "F2") {
-        e.preventDefault();
-        triggerExplicitSearch();
-        return;
-      }
-      if (manualDropdownHits.length > 0) {
+      if (manualDropdownVisible) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          if (!manualDropdownOpen) setManualDropdownOpen(true);
-          else setHighlight((h) => Math.min(h + 1, manualDropdownHits.length - 1));
+          setHighlight((h) => Math.min(h + 1, manualDropdownHits.length - 1));
           return;
         }
-        if (manualDropdownOpen) {
-          if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setHighlight((h) => Math.max(h - 1, 0));
-            return;
-          }
-          if (e.key === "Enter" && manualDropdownHits[highlight]) {
-            e.preventDefault();
-            void pick(manualDropdownHits[highlight]);
-            return;
-          }
-          if (e.key === "Escape") {
-            e.preventDefault();
-            clearManualDropdown();
-            return;
-          }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setHighlight((h) => Math.max(h - 1, 0));
+          return;
         }
       }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        if (manualDropdownOpen && manualDropdownHits[highlight]) {
-          void pick(manualDropdownHits[highlight]);
-        } else {
-          clearManualDropdown();
-          onCommit?.();
-        }
+
+      if (
+        handleLookupCommitKeyDown(e, {
+          dropdownOpen: manualDropdownVisible,
+          resultsAvailable: manualDropdownHits.length > 0,
+          highlightedIndex: highlight,
+          onPickHighlighted: () => {
+            const hit = manualDropdownHits[highlight];
+            if (hit) void pick(hit);
+          },
+          onCommitTyped: commitTypedAndAdvance,
+          onDismissDropdown: clearManualDropdown,
+          onBrowseSearch: triggerExplicitSearch,
+          manualSearchMode: true,
+        })
+      ) {
+        return;
       }
       return;
     }
@@ -526,25 +532,36 @@ export function PartyContactLookup({
       setHighlight((h) => Math.max(h - 1, 0));
       return;
     }
-    if (e.key === "Enter" && inlineHits[highlight]) {
-      e.preventDefault();
-      void pick(inlineHits[highlight]);
+
+    if (
+      handleLookupCommitKeyDown(e, {
+        dropdownOpen: inlineOpen,
+        resultsAvailable: inlineHits.length > 0,
+        highlightedIndex: highlight,
+        onPickHighlighted: () => {
+          const hit = inlineHits[highlight];
+          if (hit) void pick(hit);
+        },
+        onCommitTyped: () => {
+          setInlineOpen(false);
+          onCommit?.();
+        },
+        onDismissDropdown: () => setInlineOpen(false),
+      })
+    ) {
       return;
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      setInlineOpen(false);
-      return;
-    }
-    if (e.key === "Tab" && inlineHits[highlight]) {
-      void pick(inlineHits[highlight]);
     }
   };
 
   const title = role === "shipper" ? "Shipper" : "Consignee";
+  const manualQueryActive =
+    manualSearch && manualQueryEditedRef.current && manualQueryRaw.length >= minChars;
+  const activeHighlightQuery = manualSearch ? debouncedManualQuery : trimmedDebouncedInline;
+  const manualDropdownVisible =
+    manualSearch && manualDropdownOpen && manualQueryActive && manualDropdownHits.length > 0;
   const dropdownHits = manualSearch && manualDropdownOpen ? manualDropdownHits : inlineHits;
   const showDropdown = manualSearch
-    ? manualDropdownOpen && manualDropdownHits.length > 0
+    ? manualDropdownVisible
     : inlineOpen && canInline && inlineHits.length > 0;
   const inputH = compact ? "h-8" : "h-9";
   const codeW = compact ? "w-14" : "w-20";
@@ -567,12 +584,24 @@ export function PartyContactLookup({
       disabled={disabled || hydrating}
       onChange={(e) => {
         const name = e.target.value;
+        manualQueryEditedRef.current = true;
         onCompanyChange({ ...value, id: undefined, name });
-        if (!manualSearch) startInline(name);
+        if (manualSearch) {
+          if (name.trim().length < minChars) {
+            setManualDropdownOpen(false);
+            setManualDropdownHits([]);
+          }
+        } else {
+          startInline(name);
+        }
       }}
       onFocus={() => {
         if (manualSearch) {
-          if (manualQueryRaw.length >= minChars && manualDropdownHits.length > 0) {
+          if (
+            manualQueryEditedRef.current &&
+            manualQueryRaw.length >= minChars &&
+            manualDropdownHits.length > 0
+          ) {
             setManualDropdownOpen(true);
           }
         }
@@ -598,6 +627,7 @@ export function PartyContactLookup({
           ? undefined
           : (e) => {
               const code = e.target.value;
+              manualQueryEditedRef.current = true;
               onCompanyChange({ ...value, id: undefined, code });
               if (!manualSearch) startInline(code || value.name);
             }
@@ -607,7 +637,11 @@ export function PartyContactLookup({
           ? undefined
           : () => {
               if (manualSearch) {
-                if (manualQueryRaw.length >= minChars && manualDropdownHits.length > 0) {
+                if (
+                  manualQueryEditedRef.current &&
+                  manualQueryRaw.length >= minChars &&
+                  manualDropdownHits.length > 0
+                ) {
                   setManualDropdownOpen(true);
                 }
               }
@@ -704,33 +738,46 @@ export function PartyContactLookup({
             className="max-h-80"
           >
             {dropdownHits.map((hit, idx) => (
-                <button
-                  key={hit.id}
-                  type="button"
-                  role="option"
-                  aria-selected={idx === highlight}
-                  className={cn(
-                    "flex w-full flex-col gap-0.5 border-b px-3 py-2 text-left last:border-b-0",
-                    idx === highlight ? "bg-muted" : "hover:bg-muted/50",
-                  )}
-                  onMouseEnter={() => setHighlight(idx)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    void pick(hit);
-                  }}
-                >
-                  <div className="truncate font-mono text-[11px] leading-snug tracking-tight uppercase sm:text-xs">
-                    {formatContactPipeRow(hit)}
-                  </div>
-                  <div className="flex flex-wrap gap-x-3 text-[10px] text-muted-foreground">
-                    <span>Last Used {formatLastUsed(hit.last_used_at)}</span>
-                    {hit.shipment_count > 0 ? (
-                      <span>{hit.shipment_count} shipment{hit.shipment_count === 1 ? "" : "s"}</span>
-                    ) : null}
-                    {hit.email ? <span>{hit.email}</span> : null}
-                  </div>
-                </button>
-              ))}
+              <button
+                key={hit.id}
+                type="button"
+                role="option"
+                aria-selected={idx === highlight}
+                className={cn(
+                  "flex w-full border-b px-3 py-2 text-left last:border-b-0",
+                  idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-muted/50",
+                )}
+                onMouseEnter={() => setHighlight(idx)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  void pick(hit);
+                }}
+              >
+                {manualSearch ? (
+                  <LookupAutocompleteCompanyRow
+                    name={hit.name}
+                    code={hit.code}
+                    query={activeHighlightQuery}
+                    highlighted={idx === highlight}
+                  />
+                ) : (
+                  <>
+                    <div className="truncate font-mono text-[11px] leading-snug tracking-tight uppercase sm:text-xs">
+                      {formatContactPipeRow(hit)}
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 text-[10px] text-muted-foreground">
+                      <span>Last Used {formatLastUsed(hit.last_used_at)}</span>
+                      {hit.shipment_count > 0 ? (
+                        <span>
+                          {hit.shipment_count} shipment{hit.shipment_count === 1 ? "" : "s"}
+                        </span>
+                      ) : null}
+                      {hit.email ? <span>{hit.email}</span> : null}
+                    </div>
+                  </>
+                )}
+              </button>
+            ))}
           </LookupDropdownPortal>
         ) : null}
       </div>
