@@ -156,6 +156,8 @@ export function SearchableLookupPair({
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const explicitSearchSeqRef = useRef(0);
+  /** AWB manual mode: skip typeahead until the user edits (presets like default Origin stay closed). */
+  const manualQueryEditedRef = useRef(false);
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupQuery, setPopupQuery] = useState("");
   const [inlineOpen, setInlineOpen] = useState(false);
@@ -246,9 +248,11 @@ export function SearchableLookupPair({
   }, [debouncedInline, inlineOpen, manualDropdownRows, debouncedManualQuery]);
 
   useEffect(() => {
-    if (!canDebouncedManualSearch) {
-      setManualDropdownOpen(false);
-      setManualDropdownRows([]);
+    if (!canDebouncedManualSearch || !manualQueryEditedRef.current) {
+      if (!canDebouncedManualSearch) {
+        setManualDropdownOpen(false);
+        setManualDropdownRows([]);
+      }
       return;
     }
 
@@ -303,6 +307,7 @@ export function SearchableLookupPair({
       const next = { id: hit.id, code: hit.code, name: hit.name };
       onChange(next);
       onSelect?.(next);
+      manualQueryEditedRef.current = false;
       setInlineOpen(false);
       setInlineQuery("");
       setManualDropdownOpen(false);
@@ -322,6 +327,7 @@ export function SearchableLookupPair({
   );
 
   const clearManualDropdown = useCallback(() => {
+    manualQueryEditedRef.current = false;
     setManualDropdownOpen(false);
     setManualDropdownRows([]);
     setHighlight(0);
@@ -502,12 +508,17 @@ export function SearchableLookupPair({
       disabled={disabled}
       onChange={(e) => {
         const name = e.target.value;
+        manualQueryEditedRef.current = true;
         onChange({ ...value, id: undefined, name });
         if (!manualSearch) startInlineFrom("name", name);
       }}
       onFocus={() => {
         if (manualSearch) {
-          if (manualQueryRaw.length >= minChars && manualDropdownRows.length > 0) {
+          if (
+            manualQueryEditedRef.current &&
+            manualQueryRaw.length >= minChars &&
+            manualDropdownRows.length > 0
+          ) {
             setManualDropdownOpen(true);
           }
         } else if (value.name.trim().length >= minChars) {
@@ -536,6 +547,7 @@ export function SearchableLookupPair({
           ? undefined
           : (e) => {
               const code = e.target.value;
+              manualQueryEditedRef.current = true;
               onChange({ ...value, id: undefined, code });
               if (!manualSearch) startInlineFrom("code", code);
             }
@@ -545,7 +557,11 @@ export function SearchableLookupPair({
           ? undefined
           : () => {
               if (manualSearch) {
-                if (manualQueryRaw.length >= minChars && manualDropdownRows.length > 0) {
+                if (
+                  manualQueryEditedRef.current &&
+                  manualQueryRaw.length >= minChars &&
+                  manualDropdownRows.length > 0
+                ) {
                   setManualDropdownOpen(true);
                 }
               } else if (value.code.trim().length >= minChars) {

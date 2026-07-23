@@ -40,10 +40,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
-import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
+import { mapCsvToImportRows } from "@/lib/masters/core";
 import type { CsvRecord } from "@/lib/masters/core/csv";
 import {
   countryPincodesResource,
+  COUNTRY_PINCODE_IMPORT_HEADER_ALIASES,
+  prepareCountryPincodeImportRows,
   type CountryPincodeRow as CountryPincodeDbRow,
 } from "@/lib/masters/resources/countryPincodes";
 import {
@@ -406,10 +408,7 @@ function CountryPincodesPage() {
   const handleImportRows = async (parsedRows: CsvRecord[]) => {
     try {
       if (authed) {
-        const importRows = mapCsvToImportRows(
-          parsedRows,
-          countryPincodesResource.importColumns,
-        ) as ImportRow[];
+        const importRows = await prepareCountryPincodeImportRows(parsedRows);
         const res = await rc.commitImport.mutateAsync(importRows);
         const toastRes = formatImportToast(res);
         if (toastRes.ok) toast.success(toastRes.message);
@@ -418,15 +417,17 @@ function CountryPincodesPage() {
         return;
       }
       const imported: CountryPincodeRow[] = [];
-      for (const rec of parsedRows) {
-        const pinCode = (rec["Pincode"] ?? rec["pin_code"] ?? "").trim();
+      for (const rec of mapCsvToImportRows(parsedRows, countryPincodesResource.importColumns, {
+        aliases: COUNTRY_PINCODE_IMPORT_HEADER_ALIASES,
+      })) {
+        const pinCode = rec.pin_code.trim();
         if (!pinCode) continue;
         imported.push({
           id: crypto.randomUUID(),
           pinCode,
-          cityName: (rec["City Name"] ?? rec["city_name"] ?? "").trim(),
-          stateName: (rec["State Name"] ?? rec["state_name"] ?? "").trim(),
-          countryName: (rec["Country Name"] ?? rec["country_name"] ?? "").trim(),
+          cityName: rec.city_name.trim(),
+          stateName: rec.state_name.trim(),
+          countryName: rec.country_code.trim(),
         });
       }
       if (imported.length === 0) {

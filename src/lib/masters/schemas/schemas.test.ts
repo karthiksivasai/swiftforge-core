@@ -41,17 +41,43 @@ describe("countryCreateSchema", () => {
 });
 
 describe("areaCreateSchema", () => {
-  it("uppercases name and passes through the branch uuid", () => {
-    const out = areaCreateSchema.parse({ branch_id: UUID, name: "south zone" });
-    expect(out).toEqual({ branch_id: UUID, name: "SOUTH ZONE", destination_id: null });
+  it("uppercases name and passes through branch and service center uuids", () => {
+    const out = areaCreateSchema.parse({
+      branch_id: UUID,
+      service_center_id: "22222222-2222-2222-2222-222222222222",
+      name: "south zone",
+    });
+    expect(out).toEqual({
+      branch_id: UUID,
+      service_center_id: "22222222-2222-2222-2222-222222222222",
+      name: "SOUTH ZONE",
+      destination_id: null,
+    });
   });
 
   it("requires a valid branch uuid", () => {
-    expect(() => areaCreateSchema.parse({ branch_id: "", name: "X" })).toThrow(/Branch/);
+    expect(() =>
+      areaCreateSchema.parse({
+        branch_id: "",
+        service_center_id: UUID,
+        name: "X",
+      }),
+    ).toThrow(/Branch/);
+  });
+
+  it("requires a valid service center uuid", () => {
+    expect(() => areaCreateSchema.parse({ branch_id: UUID, service_center_id: "", name: "X" })).toThrow(
+      /Service Center/,
+    );
   });
 
   it("normalizes an empty optional fk to null", () => {
-    const out = areaCreateSchema.parse({ branch_id: UUID, name: "x", destination_id: "" });
+    const out = areaCreateSchema.parse({
+      branch_id: UUID,
+      service_center_id: UUID,
+      name: "x",
+      destination_id: "",
+    });
     expect(out.destination_id).toBeNull();
   });
 });

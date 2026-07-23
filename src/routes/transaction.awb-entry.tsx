@@ -15,6 +15,7 @@ import {
   List,
   Copy,
   Cloud,
+  FileSpreadsheet,
   Loader2,
   Check,
 } from "lucide-react";
@@ -780,14 +781,14 @@ const emptyParty = (): PartyDetails => ({
 
 const emptyPiecesDraft = (): PiecesDraft => ({
   measurementUnit: "Centimeter",
-  actualWeightPerPc: "",
+  actualWeightPerPc: "0",
   noOfPieces: "1",
-  length: "",
-  width: "",
-  height: "",
+  length: "0",
+  width: "0",
+  height: "0",
   division: "5000",
-  volWeight: "0",
-  chargeWeight: "0",
+  volWeight: "0.000",
+  chargeWeight: "0.000",
 });
 
 const emptyChargeDraft = (): ChargeDraft => ({
@@ -908,15 +909,15 @@ const calcVolWeight = (draft: PiecesDraft) => {
   const h = Number.parseFloat(draft.height) || 0;
   const pcs = Number.parseFloat(draft.noOfPieces) || 0;
   const div = Number.parseFloat(draft.division) || 5000;
-  if (!l || !w || !h || !pcs || !div) return "0";
-  return ((l * w * h * pcs) / div).toFixed(2);
+  if (!l || !w || !h || !pcs || !div) return "0.000";
+  return ((l * w * h * pcs) / div).toFixed(3);
 };
 
 const calcChargeWeight = (draft: PiecesDraft) => {
   const vol = Number.parseFloat(calcVolWeight(draft)) || 0;
   const act =
     (Number.parseFloat(draft.actualWeightPerPc) || 0) * (Number.parseFloat(draft.noOfPieces) || 0);
-  return Math.max(vol, act).toFixed(2);
+  return Math.max(vol, act).toFixed(3);
 };
 
 const formatListWeightDisplay = (value: string): string => {
@@ -3416,43 +3417,48 @@ function AwbEntryPage() {
                         className={cn("h-4 w-4 transition-transform", piecesOpen && "rotate-180")}
                       />
                     </CollapsibleTrigger>
-                    <CollapsibleContent className="border border-t-0 p-4">
-                      <div className="mb-3 flex flex-wrap items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            toast.info("Import MTS will be enabled with backend wiring")
-                          }
-                        >
+                    <CollapsibleContent className="border border-t-0 bg-card">
+                      <div className="relative mx-3 mt-3 rounded border border-border bg-card p-3 pt-5">
+                        <span className="absolute left-2.5 top-0 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[13px] font-semibold leading-none text-sidebar-foreground">
                           Import MTS
-                        </Button>
-                        <Button
-                          variant="link"
-                          size="sm"
-                          className="h-auto p-0 text-emerald-600"
-                          onClick={() =>
-                            toast.info("Excel format download will be enabled with backend wiring")
-                          }
-                        >
-                          Download Excel File Format
-                        </Button>
-                        <Input type="file" className="max-w-[200px] h-9" />
-                        <Button
-                          size="sm"
-                          className="bg-emerald-600 text-white hover:bg-emerald-600/90 gap-1"
-                        >
-                          <Upload className="h-3.5 w-3.5" />
-                          Upload
-                        </Button>
+                        </span>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                          <Button
+                            type="button"
+                            variant="link"
+                            size="sm"
+                            className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
+                            onClick={() =>
+                              toast.info("Excel format download will be enabled with backend wiring")
+                            }
+                          >
+                            <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                            Download Excel File Format
+                          </Button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm text-foreground">Select File</span>
+                            <Input type="file" className="h-8 max-w-[220px] text-[13px]" />
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
+                              onClick={() =>
+                                toast.info("Import MTS will be enabled with backend wiring")
+                              }
+                            >
+                              Upload
+                            </Button>
+                          </div>
+                        </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-9">
-                        <FieldWrapper label="Measurement Unit">
+
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(7.5rem,1.2fr)_minmax(5.25rem,0.85fr)_minmax(4.75rem,0.8fr)_repeat(3,minmax(3.75rem,0.72fr))_minmax(4.5rem,0.78fr)_minmax(11.5rem,1.35fr)_minmax(5.25rem,0.85fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                        <FieldWrapper borderLabel label="Measurement Unit">
                           <Select
                             value={piecesDraft.measurementUnit}
                             onValueChange={(v) => patchPiecesDraft({ measurementUnit: v })}
                           >
-                            <SelectTrigger>
+                            <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -3464,65 +3470,81 @@ function AwbEntryPage() {
                             </SelectContent>
                           </Select>
                         </FieldWrapper>
-                        <FieldWrapper label="Actl Weight/PCS">
+                        <FieldWrapper borderLabel label="Actl Weight/PCS">
                           <Input
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.actualWeightPerPc}
                             onChange={(e) =>
                               patchPiecesDraft({ actualWeightPerPc: e.target.value })
                             }
                           />
                         </FieldWrapper>
-                        <FieldWrapper label="No. Of Pieces">
+                        <FieldWrapper borderLabel label="No. Of Pieces">
                           <Input
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.noOfPieces}
                             onChange={(e) => patchPiecesDraft({ noOfPieces: e.target.value })}
                           />
                         </FieldWrapper>
-                        <FieldWrapper label="Length">
+                        <FieldWrapper borderLabel label="Length">
                           <Input
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.length}
                             onChange={(e) => patchPiecesDraft({ length: e.target.value })}
                           />
                         </FieldWrapper>
-                        <FieldWrapper label="Width">
+                        <FieldWrapper borderLabel label="Width">
                           <Input
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.width}
                             onChange={(e) => patchPiecesDraft({ width: e.target.value })}
                           />
                         </FieldWrapper>
-                        <FieldWrapper label="Height">
+                        <FieldWrapper borderLabel label="Height">
                           <Input
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.height}
                             onChange={(e) => patchPiecesDraft({ height: e.target.value })}
                           />
                         </FieldWrapper>
-                        <FieldWrapper label="Division">
+                        <FieldWrapper borderLabel label="Division">
                           <Input
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.division}
                             onChange={(e) => patchPiecesDraft({ division: e.target.value })}
                           />
                         </FieldWrapper>
-                        <FieldWrapper label="Vol Weight (Discount - 0 %)">
-                          <Input value={piecesDraft.volWeight} readOnly className="bg-muted/30" />
+                        <FieldWrapper
+                          borderLabel
+                          label="Vol Weight (Discount - 0 %)"
+                          className="sm:col-span-2 md:col-span-2 lg:col-span-2 xl:col-span-1"
+                        >
+                          <Input
+                            value={piecesDraft.volWeight}
+                            readOnly
+                            className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                          />
                         </FieldWrapper>
-                        <FieldWrapper label="Chrg Weight">
+                        <FieldWrapper borderLabel label="Chrg Weight">
                           <Input
                             value={piecesDraft.chargeWeight}
                             readOnly
-                            className="bg-muted/30"
+                            className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           />
                         </FieldWrapper>
+                        <div className="col-span-2 flex items-end justify-end sm:col-span-1 lg:col-span-1 xl:col-span-1">
+                          <Button
+                            type="button"
+                            className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                            onClick={addPiecesLine}
+                          >
+                            <Plus className="mr-1 h-4 w-4" />
+                            Add
+                          </Button>
+                        </div>
                       </div>
-                      <div className="mt-3 flex justify-end">
-                        <Button
-                          className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-                          onClick={addPiecesLine}
-                        >
-                          <Plus className="mr-1 h-4 w-4" />
-                          Add
-                        </Button>
-                      </div>
-                      <div className="mt-3 overflow-x-auto">
+
+                      <div className="overflow-x-auto border-t">
                         <table className="w-full min-w-[720px] text-sm">
                           <TableHeader>
                             <TableRow className="bg-sidebar hover:bg-sidebar">
@@ -3591,8 +3613,8 @@ function AwbEntryPage() {
                         className={cn("h-4 w-4 transition-transform", chargesOpen && "rotate-180")}
                       />
                     </CollapsibleTrigger>
-                    <CollapsibleContent className="border border-t-0 p-4">
-                      <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+                    <CollapsibleContent className="border border-t-0 bg-card">
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-4 xl:grid-cols-8 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                         {(
                           [
                             ["Contract Charges", chargeSummary.contractCharges],
@@ -3605,17 +3627,22 @@ function AwbEntryPage() {
                             ["Total Amount", chargeSummary.totalAmount],
                           ] as const
                         ).map(([label, val]) => (
-                          <FieldWrapper key={label} label={label}>
-                            <Input value={val} readOnly className="bg-muted/30" />
+                          <FieldWrapper key={label} borderLabel label={label}>
+                            <Input
+                              value={val}
+                              readOnly
+                              className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            />
                           </FieldWrapper>
                         ))}
                       </div>
                       {authed && editing?.id ? (
-                        <div className="mb-3 flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-2 border-b px-3 py-2.5">
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
+                            className="h-8"
                             disabled={saving || isReadOnly}
                             onClick={() => {
                               void (async () => {
@@ -3638,6 +3665,7 @@ function AwbEntryPage() {
                             type="button"
                             size="sm"
                             variant="outline"
+                            className="h-8"
                             disabled={saving || isReadOnly}
                             onClick={() => {
                               void (async () => {
@@ -3668,8 +3696,8 @@ function AwbEntryPage() {
                           ) : null}
                         </div>
                       ) : null}
-                      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-7">
-                        <FieldWrapper label="Description">
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                        <FieldWrapper borderLabel label="Description" required>
                           <Select
                             value={chargeDraft.description || undefined}
                             onValueChange={(v) =>
@@ -3680,7 +3708,7 @@ function AwbEntryPage() {
                               }))
                             }
                           >
-                            <SelectTrigger>
+                            <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
                               <SelectValue placeholder="Select" />
                             </SelectTrigger>
                             <SelectContent>
@@ -3692,8 +3720,9 @@ function AwbEntryPage() {
                             </SelectContent>
                           </Select>
                         </FieldWrapper>
-                        <FieldWrapper label="Item Amount">
+                        <FieldWrapper borderLabel label="Item Amount" required>
                           <Input
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={chargeDraft.itemAmount}
                             onChange={(e) =>
                               setChargeDraft((d) => ({
@@ -3704,63 +3733,89 @@ function AwbEntryPage() {
                             }
                           />
                         </FieldWrapper>
-                        <FieldWrapper label="Item Fuel (0%)">
-                          <Select
-                            value={chargeDraft.itemFuel}
-                            onValueChange={(v) => setChargeDraft((d) => ({ ...d, itemFuel: v }))}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {YES_NO.map((v) => (
-                                <SelectItem key={v} value={v}>
-                                  {v}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                        <FieldWrapper borderLabel label="Item Fuel (0%)">
+                          <div className="flex w-full min-w-0 items-stretch">
+                            <Select
+                              value={chargeDraft.itemFuel}
+                              onValueChange={(v) => setChargeDraft((d) => ({ ...d, itemFuel: v }))}
+                            >
+                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {YES_NO.map((v) => (
+                                  <SelectItem key={v} value={v}>
+                                    {v}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              value="0.00"
+                              readOnly
+                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            />
+                          </div>
                         </FieldWrapper>
-                        <FieldWrapper label="Tax On Fuel">
-                          <Select
-                            value={chargeDraft.taxOnFuel}
-                            onValueChange={(v) => setChargeDraft((d) => ({ ...d, taxOnFuel: v }))}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {YES_NO.map((v) => (
-                                <SelectItem key={v} value={v}>
-                                  {v}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                        <FieldWrapper borderLabel label="Tax On Fuel">
+                          <div className="flex w-full min-w-0 items-stretch">
+                            <Select
+                              value={chargeDraft.taxOnFuel}
+                              onValueChange={(v) => setChargeDraft((d) => ({ ...d, taxOnFuel: v }))}
+                            >
+                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {YES_NO.map((v) => (
+                                  <SelectItem key={v} value={v}>
+                                    {v}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              value="0.00"
+                              readOnly
+                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            />
+                          </div>
                         </FieldWrapper>
-                        <FieldWrapper label="Tax">
-                          <Select
-                            value={chargeDraft.tax}
-                            onValueChange={(v) => setChargeDraft((d) => ({ ...d, tax: v }))}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {YES_NO.map((v) => (
-                                <SelectItem key={v} value={v}>
-                                  {v}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                        <FieldWrapper borderLabel label="Tax">
+                          <div className="flex w-full min-w-0 items-stretch">
+                            <Select
+                              value={chargeDraft.tax}
+                              onValueChange={(v) => setChargeDraft((d) => ({ ...d, tax: v }))}
+                            >
+                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {YES_NO.map((v) => (
+                                  <SelectItem key={v} value={v}>
+                                    {v}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              value="0.00"
+                              readOnly
+                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            />
+                          </div>
                         </FieldWrapper>
-                        <FieldWrapper label="Item Total">
-                          <Input value={chargeDraft.itemTotal} readOnly className="bg-muted/30" />
+                        <FieldWrapper borderLabel label="Item Total">
+                          <Input
+                            value={chargeDraft.itemTotal}
+                            readOnly
+                            className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                          />
                         </FieldWrapper>
-                        <div className="flex items-end">
+                        <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
                           <Button
-                            className="w-full bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+                            type="button"
+                            className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
                             onClick={addChargeLine}
                           >
                             <Plus className="mr-1 h-4 w-4" />
@@ -3768,7 +3823,7 @@ function AwbEntryPage() {
                           </Button>
                         </div>
                       </div>
-                      <div className="mt-3 overflow-x-auto">
+                      <div className="overflow-x-auto border-t">
                         <table className="w-full min-w-[960px] text-sm">
                           <TableHeader>
                             <TableRow className="bg-sidebar hover:bg-sidebar">
@@ -4005,13 +4060,13 @@ function AwbEntryPage() {
               <div className="p-4 md:p-6">
                 <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
                   <FormSection title="Manifest GST Detail">
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-                      <FieldWrapper label="CSB_Type">
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                      <FieldWrapper borderLabel label="CSB_Type">
                         <Select
                           value={form.proforma.csbType}
                           onValueChange={(v) => patchProforma({ csbType: v })}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -4023,12 +4078,12 @@ function AwbEntryPage() {
                           </SelectContent>
                         </Select>
                       </FieldWrapper>
-                      <FieldWrapper label="Term Of Invoice">
+                      <FieldWrapper borderLabel label="Term Of Invoice">
                         <Select
                           value={form.proforma.termOfInvoice || undefined}
                           onValueChange={(v) => patchProforma({ termOfInvoice: v })}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
                             <SelectValue placeholder="Select" />
                           </SelectTrigger>
                           <SelectContent>
@@ -4041,35 +4096,39 @@ function AwbEntryPage() {
                         </Select>
                       </FieldWrapper>
                       <YesNoField
+                        borderLabel
                         label="GST Invoice"
                         value={form.proforma.gstInvoice}
                         onChange={(v) => patchProforma({ gstInvoice: v })}
                       />
-                      <FieldWrapper label="Invoice No">
+                      <FieldWrapper borderLabel label="Invoice No">
                         <Input
+                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={form.proforma.invoiceNo}
                           onChange={(e) => patchProforma({ invoiceNo: e.target.value })}
                         />
                       </FieldWrapper>
-                      <FieldWrapper label="Invoice Date">
+                      <FieldWrapper borderLabel label="Invoice Date">
                         <Input
                           type="date"
+                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={form.proforma.invoiceDate}
                           onChange={(e) => patchProforma({ invoiceDate: e.target.value })}
                         />
                       </FieldWrapper>
-                      <FieldWrapper label="Department No">
+                      <FieldWrapper borderLabel label="Department No">
                         <Input
+                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={form.proforma.departmentNo}
                           onChange={(e) => patchProforma({ departmentNo: e.target.value })}
                         />
                       </FieldWrapper>
-                      <FieldWrapper label="Export Reason">
+                      <FieldWrapper borderLabel label="Export Reason">
                         <Select
                           value={form.proforma.exportReason}
                           onValueChange={(v) => patchProforma({ exportReason: v })}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -4081,12 +4140,12 @@ function AwbEntryPage() {
                           </SelectContent>
                         </Select>
                       </FieldWrapper>
-                      <FieldWrapper label="Format">
+                      <FieldWrapper borderLabel label="Format">
                         <Select
                           value={form.proforma.format || undefined}
                           onValueChange={(v) => patchProforma({ format: v })}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
                             <SelectValue placeholder="Select" />
                           </SelectTrigger>
                           <SelectContent>
@@ -4102,181 +4161,203 @@ function AwbEntryPage() {
                   </FormSection>
 
                   <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]">
-                    <FormSection title="Import Proforma">
-                      <div className="flex flex-wrap items-center gap-3">
+                    <div className="relative rounded border border-border bg-card p-3 pt-5">
+                      <span className="absolute left-2.5 top-0 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[13px] font-semibold leading-none text-sidebar-foreground">
+                        Import Proforma
+                      </span>
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                         <Button
+                          type="button"
                           variant="link"
                           size="sm"
-                          className="h-auto p-0 text-destructive"
+                          className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
                           onClick={() =>
                             toast.info("Excel format download will be enabled with backend wiring")
                           }
                         >
+                          <FileSpreadsheet className="h-4 w-4 shrink-0" />
                           Download Excel File Format
                         </Button>
-                        <Input type="file" className="max-w-[220px] h-9" />
-                        <Button
-                          size="sm"
-                          className="bg-emerald-600 text-white hover:bg-emerald-600/90 gap-1"
-                          onClick={() =>
-                            toast.info("Proforma import will be enabled with backend wiring")
-                          }
-                        >
-                          <Upload className="h-3.5 w-3.5" />
-                          Upload
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm text-foreground">Select File</span>
+                          <Input type="file" className="h-8 max-w-[220px] text-[13px]" />
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
+                            onClick={() =>
+                              toast.info("Proforma import will be enabled with backend wiring")
+                            }
+                          >
+                            <Upload className="h-3.5 w-3.5" />
+                            Upload
+                          </Button>
+                        </div>
                       </div>
-                    </FormSection>
-                    <FormSection title="Currency" className="min-w-[12rem]">
-                      <Select
-                        value={form.proforma.currency}
-                        onValueChange={(v) => patchProforma({ currency: v })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-64">
-                          {PROFORMA_CURRENCIES.map((c) => (
-                            <SelectItem key={c} value={c}>
-                              {c}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FormSection>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-11">
-                    <FieldWrapper label="Box No">
-                      <Select
-                        value={proformaDraft.boxNo}
-                        onValueChange={(v) => patchProformaDraft({ boxNo: v })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {BOX_NUMBERS.map((b) => (
-                            <SelectItem key={b} value={b}>
-                              {b}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FieldWrapper>
-                    <FieldWrapper label="Packages">
-                      <Input
-                        value={proformaDraft.packages}
-                        onChange={(e) => patchProformaDraft({ packages: e.target.value })}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper label="Description">
-                      <Input
-                        value={proformaDraft.description}
-                        onChange={(e) => patchProformaDraft({ description: e.target.value })}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper label="HSN Code">
-                      <Input
-                        value={proformaDraft.hsnCode}
-                        onChange={(e) => patchProformaDraft({ hsnCode: e.target.value })}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper label="Quantity">
-                      <Input
-                        value={proformaDraft.quantity}
-                        onChange={(e) => patchProformaDraft({ quantity: e.target.value })}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper label="Weight">
-                      <Input
-                        value={proformaDraft.weight}
-                        onChange={(e) => patchProformaDraft({ weight: e.target.value })}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper label="Unit">
-                      <div className="flex gap-1">
+                    </div>
+                    <div className="min-w-[12rem]">
+                      <FormSection title="Currency">
                         <Select
-                          value={proformaDraft.unit}
-                          onValueChange={(v) => patchProformaDraft({ unit: v })}
+                          value={form.proforma.currency}
+                          onValueChange={(v) => patchProforma({ currency: v })}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="h-8 text-[13px]">
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent>
-                            {proformaUnits.map((u) => (
-                              <SelectItem key={u} value={u}>
-                                {u}
+                          <SelectContent className="max-h-64">
+                            {PROFORMA_CURRENCIES.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          title="Add custom unit"
-                          aria-label="Add custom unit"
-                          className="shrink-0 px-2"
-                          onClick={() => {
-                            setNewUnitInput("");
-                            setAddUnitOpen(true);
-                          }}
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </FieldWrapper>
-                    <FieldWrapper label="Rate">
-                      <Input
-                        value={proformaDraft.rate}
-                        onChange={(e) => patchProformaDraft({ rate: e.target.value })}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            addProformaLine();
-                          }
-                        }}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper label="Amount">
-                      <Input value={proformaDraft.amount} readOnly className="bg-muted/30" />
-                    </FieldWrapper>
-                    <div className="flex items-end lg:col-span-2">
-                      <Button
-                        type="button"
-                        className="w-full bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-                        onClick={addProformaLine}
-                      >
-                        <Plus className="mr-1 h-4 w-4" />
-                        Add line
-                      </Button>
+                      </FormSection>
                     </div>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap gap-4 text-sm">
-                    <span>
-                      Total Record:{" "}
-                      <span className="font-semibold text-primary">
-                        {proformaSummary.totalRecord}
-                      </span>
-                    </span>
-                    <span>
-                      Quantity:{" "}
-                      <span className="font-semibold text-primary">{proformaSummary.quantity}</span>
-                    </span>
-                    <span>
-                      Weight:{" "}
-                      <span className="font-semibold text-primary">{proformaSummary.weight}</span>
-                    </span>
-                    <span>
-                      Amount:{" "}
-                      <span className="font-semibold text-primary">{proformaSummary.amount}</span>
-                    </span>
-                  </div>
+                  <div className="mt-4 rounded-md border bg-card">
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(4rem,0.72fr)_minmax(4.5rem,0.78fr)_minmax(8rem,1.35fr)_minmax(5rem,0.9fr)_minmax(3.75rem,0.68fr)_minmax(3.75rem,0.68fr)_minmax(6.75rem,1fr)_minmax(3.75rem,0.68fr)_minmax(4.25rem,0.75fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                      <FieldWrapper borderLabel label="Box No">
+                        <Select
+                          value={proformaDraft.boxNo}
+                          onValueChange={(v) => patchProformaDraft({ boxNo: v })}
+                        >
+                          <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {BOX_NUMBERS.map((b) => (
+                              <SelectItem key={b} value={b}>
+                                {b}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="Packages">
+                        <Input
+                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                          value={proformaDraft.packages}
+                          onChange={(e) => patchProformaDraft({ packages: e.target.value })}
+                        />
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="Description">
+                        <Input
+                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                          value={proformaDraft.description}
+                          onChange={(e) => patchProformaDraft({ description: e.target.value })}
+                        />
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="HSN Code">
+                        <Input
+                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                          value={proformaDraft.hsnCode}
+                          onChange={(e) => patchProformaDraft({ hsnCode: e.target.value })}
+                        />
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="Quantity">
+                        <Input
+                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                          value={proformaDraft.quantity}
+                          onChange={(e) => patchProformaDraft({ quantity: e.target.value })}
+                        />
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="Weight">
+                        <Input
+                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                          value={proformaDraft.weight}
+                          onChange={(e) => patchProformaDraft({ weight: e.target.value })}
+                        />
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="Unit">
+                        <div className="flex w-full min-w-0 items-stretch">
+                          <Select
+                            value={proformaDraft.unit}
+                            onValueChange={(v) => patchProformaDraft({ unit: v })}
+                          >
+                            <SelectTrigger className="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {proformaUnits.map((u) => (
+                                <SelectItem key={u} value={u}>
+                                  {u}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            title="Add custom unit"
+                            aria-label="Add custom unit"
+                            className="h-8 w-8 shrink-0 rounded-none border-0 border-l border-input px-0 shadow-none"
+                            onClick={() => {
+                              setNewUnitInput("");
+                              setAddUnitOpen(true);
+                            }}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="Rate">
+                        <Input
+                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                          value={proformaDraft.rate}
+                          onChange={(e) => patchProformaDraft({ rate: e.target.value })}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              addProformaLine();
+                            }
+                          }}
+                        />
+                      </FieldWrapper>
+                      <FieldWrapper borderLabel label="Amount">
+                        <Input
+                          value={proformaDraft.amount}
+                          readOnly
+                          className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                        />
+                      </FieldWrapper>
+                      <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
+                        <Button
+                          type="button"
+                          className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                          onClick={addProformaLine}
+                        >
+                          <Plus className="mr-1 h-4 w-4" />
+                          Add line
+                        </Button>
+                      </div>
+                    </div>
 
-                  <div className="mt-3 overflow-x-auto">
-                    <table className="w-full min-w-[960px] text-sm">
+                    <div className="flex flex-wrap gap-4 border-t px-3 py-2.5 text-sm">
+                      <span>
+                        Total Record:{" "}
+                        <span className="font-semibold text-primary">
+                          {proformaSummary.totalRecord}
+                        </span>
+                      </span>
+                      <span>
+                        Quantity:{" "}
+                        <span className="font-semibold text-primary">{proformaSummary.quantity}</span>
+                      </span>
+                      <span>
+                        Weight:{" "}
+                        <span className="font-semibold text-primary">{proformaSummary.weight}</span>
+                      </span>
+                      <span>
+                        Amount:{" "}
+                        <span className="font-semibold text-primary">{proformaSummary.amount}</span>
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto border-t">
+                      <table className="w-full min-w-[960px] text-sm">
                       <TableHeader>
                         <TableRow className="bg-sidebar hover:bg-sidebar">
                           {[
@@ -4342,6 +4423,7 @@ function AwbEntryPage() {
                         )}
                       </TableBody>
                     </table>
+                    </div>
                   </div>
                 </div>
                 <div className="mt-6">
@@ -4365,54 +4447,59 @@ function AwbEntryPage() {
             <TabsContent value="forwarding" className="mt-0">
               <div className="p-4 md:p-6">
                 <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-                    <FieldWrapper label="Delivery AWB">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                    <FieldWrapper borderLabel label="Delivery AWB">
                       <Input
+                        className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                         value={form.forwarding.deliveryAwb}
                         onChange={(e) => patchForwarding({ deliveryAwb: e.target.value })}
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Forwarding AWB">
+                    <FieldWrapper borderLabel label="Forwarding AWB">
                       <Input
+                        className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                         value={form.forwarding.forwardingAwb}
                         onChange={(e) => patchForwarding({ forwardingAwb: e.target.value })}
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Delivery Product">
+                    <FieldWrapper borderLabel lookupSplit label="Delivery Product">
                       <LookupPairInput
                         lookup="product"
                         value={form.forwarding.deliveryProduct}
                         onChange={(v) => patchForwarding({ deliveryProduct: v })}
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Delivery Vendor">
+                    <FieldWrapper borderLabel lookupSplit label="Delivery Vendor">
                       <LookupPairInput
                         lookup="vendor"
                         value={form.forwarding.deliveryVendor}
                         onChange={(v) => patchForwarding({ deliveryVendor: v })}
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Delivery Service">
+                    <FieldWrapper borderLabel lookupSplit label="Delivery Service">
                       <LookupPairInput
                         lookup="product"
                         value={form.forwarding.deliveryService}
                         onChange={(v) => patchForwarding({ deliveryService: v })}
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Vendor Weight">
+                    <FieldWrapper borderLabel label="Vendor Weight">
                       <Input
+                        className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                         value={form.forwarding.vendorWeight}
                         onChange={(e) => patchForwarding({ vendorWeight: e.target.value })}
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Vendor Amount">
+                    <FieldWrapper borderLabel label="Vendor Amount">
                       <Input
+                        className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                         value={form.forwarding.vendorAmount}
                         onChange={(e) => patchForwarding({ vendorAmount: e.target.value })}
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Vendor Invoice">
+                    <FieldWrapper borderLabel label="Vendor Invoice">
                       <Input
+                        className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                         value={form.forwarding.vendorInvoice}
                         onChange={(e) => patchForwarding({ vendorInvoice: e.target.value })}
                       />
@@ -4433,8 +4520,8 @@ function AwbEntryPage() {
                         )}
                       />
                     </CollapsibleTrigger>
-                    <CollapsibleContent className="border border-t-0 p-4">
-                      <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+                    <CollapsibleContent className="border border-t-0 bg-card">
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-4 xl:grid-cols-8 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                         {(
                           [
                             ["Contract Charges", vendorChargeSummary.contractCharges],
@@ -4447,20 +4534,22 @@ function AwbEntryPage() {
                             ["Total Amount", vendorChargeSummary.totalAmount],
                           ] as const
                         ).map(([label, val]) => (
-                          <FieldWrapper key={label} label={label}>
-                            <Input value={val} readOnly className="bg-muted/30" />
+                          <FieldWrapper key={label} borderLabel label={label}>
+                            <Input
+                              value={val}
+                              readOnly
+                              className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            />
                           </FieldWrapper>
                         ))}
                       </div>
-                      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-8">
-                        <FieldWrapper label="Description" required>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                        <FieldWrapper borderLabel label="Description" required>
                           <Select
                             value={vendorChargeDraft.description || undefined}
                             onValueChange={(v) => patchVendorChargeDraft({ description: v })}
                           >
-                            <SelectTrigger
-                              className={cn(!vendorChargeDraft.description && "border-destructive")}
-                            >
+                            <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
                               <SelectValue placeholder="Select" />
                             </SelectTrigger>
                             <SelectContent>
@@ -4472,20 +4561,20 @@ function AwbEntryPage() {
                             </SelectContent>
                           </Select>
                         </FieldWrapper>
-                        <FieldWrapper label="Amount" required>
+                        <FieldWrapper borderLabel label="Amount" required>
                           <Input
-                            className={cn(!vendorChargeDraft.amount.trim() && "border-destructive")}
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={vendorChargeDraft.amount}
                             onChange={(e) => patchVendorChargeDraft({ amount: e.target.value })}
                           />
                         </FieldWrapper>
-                        <FieldWrapper label="Fuel(0)">
-                          <div className="flex gap-1">
+                        <FieldWrapper borderLabel label="Fuel(0)">
+                          <div className="flex w-full min-w-0 items-stretch">
                             <Select
                               value={vendorChargeDraft.fuel}
                               onValueChange={(v) => patchVendorChargeDraft({ fuel: v })}
                             >
-                              <SelectTrigger className="w-20">
+                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -4499,17 +4588,17 @@ function AwbEntryPage() {
                             <Input
                               value={vendorChargeDraft.fuelAmt}
                               readOnly
-                              className="bg-muted/30"
+                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             />
                           </div>
                         </FieldWrapper>
-                        <FieldWrapper label="Tax On Fuel">
-                          <div className="flex gap-1">
+                        <FieldWrapper borderLabel label="Tax On Fuel">
+                          <div className="flex w-full min-w-0 items-stretch">
                             <Select
                               value={vendorChargeDraft.taxOnFuel}
                               onValueChange={(v) => patchVendorChargeDraft({ taxOnFuel: v })}
                             >
-                              <SelectTrigger className="w-20">
+                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -4523,17 +4612,17 @@ function AwbEntryPage() {
                             <Input
                               value={vendorChargeDraft.taxOnFuelAmt}
                               readOnly
-                              className="bg-muted/30"
+                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             />
                           </div>
                         </FieldWrapper>
-                        <FieldWrapper label="Tax">
-                          <div className="flex gap-1">
+                        <FieldWrapper borderLabel label="Tax">
+                          <div className="flex w-full min-w-0 items-stretch">
                             <Select
                               value={vendorChargeDraft.tax}
                               onValueChange={(v) => patchVendorChargeDraft({ tax: v })}
                             >
-                              <SelectTrigger className="w-20">
+                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -4547,16 +4636,21 @@ function AwbEntryPage() {
                             <Input
                               value={vendorChargeDraft.taxAmt}
                               readOnly
-                              className="bg-muted/30"
+                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             />
                           </div>
                         </FieldWrapper>
-                        <FieldWrapper label="Total">
-                          <Input value={vendorChargeDraft.total} readOnly className="bg-muted/30" />
+                        <FieldWrapper borderLabel label="Total">
+                          <Input
+                            value={vendorChargeDraft.total}
+                            readOnly
+                            className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                          />
                         </FieldWrapper>
-                        <div className="flex items-end lg:col-span-2">
+                        <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
                           <Button
-                            className="w-full bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+                            type="button"
+                            className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
                             onClick={addVendorChargeLine}
                           >
                             <Plus className="mr-1 h-4 w-4" />
@@ -4564,7 +4658,7 @@ function AwbEntryPage() {
                           </Button>
                         </div>
                       </div>
-                      <div className="mt-3 overflow-x-auto">
+                      <div className="overflow-x-auto border-t">
                         <table className="w-full min-w-[960px] text-sm">
                           <TableHeader>
                             <TableRow className="bg-sidebar hover:bg-sidebar">
@@ -5839,47 +5933,55 @@ function ShipmentDetailsFields({
   const onPaymentTypeChange = useErpSelectHandler((v: string) =>
     setForm((f) => ({ ...f, paymentType: v })),
   );
+  const inputClass = "h-8 px-1.5 text-[13px]";
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-      <FieldWrapper label="Payment Type">
-        <Select
-          value={form.paymentType || undefined}
-          onValueChange={onPaymentTypeChange}
-          disabled={isReadOnly || paymentTypeReadOnly || clientLoading}
-        >
-          <SelectTrigger {...erpNavOrder(AWB_NAV.PAYMENT_TYPE)}>
-            <SelectValue placeholder="Select" />
-          </SelectTrigger>
-          <SelectContent>
-            {PAYMENT_TYPES.map((p) => (
-              <SelectItem key={p} value={p}>
-                {p}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+      <div className="min-w-0">
+        <FieldWrapper borderLabel label="Payment Type">
+          <Select
+            value={form.paymentType || undefined}
+            onValueChange={onPaymentTypeChange}
+            disabled={isReadOnly || paymentTypeReadOnly || clientLoading}
+          >
+            <SelectTrigger
+              {...erpNavOrder(AWB_NAV.PAYMENT_TYPE)}
+              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+            >
+              <SelectValue placeholder="Select" />
+            </SelectTrigger>
+            <SelectContent>
+              {PAYMENT_TYPES.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FieldWrapper>
         {paymentTypeReadOnly ? (
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">
             Locked to Client Master. Enable “Allow Payment Type Override” in Form Setup to edit.
           </p>
         ) : null}
-      </FieldWrapper>
-      <FieldWrapper label="Content">
+      </div>
+      <FieldWrapper borderLabel label="Content">
         <ErpNavInput
           order={AWB_NAV.CONTENT}
+          className={inputClass}
           value={form.content}
           onValueChange={(v) => setForm((f) => ({ ...f, content: v }))}
         />
       </FieldWrapper>
-      <FieldWrapper label="Instruction">
+      <FieldWrapper borderLabel label="Instruction">
         <ErpNavInput
           order={AWB_NAV.INSTRUCTION}
+          className={inputClass}
           value={form.instruction}
           onValueChange={(v) => setForm((f) => ({ ...f, instruction: v }))}
         />
       </FieldWrapper>
-      <FieldWrapper label="Field Executive">
+      <FieldWrapper borderLabel lookupSplit label="Field Executive">
         <LookupPairInput
           lookup="fieldExecutive"
           value={form.fieldExecutive}
@@ -5887,36 +5989,40 @@ function ShipmentDetailsFields({
           navOrder={AWB_NAV.FIELD_EXECUTIVE}
         />
       </FieldWrapper>
-      <FieldWrapper label="Cash Receipt No.">
+      <FieldWrapper borderLabel label="Cash Receipt No.">
         <ErpNavInput
           order={AWB_NAV.CASH_RECEIPT_NO}
+          className={inputClass}
           value={form.cashReceiptNo}
           onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptNo: v }))}
         />
       </FieldWrapper>
-      <FieldWrapper label="Amount Received">
+      <FieldWrapper borderLabel label="Amount Received">
         <ErpNavInput
           order={AWB_NAV.AMOUNT_RECEIVED}
+          className={inputClass}
           value={form.amountReceived}
           onValueChange={(v) => setForm((f) => ({ ...f, amountReceived: v }))}
         />
       </FieldWrapper>
-      <FieldWrapper label="Balance Amount">
+      <FieldWrapper borderLabel label="Balance Amount">
         <ErpNavInput
           order={AWB_NAV.BALANCE_AMOUNT}
+          className={inputClass}
           value={form.balanceAmount}
           onValueChange={(v) => setForm((f) => ({ ...f, balanceAmount: v }))}
         />
       </FieldWrapper>
-      <FieldWrapper label="Cash Receipt Date">
+      <FieldWrapper borderLabel label="Cash Receipt Date">
         <ErpNavDateInput
           order={AWB_NAV.CASH_RECEIPT_DATE}
+          className={inputClass}
           value={form.cashReceiptDate}
           onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptDate: v }))}
         />
       </FieldWrapper>
-      <div className="flex items-end pb-1">
-        <div className="flex items-center gap-2">
+      <div className="col-span-2 flex items-end lg:col-span-4">
+        <div className="flex items-center gap-2 pt-1.5">
           <Checkbox
             id="lock"
             checked={form.lock}
@@ -6013,43 +6119,60 @@ function YesNoField({
   label,
   value,
   onChange,
+  borderLabel,
 }: {
   label: string;
   value: boolean;
   onChange: (v: boolean) => void;
+  borderLabel?: boolean;
 }) {
-  return (
-    <FieldWrapper label={label}>
-      <div className="flex h-9 overflow-hidden rounded-md border">
-        <Button
-          type="button"
-          variant="ghost"
-          className={cn(
-            "h-9 flex-1 rounded-none",
-            value
-              ? "bg-emerald-600 text-white hover:bg-emerald-600/90 hover:text-white"
-              : "text-muted-foreground hover:bg-muted/60",
-          )}
-          onClick={() => onChange(true)}
-        >
-          Yes
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          className={cn(
-            "h-9 flex-1 rounded-none border-l",
-            !value
-              ? "bg-emerald-600 text-white hover:bg-emerald-600/90 hover:text-white"
-              : "text-muted-foreground hover:bg-muted/60",
-          )}
-          onClick={() => onChange(false)}
-        >
-          No
-        </Button>
-      </div>
-    </FieldWrapper>
+  const toggle = (
+    <div
+      className={cn(
+        "flex w-full min-w-0 items-stretch overflow-hidden",
+        !borderLabel && "h-9 rounded-md border",
+      )}
+    >
+      <Button
+        type="button"
+        variant="ghost"
+        className={cn(
+          "h-8 flex-1 rounded-none px-2 text-[13px]",
+          !borderLabel && "h-9",
+          value
+            ? "bg-emerald-600 text-white hover:bg-emerald-600/90 hover:text-white"
+            : "text-muted-foreground hover:bg-muted/60",
+        )}
+        onClick={() => onChange(true)}
+      >
+        Yes
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        className={cn(
+          "h-8 flex-1 rounded-none border-l px-2 text-[13px]",
+          !borderLabel && "h-9",
+          !value
+            ? "bg-emerald-600 text-white hover:bg-emerald-600/90 hover:text-white"
+            : "text-muted-foreground hover:bg-muted/60",
+        )}
+        onClick={() => onChange(false)}
+      >
+        No
+      </Button>
+    </div>
   );
+
+  if (borderLabel) {
+    return (
+      <FieldWrapper borderLabel label={label}>
+        {toggle}
+      </FieldWrapper>
+    );
+  }
+
+  return <FieldWrapper label={label}>{toggle}</FieldWrapper>;
 }
 
 function LookupPairInput({

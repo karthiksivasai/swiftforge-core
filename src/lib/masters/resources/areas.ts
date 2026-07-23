@@ -10,6 +10,7 @@ import {
 
 export type AreaRow = BaseRow & {
   branch_id: string;
+  service_center_id: string | null;
   name: string;
   destination_id: string | null;
 };
@@ -21,7 +22,7 @@ export const areasResource: MasterResource<AreaRow, AreaCreate, AreaUpdate> = {
   permission: GEO_MASTER_PERMISSIONS.areas,
   label: { singular: "Area", plural: "Areas" },
   columns:
-    "id, tenant_id, branch_id, name, destination_id, created_at, created_by, updated_at, updated_by, deleted_at, row_version",
+    "id, tenant_id, branch_id, service_center_id, name, destination_id, created_at, created_by, updated_at, updated_by, deleted_at, row_version",
   searchColumns: ["name"],
   orderBy: "name",
   ascending: true,

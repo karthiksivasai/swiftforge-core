@@ -57,12 +57,14 @@ import {
   toErrorMessage,
   formatImportToast,
 } from "@/lib/masters/screen";
-import { LookupCombobox, EntityCombobox } from "@/components/masters/lookup-combobox";
+import { LookupCombobox } from "@/components/masters/lookup-combobox";
+import type { LookupItem } from "@/lib/masters/core/lookup";
 
 type AreaRow = {
   id: string;
   areaName: string;
   serviceCenter: string;
+  serviceCenterId?: string;
   destination: string;
   branchId?: string;
   destinationId?: string;
@@ -72,6 +74,7 @@ type AreaRow = {
 type AreaForm = {
   areaName: string;
   serviceCenter: string;
+  serviceCenterId?: string;
   destination: string;
   branchId?: string;
   destinationId?: string;
@@ -98,8 +101,28 @@ const SEED_ROWS: Omit<AreaRow, "id">[] = [
 const emptyForm = (): AreaForm => ({
   areaName: "",
   serviceCenter: "HYD",
+  serviceCenterId: "",
   destination: SERVICE_CENTER_DESTINATIONS.HYD,
 });
+
+function resolveBranchId(
+  item: LookupItem | null,
+  branchOptions: { id: string; code: string | null; name: string }[],
+): string {
+  if (!item) return "";
+  const candidates = [item.hint, item.code]
+    .filter(Boolean)
+    .map((value) => value.trim().toUpperCase());
+  for (const needle of candidates) {
+    const byCode = branchOptions.find((b) => (b.code ?? "").trim().toUpperCase() === needle);
+    if (byCode) return byCode.id;
+    const byName = branchOptions.find((b) => b.name.trim().toUpperCase() === needle);
+    if (byName) return byName.id;
+  }
+  // Single-branch tenants still pick a service center in the UI; map to the org branch.
+  if (branchOptions.length === 1) return branchOptions[0].id;
+  return "";
+}
 
 export const Route = createFileRoute("/master/operation/area")({
   head: () => ({
@@ -115,7 +138,12 @@ function rowToView(r: AreaDbRow & Record<string, unknown>): AreaRow {
   return {
     id: r.id,
     areaName: r.name,
-    serviceCenter: (r.branch_name as string) ?? "",
+    serviceCenter:
+      (r.service_center_name as string) ||
+      (r.service_center_code as string) ||
+      (r.branch_name as string) ||
+      "",
+    serviceCenterId: (r.service_center_id as string | null) ?? undefined,
     branchId: r.branch_id,
     destination: (r.destination_name as string) ?? "",
     destinationId: r.destination_id ?? "",
@@ -130,6 +158,7 @@ function AreaPage() {
     enabled: authed,
     labelRefs: [
       { idField: "branch_id", table: "branches", as: "branch" },
+      { idField: "service_center_id", table: "service_centers", as: "service_center" },
       { idField: "destination_id", table: "destinations", as: "destination" },
     ],
   });
@@ -204,6 +233,7 @@ function AreaPage() {
     setForm({
       areaName: row.areaName,
       serviceCenter: row.serviceCenter,
+      serviceCenterId: row.serviceCenterId ?? "",
       destination: row.destination,
       branchId: row.branchId,
       destinationId: row.destinationId,
@@ -224,12 +254,15 @@ function AreaPage() {
 
   const toRaw = (f: AreaForm) => ({
     branch_id: f.branchId || "",
+    service_center_id: f.serviceCenterId || "",
     name: f.areaName,
     destination_id: f.destinationId || null,
   });
 
   const handleSave = async () => {
     if (authed) {
+      if (!form.serviceCenterId?.trim()) return toast.error("Service Center is required");
+      if (!form.branchId?.trim()) return toast.error("Service Center is required");
       setSaving(true);
       try {
         const raw = toRaw(form);
@@ -362,13 +395,17 @@ function AreaPage() {
               </FieldWrapper>
               <FieldWrapper label="Service Center" required>
                 {authed ? (
-                  <EntityCombobox
-                    items={branches.options}
-                    value={form.branchId ?? ""}
+                  <LookupCombobox
+                    lookupKey="service-center"
+                    value={form.serviceCenterId ?? ""}
                     valueLabel={form.serviceCenter}
-                    loading={branches.isLoading}
                     onChange={(id, item) =>
-                      setForm((f) => ({ ...f, branchId: id, serviceCenter: item?.name ?? "" }))
+                      setForm((f) => ({
+                        ...f,
+                        serviceCenterId: id,
+                        serviceCenter: item?.name ?? "",
+                        branchId: resolveBranchId(item, branches.options),
+                      }))
                     }
                     placeholder="Select Service Center"
                   />
