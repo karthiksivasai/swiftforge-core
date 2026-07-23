@@ -3372,6 +3372,7 @@ function AwbEntryPage() {
                       <Button
                         size="sm"
                         className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+                        {...erpNavSkip()}
                         onClick={() =>
                           toast.info("Customer charges will be enabled with backend wiring")
                         }
@@ -3389,6 +3390,7 @@ function AwbEntryPage() {
                       <Button
                         size="sm"
                         className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+                        {...erpNavSkip()}
                         onClick={() =>
                           toast.info("Vendor charges will be enabled with backend wiring")
                         }
@@ -3406,6 +3408,7 @@ function AwbEntryPage() {
                       <Button
                         size="sm"
                         className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+                        {...erpNavSkip()}
                         onClick={() =>
                           toast.info("Rate compare will be enabled with backend wiring")
                         }
@@ -3416,7 +3419,10 @@ function AwbEntryPage() {
                   </div>
 
                   <Collapsible open={piecesOpen} onOpenChange={setPiecesOpen} className="mt-4">
-                    <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60">
+                    <CollapsibleTrigger
+                      className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
+                      {...erpNavSkip()}
+                    >
                       Click here to enter Pieces details Or Press [Alt + u]
                       <ChevronDown
                         className={cn("h-4 w-4 transition-transform", piecesOpen && "rotate-180")}
@@ -3433,6 +3439,7 @@ function AwbEntryPage() {
                             variant="link"
                             size="sm"
                             className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
+                            {...erpNavSkip()}
                             onClick={() =>
                               toast.info("Excel format download will be enabled with backend wiring")
                             }
@@ -3442,11 +3449,12 @@ function AwbEntryPage() {
                           </Button>
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm text-foreground">Select File</span>
-                            <Input type="file" className="h-8 max-w-[220px] text-[13px]" />
+                            <Input type="file" className="h-8 max-w-[220px] text-[13px]" {...erpNavSkip()} />
                             <Button
                               type="button"
                               size="sm"
                               className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
+                              {...erpNavSkip()}
                               onClick={() =>
                                 toast.info("Import MTS will be enabled with backend wiring")
                               }
@@ -3523,6 +3531,7 @@ function AwbEntryPage() {
                           <Input
                             value={piecesDraft.volWeight}
                             readOnly
+                            {...erpNavOrder(AWB_NAV.PIECES_VOL_WEIGHT)}
                             className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           />
                         </FieldWrapper>
@@ -3530,6 +3539,7 @@ function AwbEntryPage() {
                           <Input
                             value={piecesDraft.chargeWeight}
                             readOnly
+                            {...erpNavOrder(AWB_NAV.PIECES_CHARGE_WEIGHT)}
                             className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           />
                         </FieldWrapper>
@@ -3537,6 +3547,7 @@ function AwbEntryPage() {
                           <Button
                             type="button"
                             className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                            {...erpNavOrder(AWB_NAV.PIECES_ADD)}
                             onClick={addPiecesLine}
                           >
                             <Plus className="mr-1 h-4 w-4" />
@@ -3608,7 +3619,10 @@ function AwbEntryPage() {
                   </Collapsible>
 
                   <Collapsible open={chargesOpen} onOpenChange={setChargesOpen} className="mt-4">
-                    <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60">
+                    <CollapsibleTrigger
+                      className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
+                      {...erpNavSkip()}
+                    >
                       Click here to enter Charge details Or Press [Alt + c]
                       <ChevronDown
                         className={cn("h-4 w-4 transition-transform", chargesOpen && "rotate-180")}
@@ -3644,6 +3658,7 @@ function AwbEntryPage() {
                             size="sm"
                             variant="outline"
                             className="h-8"
+                            {...erpNavSkip()}
                             disabled={saving || isReadOnly}
                             onClick={() => {
                               void (async () => {
@@ -3667,6 +3682,7 @@ function AwbEntryPage() {
                             size="sm"
                             variant="outline"
                             className="h-8"
+                            {...erpNavSkip()}
                             disabled={saving || isReadOnly}
                             onClick={() => {
                               void (async () => {
@@ -3787,6 +3803,7 @@ function AwbEntryPage() {
                           <Button
                             type="button"
                             className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                            {...erpNavOrder(AWB_NAV.CHARGE_ADD)}
                             onClick={addChargeLine}
                           >
                             <Plus className="mr-1 h-4 w-4" />
@@ -4116,6 +4133,7 @@ function AwbEntryPage() {
                           variant="link"
                           size="sm"
                           className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
+                          {...erpNavSkip()}
                           onClick={() =>
                             toast.info("Excel format download will be enabled with backend wiring")
                           }
@@ -4125,11 +4143,12 @@ function AwbEntryPage() {
                         </Button>
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm text-foreground">Select File</span>
-                          <Input type="file" className="h-8 max-w-[220px] text-[13px]" />
+                          <Input type="file" className="h-8 max-w-[220px] text-[13px]" {...erpNavSkip()} />
                           <Button
                             type="button"
                             size="sm"
                             className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
+                            {...erpNavSkip()}
                             onClick={() =>
                               toast.info("Proforma import will be enabled with backend wiring")
                             }
@@ -4221,6 +4240,7 @@ function AwbEntryPage() {
                             title="Add custom unit"
                             aria-label="Add custom unit"
                             className="h-8 w-8 shrink-0 rounded-none border-0 border-l border-input px-0 shadow-none"
+                            {...erpNavSkip()}
                             onClick={() => {
                               setNewUnitInput("");
                               setAddUnitOpen(true);
@@ -4249,6 +4269,7 @@ function AwbEntryPage() {
                         <Button
                           type="button"
                           className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                          {...erpNavOrder(AWB_NAV.PROFORMA_ADD)}
                           onClick={addProformaLine}
                         >
                           <Plus className="mr-1 h-4 w-4" />
@@ -4441,7 +4462,10 @@ function AwbEntryPage() {
                     onOpenChange={setVendorChargesOpen}
                     className="mt-4"
                   >
-                    <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60">
+                    <CollapsibleTrigger
+                      className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
+                      {...erpNavSkip()}
+                    >
                       Click here to enter Vendor Charge details Or Press [Alt + w]
                       <ChevronDown
                         className={cn(
@@ -4551,6 +4575,7 @@ function AwbEntryPage() {
                           <Button
                             type="button"
                             className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                            {...erpNavOrder(AWB_NAV.VENDOR_CHARGE_ADD)}
                             onClick={addVendorChargeLine}
                           >
                             <Plus className="mr-1 h-4 w-4" />
@@ -4697,6 +4722,7 @@ function AwbEntryPage() {
                       size="icon"
                       className="h-9 w-9 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                       aria-label="Search KYC"
+                      {...erpNavSkip()}
                     >
                       <Search className="h-4 w-4" />
                     </Button>
@@ -5821,7 +5847,9 @@ function ShipmentDetailsFields({
   isReadOnly: boolean;
 }) {
   const { onValueChange: onPaymentTypeChange, contentProps: paymentTypeSelectContentProps, itemProps: paymentTypeSelectItemProps } =
-    useErpSelectNav((v: string) => setForm((f) => ({ ...f, paymentType: v })));
+    useErpSelectNav((v: string) => setForm((f) => ({ ...f, paymentType: v })), {
+      fromOrder: AWB_NAV.PAYMENT_TYPE,
+    });
   const inputClass = "h-8 px-1.5 text-[13px]";
 
   return (
@@ -5916,6 +5944,7 @@ function ShipmentDetailsFields({
             id="lock"
             checked={form.lock}
             onCheckedChange={(c) => setForm((f) => ({ ...f, lock: c === true }))}
+            {...erpNavOrder(AWB_NAV.LOCK)}
           />
           <label htmlFor="lock" className="text-sm text-muted-foreground">
             Lock
@@ -5967,6 +5996,7 @@ function AwbFormFooter({
             onClick={onSave}
             disabled={saving}
             className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+            {...erpNavOrder(AWB_NAV.FOOTER_SAVE)}
           >
             Save
           </Button>
@@ -5977,6 +6007,7 @@ function AwbFormFooter({
             onClick={onBook}
             disabled={saving}
             className="h-8 bg-sidebar text-xs text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+            {...erpNavOrder(AWB_NAV.FOOTER_BOOK)}
           >
             Book
           </Button>
@@ -5992,11 +6023,19 @@ function AwbFormFooter({
             className="h-8 bg-sidebar text-xs text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
             onClick={onNext}
             disabled={saving}
+            {...erpNavOrder(AWB_NAV.FOOTER_NEXT)}
           >
             Next
           </Button>
         ) : null}
-        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={onCancel} disabled={saving}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={onCancel}
+          disabled={saving}
+          {...erpNavOrder(AWB_NAV.FOOTER_CLOSE)}
+        >
           Close
         </Button>
       </div>
