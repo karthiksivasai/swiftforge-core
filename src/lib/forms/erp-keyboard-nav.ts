@@ -2,7 +2,7 @@
 export const ERP_NAV_ORDER = "data-erp-nav-order";
 export const ERP_NAV_SKIP = "data-erp-nav-skip";
 export const ERP_NAV_GROUP = "data-erp-nav-group";
-/** Lookup fields that search only on Enter / F2 / search button (AWB Entry). */
+/** Lookup fields that search on F2 / search button; Enter advances via onCommit (AWB Entry). */
 export const ERP_MANUAL_SEARCH = "data-erp-manual-search";
 
 export function erpNavOrder(order: number) {

@@ -162,7 +162,6 @@ type ReportFilters = {
   product: LookupPair;
   vendor: LookupPair;
   format: string;
-  pdfType: string;
   excel: boolean;
 };
 
@@ -318,7 +317,6 @@ const emptyReportFilters = (): ReportFilters => ({
   product: emptyPair(),
   vendor: emptyPair(),
   format: "Single Line",
-  pdfType: "",
   excel: false,
 });
 
@@ -1336,42 +1334,41 @@ function ManifestScanPage() {
                 </Select>
               </FieldWrapper>
               <FieldWrapper label="PDF Type">
-                <Input value={reportFilters.pdfType} onChange={(e) => setReportFilters((f) => ({ ...f, pdfType: e.target.value }))} placeholder="PDF Type" />
-              </FieldWrapper>
-              <div className="flex flex-wrap items-end gap-2">
-                <DataIoToolbar
-                  export={{
-                    filename: "manifest-scans",
-                    title: "Manifest Scans",
-                    columns: [
-                      { key: "manifestNo", header: "Manifest No" },
-                      { key: "masterAwbNo", header: "Master AWBNo" },
-                      { key: "date", header: "Date" },
-                      { key: "location", header: "Location" },
-                      { key: "serviceCentre", header: "Service Centre" },
-                      { key: "connectStation", header: "Connect Station" },
-                      { key: "vendor", header: "Vendor" },
-                    ],
-                    getRows: () =>
-                      filtered.map((r) => {
-                        const d = listDisplay(r);
-                        return {
-                          manifestNo: d.manifestNo,
-                          masterAwbNo: d.masterAwbNo,
-                          date: d.date,
-                          location: d.location,
-                          serviceCentre: d.serviceCentre,
-                          connectStation: d.connectStation,
-                          vendor: d.vendor,
-                        };
-                      }),
-                  }}
-                />
-                <Button className="bg-emerald-600 text-white hover:bg-emerald-600/90" onClick={() => toast.info("Print will be enabled with backend wiring")}>Print</Button>
-                <div className="flex items-center gap-2 pb-2">
-                  <Checkbox id="excelExport" checked={reportFilters.excel} onCheckedChange={(c) => setReportFilters((f) => ({ ...f, excel: c === true }))} />
-                  <label htmlFor="excelExport" className="text-sm text-muted-foreground">Excel</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <DataIoToolbar
+                    export={{
+                      filename: "manifest-scans",
+                      title: "Manifest Scans",
+                      columns: [
+                        { key: "manifestNo", header: "Manifest No" },
+                        { key: "masterAwbNo", header: "Master AWBNo" },
+                        { key: "date", header: "Date" },
+                        { key: "location", header: "Location" },
+                        { key: "serviceCentre", header: "Service Centre" },
+                        { key: "connectStation", header: "Connect Station" },
+                        { key: "vendor", header: "Vendor" },
+                      ],
+                      getRows: () =>
+                        filtered.map((r) => {
+                          const d = listDisplay(r);
+                          return {
+                            manifestNo: d.manifestNo,
+                            masterAwbNo: d.masterAwbNo,
+                            date: d.date,
+                            location: d.location,
+                            serviceCentre: d.serviceCentre,
+                            connectStation: d.connectStation,
+                            vendor: d.vendor,
+                          };
+                        }),
+                    }}
+                  />
+                  <Button className="bg-emerald-600 text-white hover:bg-emerald-600/90" onClick={() => toast.info("Print will be enabled with backend wiring")}>Print</Button>
                 </div>
+              </FieldWrapper>
+              <div className="flex items-end gap-2 pb-2">
+                <Checkbox id="excelExport" checked={reportFilters.excel} onCheckedChange={(c) => setReportFilters((f) => ({ ...f, excel: c === true }))} />
+                <label htmlFor="excelExport" className="text-sm text-muted-foreground">Excel</label>
               </div>
             </div>
           </Card>

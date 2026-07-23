@@ -1,7 +1,7 @@
 /**
  * Code + Name lookup pair with:
  *  - inline autocomplete while typing (default, filter screens)
- *  - manual search: debounced dropdown while typing + Enter / F2 / 🔍 to commit
+ *  - manual search: F2 / 🔍 to search; Enter advances to next field (AWB ERP)
  *  - magnifying-glass popup (live RPC dialog or demo MasterLookupDialog)
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -147,7 +147,7 @@ export function SearchableLookupPair({
   splitCode?: boolean;
   navOrder?: number;
   onCommit?: () => void;
-  /** AWB ERP mode: debounced dropdown while typing; Enter / F2 / 🔍 to commit. */
+  /** AWB ERP mode: search on F2 / 🔍; Enter advances focus via onCommit. */
   manualSearch?: boolean;
   emptySearchMessage?: string;
   noResultsMessage?: string;
@@ -173,8 +173,7 @@ export function SearchableLookupPair({
   const debouncedManualQuery = useDebouncedValue(manualQueryRaw, debounceMs);
   const debouncedInline = useDebouncedValue(inlineQuery, debounceMs);
   const canInlineSearch = !manualSearch && debouncedInline.trim().length >= minChars;
-  const canDebouncedManualSearch =
-    manualSearch && debouncedManualQuery.length >= minChars;
+  const canDebouncedManualSearch = false;
 
   const cacheKey = `${live && liveKey ? `live:${liveKey}` : `demo:${lookupKey}`}::${debouncedInline.trim().toLowerCase()}`;
   const cached = canInlineSearch ? cacheGet(cacheKey) : undefined;
@@ -445,7 +444,8 @@ export function SearchableLookupPair({
         if (manualDropdownOpen && manualDropdownRows[highlight]) {
           pick(manualDropdownRows[highlight]);
         } else {
-          void runManualSearch();
+          clearManualDropdown();
+          onCommit?.();
         }
       }
       return;
@@ -661,9 +661,18 @@ export function SearchableLookupPair({
             </div>
           </div>
         ) : (
-          <div className="flex gap-1">
-            {nameInput}
-            {codeInput}
+          <div className="flex w-full min-w-0 items-stretch gap-1">
+            <div
+              className={cn(
+                "flex min-w-0 flex-1 items-stretch overflow-hidden rounded border border-input bg-background",
+                inputH,
+              )}
+            >
+              {nameInput}
+              <div className={cn("flex shrink-0 items-stretch border-l border-input", codeW)}>
+                {codeInput}
+              </div>
+            </div>
             {searchButton}
           </div>
         )}

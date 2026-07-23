@@ -43,6 +43,7 @@ export type UiPickupRow = UiPickupForm & {
   awbNo: string;
   confirm: string;
   cancel: string;
+  userId: string;
 };
 
 const VEHICLE_UI_TO_DB: Record<string, string> = {
@@ -109,12 +110,13 @@ export function dbPickupToUi(row: PickupDbRow): UiPickupRow {
     reason: row.reason ?? "",
     pickupReady: row.pickup_ready,
     pickupTime: row.pickup_time ? String(row.pickup_time).slice(0, 5) : "",
-    bookedBy: "",
+    bookedBy: row.user_id ?? "",
     editedBy: "",
     passed: "",
     awbNo: row.awb_no ?? "",
     confirm: row.status === "CONFIRMED" ? "Yes" : "",
     cancel: row.status === "CANCELLED" ? "Yes" : "",
+    userId: row.user_id ?? "",
   };
 }
 

@@ -130,6 +130,9 @@ begin
   if v_p.vehicle_type <> 'BIKE' then
     raise exception 'FAIL [vehicle]: expected BIKE, got %', v_p.vehicle_type;
   end if;
+  if v_p.user_id is distinct from 'pickupadm' then
+    raise exception 'FAIL [user_id]: expected pickupadm, got %', v_p.user_id;
+  end if;
   perform set_config('pk.id1', v_p.id::text, false);
   perform set_config('pk.rv1', v_p.row_version::text, false);
   raise notice 'PASS [create-open]';

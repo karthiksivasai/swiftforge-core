@@ -62,6 +62,7 @@ import {
   type LookupPairValue,
 } from "@/components/masters/searchable-lookup-pair";
 import { cn } from "@/lib/utils";
+import type { LookupKey } from "@/lib/master-lookups";
 
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
@@ -85,6 +86,40 @@ type Mode = "client" | "copy";
 type LookupPair = LookupPairValue;
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
+
+const CR_INPUT =
+  "h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0";
+const CR_SELECT =
+  "h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0";
+const CR_GRID =
+  "grid grid-cols-1 gap-x-3 gap-y-2.5 md:grid-cols-2 xl:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]";
+const CR_STACK = "grid grid-cols-1 gap-2.5 [&_label]:whitespace-nowrap [&_label]:text-[11px]";
+
+function CustomerRateLookupField({
+  label,
+  lookup,
+  value,
+  onChange,
+  required,
+}: {
+  label: string;
+  lookup: LookupKey;
+  value: LookupPair;
+  onChange: (v: LookupPair) => void;
+  required?: boolean;
+}) {
+  return (
+    <FieldWrapper borderLabel lookupSplit label={label} required={required}>
+      <SearchableLookupPair
+        lookup={lookup}
+        value={value}
+        onChange={onChange}
+        compact
+        splitCode
+      />
+    </FieldWrapper>
+  );
+}
 
 type ClientFilters = {
   customer: LookupPair;
@@ -1023,22 +1058,20 @@ function CustomerRatePage() {
 
           {mode === "client" ? (
             <>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {/* Col 1 */}
-                <FieldWrapper label="Customer" required>
-                  <SearchableLookupPair
-                    lookup="customer"
-                    value={filters.customer}
-                    onChange={(v) => patchFilter("customer", v)}
-                  />
-                </FieldWrapper>
-                {/* Col 2 */}
-                <FieldWrapper label="From Date">
+              <div className={CR_GRID}>
+                <CustomerRateLookupField
+                  label="Customer"
+                  lookup="customer"
+                  value={filters.customer}
+                  onChange={(v) => patchFilter("customer", v)}
+                  required
+                />
+                <FieldWrapper borderLabel label="From Date">
                   <Select
                     value={filters.fromDate || undefined}
                     onValueChange={(v) => patchFilter("fromDate", v)}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className={CR_SELECT}>
                       <SelectValue placeholder="Select From Date" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1055,63 +1088,53 @@ function CustomerRatePage() {
                     </SelectContent>
                   </Select>
                 </FieldWrapper>
-                {/* Col 3 */}
-                <FieldWrapper label="Origin">
-                  <SearchableLookupPair
-                    lookup="destination"
-                    value={filters.origin}
-                    onChange={(v) => patchFilter("origin", v)}
-                  />
-                </FieldWrapper>
-                {/* Col 4 */}
-                <FieldWrapper label="Vendor">
-                  <SearchableLookupPair
-                    lookup="vendor"
-                    value={filters.vendor}
-                    onChange={(v) => patchFilter("vendor", v)}
-                  />
-                </FieldWrapper>
-
-                {/* Row 2 */}
-                <FieldWrapper label="Product">
-                  <SearchableLookupPair
-                    lookup="product"
-                    value={filters.product}
-                    onChange={(v) => patchFilter("product", v)}
-                  />
-                </FieldWrapper>
-                <FieldWrapper label="Zone">
-                  <SearchableLookupPair
-                    lookup="zone"
-                    value={filters.zone}
-                    onChange={(v) => patchFilter("zone", v)}
-                  />
-                </FieldWrapper>
-                <FieldWrapper label="Country">
-                  <SearchableLookupPair
-                    lookup="country"
-                    value={filters.country}
-                    onChange={(v) => patchFilter("country", v)}
-                  />
-                </FieldWrapper>
-                <FieldWrapper label="Destination">
-                  <SearchableLookupPair
-                    lookup="destination"
-                    value={filters.destination}
-                    onChange={(v) => patchFilter("destination", v)}
-                  />
-                </FieldWrapper>
-
-                {/* Row 3 */}
-                <FieldWrapper label="Service">
+                <CustomerRateLookupField
+                  label="Origin"
+                  lookup="destination"
+                  value={filters.origin}
+                  onChange={(v) => patchFilter("origin", v)}
+                />
+                <CustomerRateLookupField
+                  label="Vendor"
+                  lookup="vendor"
+                  value={filters.vendor}
+                  onChange={(v) => patchFilter("vendor", v)}
+                />
+                <CustomerRateLookupField
+                  label="Product"
+                  lookup="product"
+                  value={filters.product}
+                  onChange={(v) => patchFilter("product", v)}
+                />
+                <CustomerRateLookupField
+                  label="Zone"
+                  lookup="zone"
+                  value={filters.zone}
+                  onChange={(v) => patchFilter("zone", v)}
+                />
+                <CustomerRateLookupField
+                  label="Country"
+                  lookup="country"
+                  value={filters.country}
+                  onChange={(v) => patchFilter("country", v)}
+                />
+                <CustomerRateLookupField
+                  label="Destination"
+                  lookup="destination"
+                  value={filters.destination}
+                  onChange={(v) => patchFilter("destination", v)}
+                />
+                <FieldWrapper borderLabel label="Service">
                   <Input
+                    className={CR_INPUT}
                     value={filters.service}
                     onChange={(e) => patchFilter("service", e.target.value)}
                   />
                 </FieldWrapper>
                 {!increaseRateOpen ? (
-                  <FieldWrapper label="Contract No">
+                  <FieldWrapper borderLabel label="Contract No">
                     <Input
+                      className={CR_INPUT}
                       value={filters.contractNo}
                       onChange={(e) => patchFilter("contractNo", e.target.value)}
                     />
@@ -1121,13 +1144,13 @@ function CustomerRatePage() {
 
               {increaseRateOpen ? (
                 <div className="mt-6 border-t pt-6">
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-                    <FieldWrapper label="From Date" required>
-                      <div className="relative">
-                        <CalendarIcon className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <div className={CR_GRID}>
+                    <FieldWrapper borderLabel label="From Date" required>
+                      <div className="relative flex w-full min-w-0 items-stretch">
+                        <CalendarIcon className="pointer-events-none absolute left-2 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           type="date"
-                          className="pl-8"
+                          className={`${CR_INPUT} pl-8`}
                           value={increaseForm.fromDate}
                           onChange={(e) =>
                             setIncreaseForm((f) => ({ ...f, fromDate: e.target.value }))
@@ -1135,12 +1158,12 @@ function CustomerRatePage() {
                         />
                       </div>
                     </FieldWrapper>
-                    <FieldWrapper label="Increase By" required>
+                    <FieldWrapper borderLabel label="Increase By" required>
                       <Select
                         value={increaseForm.increaseBy || undefined}
                         onValueChange={(v) => setIncreaseForm((f) => ({ ...f, increaseBy: v }))}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className={CR_SELECT}>
                           <SelectValue placeholder="Select Increase Type" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1205,8 +1228,9 @@ function CustomerRatePage() {
           ) : (
             <>
               <div className="mb-4 flex flex-wrap items-end justify-end gap-4">
-                <FieldWrapper label="Percentage Increase" className="w-full max-w-xs">
+                <FieldWrapper borderLabel label="Percentage Increase" className="w-full max-w-xs">
                   <Input
+                    className={CR_INPUT}
                     value={pctIncrease}
                     onChange={(e) => setPctIncrease(e.target.value)}
                     placeholder="0.00 to 100.00"
@@ -1353,8 +1377,8 @@ function CustomerRatePage() {
             <DialogTitle>{editing ? "Edit Customer Rate" : "Customer Rate Details"}</DialogTitle>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 gap-4 py-2 md:grid-cols-2 lg:grid-cols-4">
-            <FieldWrapper label="Customer" required>
+          <div className={`${CR_GRID} py-2`}>
+            <FieldWrapper borderLabel label="Customer" required>
               {authed ? (
                 <LookupCombobox
                   lookupKey="customer"
@@ -1373,128 +1397,123 @@ function CustomerRatePage() {
                     }))
                   }
                   placeholder="Select Customer"
+                  className="h-8 justify-between px-1.5 text-[13px] font-normal shadow-none"
                 />
               ) : (
                 <Input
+                  className={CR_INPUT}
                   value={form.customerName}
                   onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))}
                   placeholder="Customer"
                 />
               )}
             </FieldWrapper>
-            <FieldWrapper label="From Date" required>
-              <div className="relative">
-                <CalendarIcon className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <FieldWrapper borderLabel label="From Date" required>
+              <div className="relative flex w-full min-w-0 items-stretch">
+                <CalendarIcon className="pointer-events-none absolute left-2 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   type="date"
-                  className="pl-8"
+                  className={`${CR_INPUT} pl-8`}
                   value={form.fromDate}
                   onChange={(e) => setForm((f) => ({ ...f, fromDate: e.target.value }))}
                 />
               </div>
             </FieldWrapper>
-            <FieldWrapper label="Origin">
-              <SearchableLookupPair
-                lookup="destination"
-                value={{ id: form.originId, code: form.originCode, name: form.originName }}
-                onChange={(v) =>
-                  setForm((f) => ({
-                    ...f,
-                    originId: v.id ?? "",
-                    originCode: v.code,
-                    originName: v.name,
-                  }))
-                }
-              />
-            </FieldWrapper>
-            <FieldWrapper label="Vendor">
-              <SearchableLookupPair
-                lookup="vendor"
-                value={{ id: form.vendorId, code: form.vendorCode, name: form.vendorName }}
-                onChange={(v) =>
-                  setForm((f) => ({
-                    ...f,
-                    vendorId: v.id ?? "",
-                    vendorCode: v.code,
-                    vendorName: v.name,
-                  }))
-                }
-              />
-            </FieldWrapper>
-
-            <FieldWrapper label="Product">
-              <SearchableLookupPair
-                lookup="product"
-                value={{ id: form.productId, code: form.productCode, name: form.productName }}
-                onChange={(v) =>
-                  setForm((f) => ({
-                    ...f,
-                    productId: v.id ?? "",
-                    productCode: v.code,
-                    productName: v.name,
-                  }))
-                }
-              />
-            </FieldWrapper>
-            <FieldWrapper label="Zone">
-              <SearchableLookupPair
-                lookup="zone"
-                value={{ id: form.zoneId, code: form.zoneCode, name: form.zoneName }}
-                onChange={(v) =>
-                  setForm((f) => ({
-                    ...f,
-                    zoneId: v.id ?? "",
-                    zoneCode: v.code,
-                    zoneName: v.name,
-                  }))
-                }
-              />
-            </FieldWrapper>
-            <FieldWrapper label="Country">
-              <SearchableLookupPair
-                lookup="country"
-                value={{ id: form.countryId, code: form.countryCode, name: form.countryName }}
-                onChange={(v) =>
-                  setForm((f) => ({
-                    ...f,
-                    countryId: v.id ?? "",
-                    countryCode: v.code,
-                    countryName: v.name,
-                  }))
-                }
-              />
-            </FieldWrapper>
-            <FieldWrapper label="Destination">
-              <SearchableLookupPair
-                lookup="destination"
-                value={{
-                  id: form.destinationId,
-                  code: form.destinationCode,
-                  name: form.destinationName,
-                }}
-                onChange={(v) =>
-                  setForm((f) => ({
-                    ...f,
-                    destinationId: v.id ?? "",
-                    destinationCode: v.code,
-                    destinationName: v.name,
-                  }))
-                }
-              />
-            </FieldWrapper>
-
-            <FieldWrapper label="Service">
+            <CustomerRateLookupField
+              label="Origin"
+              lookup="destination"
+              value={{ id: form.originId, code: form.originCode, name: form.originName }}
+              onChange={(v) =>
+                setForm((f) => ({
+                  ...f,
+                  originId: v.id ?? "",
+                  originCode: v.code,
+                  originName: v.name,
+                }))
+              }
+            />
+            <CustomerRateLookupField
+              label="Vendor"
+              lookup="vendor"
+              value={{ id: form.vendorId, code: form.vendorCode, name: form.vendorName }}
+              onChange={(v) =>
+                setForm((f) => ({
+                  ...f,
+                  vendorId: v.id ?? "",
+                  vendorCode: v.code,
+                  vendorName: v.name,
+                }))
+              }
+            />
+            <CustomerRateLookupField
+              label="Product"
+              lookup="product"
+              value={{ id: form.productId, code: form.productCode, name: form.productName }}
+              onChange={(v) =>
+                setForm((f) => ({
+                  ...f,
+                  productId: v.id ?? "",
+                  productCode: v.code,
+                  productName: v.name,
+                }))
+              }
+            />
+            <CustomerRateLookupField
+              label="Zone"
+              lookup="zone"
+              value={{ id: form.zoneId, code: form.zoneCode, name: form.zoneName }}
+              onChange={(v) =>
+                setForm((f) => ({
+                  ...f,
+                  zoneId: v.id ?? "",
+                  zoneCode: v.code,
+                  zoneName: v.name,
+                }))
+              }
+            />
+            <CustomerRateLookupField
+              label="Country"
+              lookup="country"
+              value={{ id: form.countryId, code: form.countryCode, name: form.countryName }}
+              onChange={(v) =>
+                setForm((f) => ({
+                  ...f,
+                  countryId: v.id ?? "",
+                  countryCode: v.code,
+                  countryName: v.name,
+                }))
+              }
+            />
+            <CustomerRateLookupField
+              label="Destination"
+              lookup="destination"
+              value={{
+                id: form.destinationId,
+                code: form.destinationCode,
+                name: form.destinationName,
+              }}
+              onChange={(v) =>
+                setForm((f) => ({
+                  ...f,
+                  destinationId: v.id ?? "",
+                  destinationCode: v.code,
+                  destinationName: v.name,
+                }))
+              }
+            />
+            <FieldWrapper borderLabel label="Service">
               <Input
+                className={CR_INPUT}
                 value={form.service}
                 onChange={(e) => setForm((f) => ({ ...f, service: e.target.value }))}
               />
             </FieldWrapper>
-            <FieldWrapper label="Unit">
+            <FieldWrapper borderLabel label="Unit">
               <Select
                 value={form.unit || undefined}
                 onValueChange={(v) => setForm((f) => ({ ...f, unit: v }))}
               >
-                <SelectTrigger>
+                <SelectTrigger className={CR_SELECT}>
                   <SelectValue placeholder="Select Unit Type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1506,19 +1525,19 @@ function CustomerRatePage() {
                 </SelectContent>
               </Select>
             </FieldWrapper>
-            <FieldWrapper label="Days">
+            <FieldWrapper borderLabel label="Days">
               <Input
+                className={CR_INPUT}
                 value={form.days}
                 onChange={(e) => setForm((f) => ({ ...f, days: e.target.value }))}
               />
             </FieldWrapper>
-
-            <FieldWrapper label="Rate Type" required>
+            <FieldWrapper borderLabel label="Rate Type" required>
               <Select
                 value={form.rateType || undefined}
                 onValueChange={(v) => setForm((f) => ({ ...f, rateType: v }))}
               >
-                <SelectTrigger>
+                <SelectTrigger className={CR_SELECT}>
                   <SelectValue placeholder="Select Rate Type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1530,26 +1549,28 @@ function CustomerRatePage() {
                 </SelectContent>
               </Select>
             </FieldWrapper>
-            <FieldWrapper label="Weight" required>
+            <FieldWrapper borderLabel label="Weight" required>
               <Input
+                className={CR_INPUT}
                 value={form.weight}
                 onChange={(e) => setForm((f) => ({ ...f, weight: e.target.value }))}
               />
             </FieldWrapper>
-            <div className="flex flex-col justify-end gap-1.5 lg:col-span-2">
-              <FieldWrapper label="Rate" required>
-                <div className="flex gap-2">
+            <div className="flex flex-col justify-end lg:col-span-2">
+              <FieldWrapper borderLabel label="Rate" required>
+                <div className="flex w-full min-w-0 items-stretch">
                   <Input
+                    className={`min-w-0 flex-1 ${CR_INPUT}`}
                     value={form.rate}
                     onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))}
                   />
                   <Button
                     type="button"
                     size="sm"
-                    className="shrink-0 gap-1 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                    className="h-8 shrink-0 rounded-none border-0 border-l border-input bg-sidebar px-3 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                     onClick={handleAddRateLine}
                   >
-                    <Plus className="h-4 w-4" /> Add
+                    <Plus className="mr-1 h-4 w-4" /> Add
                   </Button>
                 </div>
               </FieldWrapper>
@@ -1655,21 +1676,20 @@ function CopySideCard({
       <legend className="rounded bg-sidebar px-2 py-0.5 text-xs font-medium text-sidebar-foreground">
         {title}
       </legend>
-      <div className="grid grid-cols-1 gap-3">
-        <FieldWrapper label="Customer">
-          <SearchableLookupPair
-            lookup="customer"
-            value={value.customer}
-            onChange={(v) => patch("customer", v)}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="From Date">
+      <div className={CR_STACK}>
+        <CustomerRateLookupField
+          label="Customer"
+          lookup="customer"
+          value={value.customer}
+          onChange={(v) => patch("customer", v)}
+        />
+        <FieldWrapper borderLabel label="From Date">
           {fromDateMode === "select" ? (
             <Select
               value={value.fromDate || undefined}
               onValueChange={(v) => patch("fromDate", v)}
             >
-              <SelectTrigger>
+              <SelectTrigger className={CR_SELECT}>
                 <SelectValue placeholder="Select From Date" />
               </SelectTrigger>
               <SelectContent>
@@ -1686,61 +1706,59 @@ function CopySideCard({
               </SelectContent>
             </Select>
           ) : (
-            <div className="relative">
+            <div className="relative flex w-full min-w-0 items-stretch">
               <Input
                 type="date"
                 value={value.fromDate}
                 onChange={(e) => patch("fromDate", e.target.value)}
-                className="pr-9"
+                className={`${CR_INPUT} pr-8`}
               />
-              <CalendarIcon className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <CalendarIcon className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             </div>
           )}
         </FieldWrapper>
-        <FieldWrapper label="Origin">
-          <SearchableLookupPair
-            lookup="destination"
-            value={value.origin}
-            onChange={(v) => patch("origin", v)}
+        <CustomerRateLookupField
+          label="Origin"
+          lookup="destination"
+          value={value.origin}
+          onChange={(v) => patch("origin", v)}
+        />
+        <CustomerRateLookupField
+          label="Vendor"
+          lookup="vendor"
+          value={value.vendor}
+          onChange={(v) => patch("vendor", v)}
+        />
+        <CustomerRateLookupField
+          label="Product"
+          lookup="product"
+          value={value.product}
+          onChange={(v) => patch("product", v)}
+        />
+        <CustomerRateLookupField
+          label="Zone"
+          lookup="zone"
+          value={value.zone}
+          onChange={(v) => patch("zone", v)}
+        />
+        <CustomerRateLookupField
+          label="Country"
+          lookup="country"
+          value={value.country}
+          onChange={(v) => patch("country", v)}
+        />
+        <CustomerRateLookupField
+          label="Destination"
+          lookup="destination"
+          value={value.destination}
+          onChange={(v) => patch("destination", v)}
+        />
+        <FieldWrapper borderLabel label="Service">
+          <Input
+            className={CR_INPUT}
+            value={value.service}
+            onChange={(e) => patch("service", e.target.value)}
           />
-        </FieldWrapper>
-        <FieldWrapper label="Vendor">
-          <SearchableLookupPair
-            lookup="vendor"
-            value={value.vendor}
-            onChange={(v) => patch("vendor", v)}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Product">
-          <SearchableLookupPair
-            lookup="product"
-            value={value.product}
-            onChange={(v) => patch("product", v)}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Zone">
-          <SearchableLookupPair
-            lookup="zone"
-            value={value.zone}
-            onChange={(v) => patch("zone", v)}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Country">
-          <SearchableLookupPair
-            lookup="country"
-            value={value.country}
-            onChange={(v) => patch("country", v)}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Destination">
-          <SearchableLookupPair
-            lookup="destination"
-            value={value.destination}
-            onChange={(v) => patch("destination", v)}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Service">
-          <Input value={value.service} onChange={(e) => patch("service", e.target.value)} />
         </FieldWrapper>
       </div>
     </fieldset>

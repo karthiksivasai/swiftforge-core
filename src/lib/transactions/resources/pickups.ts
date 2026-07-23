@@ -41,6 +41,7 @@ export type PickupRow = BaseRow & {
   status: PickupStatus;
   awb_id: string | null;
   awb_no: string | null;
+  user_id: string | null;
   booked_by: string | null;
   edited_by: string | null;
   cancelled_at: string | null;
@@ -61,7 +62,7 @@ const PICKUP_COLUMNS = `
   pay_option, consignee_details, branch_id, vehicle_type,
   area_id, field_executive_id, sales_executive_id,
   special_instructions, reason, pickup_ready, status,
-  awb_id, awb_no, booked_by, edited_by,
+  awb_id, awb_no, user_id, booked_by, edited_by,
   cancelled_at, confirmed_at,
   created_at, created_by, updated_at, updated_by, deleted_at, row_version,
   customers(code,name),

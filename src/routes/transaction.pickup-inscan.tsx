@@ -1,11 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { FileText, Settings, Wrench, Search } from "lucide-react";
+import { FileBarChart, Settings, Wrench } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -25,11 +24,51 @@ import {
   FieldWrapper,
   IconButton,
   MasterBreadcrumb,
+  downloadCsv,
 } from "@/components/master-table-kit";
-import { MasterLookupDialog } from "@/components/master-lookup-dialog";
-import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import {
+  SearchableLookupPair,
+  type LookupPairValue,
+} from "@/components/masters/searchable-lookup-pair";
+import { type LookupKey } from "@/lib/master-lookups";
 
-type LookupPair = { code: string; name: string };
+type LookupPair = LookupPairValue;
+
+const PI_INPUT =
+  "h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0";
+const PI_SELECT =
+  "h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0";
+const PI_GRID =
+  "grid grid-cols-1 gap-x-3 gap-y-2.5 md:grid-cols-2 xl:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]";
+
+function InscanLookupField({
+  label,
+  lookup,
+  value,
+  onChange,
+  disabled,
+  required,
+}: {
+  label: string;
+  lookup: LookupKey;
+  value: LookupPair;
+  onChange: (v: LookupPair) => void;
+  disabled?: boolean;
+  required?: boolean;
+}) {
+  return (
+    <FieldWrapper borderLabel lookupSplit label={label} required={required}>
+      <SearchableLookupPair
+        lookup={lookup}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        compact
+        splitCode
+      />
+    </FieldWrapper>
+  );
+}
 
 type InscanRecord = {
   id: string;
@@ -58,6 +97,13 @@ type FormSetupField = "product" | "paymentType" | "consigneeName";
 
 type FormSetupSettings = Record<FormSetupField, boolean>;
 
+type ReportForm = {
+  fromDate: string;
+  toDate: string;
+  customer: LookupPair;
+  fieldExecutive: LookupPair;
+};
+
 const FORM_SETUP_FIELDS: FormSetupField[] = ["product", "paymentType", "consigneeName"];
 
 const defaultSetup = (): SetupSettings => ({
@@ -71,7 +117,6 @@ const defaultFormSetup = (): FormSetupSettings => ({
   consigneeName: true,
 });
 
-const SERVICE_CENTRES = MASTER_LOOKUPS.serviceCentre.options;
 const PAYMENT_TYPES = ["Cash", "Cheque", "Credit", "To Pay"] as const;
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
@@ -97,6 +142,13 @@ const emptyForm = (): InscanForm => ({
   holdRemarks: "",
 });
 
+const emptyReportForm = (): ReportForm => ({
+  fromDate: todayIso(),
+  toDate: todayIso(),
+  customer: emptyPair(),
+  fieldExecutive: emptyPair(),
+});
+
 export const Route = createFileRoute("/transaction/pickup-inscan")({
   head: () => ({
     meta: [
@@ -117,6 +169,10 @@ function PickupInscanPage() {
   const [formSetupOpen, setFormSetupOpen] = useState(false);
   const [formSetupSettings, setFormSetupSettings] = useState<FormSetupSettings>(defaultFormSetup);
   const [formSetupDraft, setFormSetupDraft] = useState<FormSetupSettings>(defaultFormSetup);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportForm, setReportForm] = useState<ReportForm>(emptyReportForm);
+
+  const patchReport = (patch: Partial<ReportForm>) => setReportForm((f) => ({ ...f, ...patch }));
 
   const isFieldDisabled = (field: FormSetupField) => formSetupSettings[field];
 
@@ -150,6 +206,76 @@ function PickupInscanPage() {
     setFormSetupSettings({ ...formSetupDraft });
     setFormSetupOpen(false);
     toast.success("Form setup saved");
+  };
+
+  const openReport = () => {
+    setReportForm(emptyReportForm());
+    setReportOpen(true);
+  };
+
+  const closeReport = () => {
+    setReportOpen(false);
+    setReportForm(emptyReportForm());
+  };
+
+  const handleReportExcel = () => {
+    if (!reportForm.fromDate.trim()) return toast.error("From Date is required");
+    if (!reportForm.toDate.trim()) return toast.error("To Date is required");
+    if (reportForm.fromDate > reportForm.toDate) {
+      return toast.error("From Date cannot be after To Date");
+    }
+
+    const reportRows = records.filter((row) => {
+      if (row.scanDate < reportForm.fromDate || row.scanDate > reportForm.toDate) return false;
+      if (reportForm.fieldExecutive.code.trim()) {
+        if (row.fieldExecutive.code !== reportForm.fieldExecutive.code.trim()) return false;
+      } else if (reportForm.fieldExecutive.name.trim()) {
+        if (!row.fieldExecutive.name.toLowerCase().includes(reportForm.fieldExecutive.name.trim().toLowerCase())) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    downloadCsv(
+      "pickup-inscan-report.csv",
+      [
+        "Scan Date",
+        "Scan Time",
+        "Service Center",
+        "Field Executive Code",
+        "Field Executive Name",
+        "PickUp No",
+        "AWB No",
+        "Hold",
+        "Hold Remarks",
+        "Product Code",
+        "Product Name",
+        "Payment Type",
+        "Consignee Name",
+      ],
+      reportRows.map((row) => [
+        row.scanDate,
+        row.scanTime,
+        row.serviceCenter,
+        row.fieldExecutive.code,
+        row.fieldExecutive.name,
+        row.pickupNo,
+        row.awbNo,
+        row.hold ? "Yes" : "No",
+        row.holdRemarks,
+        row.product.code,
+        row.product.name,
+        row.paymentType,
+        row.consigneeName,
+      ]),
+    );
+
+    toast.success(
+      reportRows.length > 0
+        ? `Exported ${reportRows.length} inscan record${reportRows.length === 1 ? "" : "s"} to Excel`
+        : "No inscan records matched the report filters — empty export downloaded",
+    );
   };
 
   const allFormSetupChecked = FORM_SETUP_FIELDS.every((f) => formSetupDraft[f]);
@@ -257,23 +383,18 @@ function PickupInscanPage() {
     saveRecord();
   };
 
+  const showOptionalFields = FORM_SETUP_FIELDS.some((f) => !formSetupSettings[f]);
+
   return (
     <div className="flex w-full min-w-0 flex-col gap-5 px-4 py-6 md:px-8 md:py-8">
       <MasterBreadcrumb trail={["Transaction", "Pickup Inscan"]} />
-
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Pickup Inscan</h1>
-        <p className="text-sm text-muted-foreground">
-          Scan pickup shipments at the service centre for inscan processing.
-        </p>
-      </div>
 
       <Card className="min-w-0 overflow-hidden border p-0">
         <div className="border-b bg-muted/30 px-4 py-3">
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5">
-              <IconButton label="Document" onClick={() => toast.info("Document view will be enabled with backend wiring")}>
-                <FileText className="h-4 w-4" />
+              <IconButton label="Report" onClick={openReport}>
+                <FileBarChart className="h-4 w-4" />
               </IconButton>
               <IconButton label="Setup" onClick={openSetup}>
                 <Settings className="h-4 w-4" />
@@ -286,31 +407,36 @@ function PickupInscanPage() {
         </div>
 
         <div className="p-4 md:p-6">
-          <Badge className="mb-4 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">Inscan</Badge>
+          <div className="relative min-w-0 rounded border border-border bg-card p-4 pt-6 shadow-none md:p-6 md:pt-7">
+            <span className="absolute left-2.5 top-1 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[14px] font-semibold leading-none text-sidebar-foreground">
+              Inscan
+            </span>
 
-          <div className="mb-4 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              onClick={openAdd}
-              className="h-9 bg-emerald-600 text-white hover:bg-emerald-600/90"
-            >
-              Add
-            </Button>
-            <Button size="sm" variant="secondary" onClick={openEdit} className="h-9">
-              Edit
-            </Button>
-          </div>
+            <div className="mb-4 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  onClick={openAdd}
+                  className="h-9 bg-emerald-600 text-white hover:bg-emerald-600/90"
+                >
+                  Add
+                </Button>
+                <Button size="sm" variant="secondary" onClick={openEdit} className="h-9">
+                  Edit
+                </Button>
+              </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <FieldWrapper label="Scan Date" required>
+              <div className={PI_GRID}>
+            <FieldWrapper borderLabel label="Scan Date" required>
               <Input
                 type="date"
+                className={PI_INPUT}
                 value={form.scanDate}
                 onChange={(e) => setForm((f) => ({ ...f, scanDate: e.target.value }))}
               />
             </FieldWrapper>
-            <FieldWrapper label="Scan Time" required>
+            <FieldWrapper borderLabel label="Scan Time" required>
               <Input
+                className={PI_INPUT}
                 value={form.scanTime}
                 onChange={(e) => setForm((f) => ({ ...f, scanTime: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
                 placeholder="HHmm"
@@ -318,32 +444,30 @@ function PickupInscanPage() {
                 maxLength={4}
               />
             </FieldWrapper>
-            <FieldWrapper label="Service Center">
-              <Select value={form.serviceCenter} onValueChange={(v) => setForm((f) => ({ ...f, serviceCenter: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {SERVICE_CENTRES.map((sc) => (
-                    <SelectItem key={sc.code} value={sc.code}>{sc.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FieldWrapper>
-            <FieldWrapper label="Field Executive">
-              <LookupPairInput
-                lookup="fieldExecutive"
-                value={form.fieldExecutive}
-                onChange={(v) => setForm((f) => ({ ...f, fieldExecutive: v }))}
+            <FieldWrapper borderLabel label="Service Center">
+              <Input
+                className={PI_INPUT}
+                value={form.serviceCenter}
+                onChange={(e) => setForm((f) => ({ ...f, serviceCenter: e.target.value.toUpperCase() }))}
               />
             </FieldWrapper>
+            <InscanLookupField
+              label="Field Executive"
+              lookup="fieldExecutive"
+              value={form.fieldExecutive}
+              onChange={(v) => setForm((f) => ({ ...f, fieldExecutive: v }))}
+            />
 
-            <FieldWrapper label="PickUp No">
+            <FieldWrapper borderLabel label="PickUp No">
               <Input
+                className={PI_INPUT}
                 value={form.pickupNo}
                 onChange={(e) => setForm((f) => ({ ...f, pickupNo: e.target.value }))}
               />
             </FieldWrapper>
-            <FieldWrapper label="AWB No." required>
+            <FieldWrapper borderLabel label="AWB No." required>
               <Input
+                className={PI_INPUT}
                 value={form.awbNo}
                 onChange={(e) => setForm((f) => ({ ...f, awbNo: e.target.value }))}
                 onBlur={tryAwbAutoSave}
@@ -356,62 +480,124 @@ function PickupInscanPage() {
                 }}
               />
             </FieldWrapper>
-
-            <FieldWrapper label="Product">
-              <LookupPairInput
-                lookup="product"
-                value={form.product}
-                disabled={isFieldDisabled("product")}
-                onChange={(v) => setForm((f) => ({ ...f, product: v }))}
-              />
-            </FieldWrapper>
-            <FieldWrapper label="Payment Type">
-              <Select
-                value={form.paymentType || undefined}
-                disabled={isFieldDisabled("paymentType")}
-                onValueChange={(v) => setForm((f) => ({ ...f, paymentType: v }))}
-              >
-                <SelectTrigger><SelectValue placeholder="Select Payment Type" /></SelectTrigger>
-                <SelectContent>
-                  {PAYMENT_TYPES.map((pt) => (
-                    <SelectItem key={pt} value={pt}>{pt}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FieldWrapper>
-            <FieldWrapper label="Consignee Name">
-              <Input
-                value={form.consigneeName}
-                disabled={isFieldDisabled("consigneeName")}
-                onChange={(e) => setForm((f) => ({ ...f, consigneeName: e.target.value }))}
-              />
-            </FieldWrapper>
-
-            <div className="flex items-end gap-2 pb-1 lg:col-span-2">
-              <div className="flex shrink-0 items-center gap-2">
+            <FieldWrapper borderLabel label="Hold" className="md:col-span-2 xl:col-span-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2 px-1">
                 <Checkbox
                   id="hold"
                   checked={form.hold}
                   onCheckedChange={(c) => setForm((f) => ({ ...f, hold: c === true }))}
                 />
-                <label htmlFor="hold" className="text-sm text-muted-foreground">Hold</label>
+                <Input
+                  className={`min-w-0 flex-1 ${PI_INPUT}`}
+                  value={form.holdRemarks}
+                  disabled={!form.hold}
+                  onChange={(e) => setForm((f) => ({ ...f, holdRemarks: e.target.value }))}
+                />
               </div>
-              <Input
-                value={form.holdRemarks}
-                disabled={!form.hold}
-                onChange={(e) => setForm((f) => ({ ...f, holdRemarks: e.target.value }))}
-                className="flex-1"
-                placeholder=""
-              />
-            </div>
+            </FieldWrapper>
           </div>
 
-          <div className="mt-4 flex justify-end gap-2">
-            <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
-            <Button variant="destructive" onClick={handleReset}>Reset</Button>
+          {showOptionalFields ? (
+            <div className={`${PI_GRID} mt-2.5`}>
+              {!isFieldDisabled("product") ? (
+                <InscanLookupField
+                  label="Product"
+                  lookup="product"
+                  value={form.product}
+                  onChange={(v) => setForm((f) => ({ ...f, product: v }))}
+                />
+              ) : null}
+              {!isFieldDisabled("paymentType") ? (
+                <FieldWrapper borderLabel label="Payment Type">
+                  <Select
+                    value={form.paymentType || undefined}
+                    onValueChange={(v) => setForm((f) => ({ ...f, paymentType: v }))}
+                  >
+                    <SelectTrigger className={PI_SELECT}>
+                      <SelectValue placeholder="Select Payment Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_TYPES.map((pt) => (
+                        <SelectItem key={pt} value={pt}>
+                          {pt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FieldWrapper>
+              ) : null}
+              {!isFieldDisabled("consigneeName") ? (
+                <FieldWrapper borderLabel label="Consignee Name">
+                  <Input
+                    className={PI_INPUT}
+                    value={form.consigneeName}
+                    onChange={(e) => setForm((f) => ({ ...f, consigneeName: e.target.value }))}
+                  />
+                </FieldWrapper>
+              ) : null}
+            </div>
+          ) : null}
+
+              <div className="mt-4 flex justify-end gap-2">
+                <Button onClick={handleSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">Save</Button>
+                <Button variant="destructive" onClick={handleReset}>Reset</Button>
+              </div>
           </div>
         </div>
       </Card>
+
+      <Dialog open={reportOpen} onOpenChange={(open) => !open && closeReport()}>
+        <DialogContent className="max-w-4xl gap-0 overflow-hidden p-0 sm:max-w-4xl">
+          <div className="bg-sidebar px-4 py-3">
+            <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+              Inscan Report
+            </DialogTitle>
+          </div>
+          <div className="p-6">
+            <div className={PI_GRID}>
+              <FieldWrapper borderLabel label="From Date" required>
+                <Input
+                  type="date"
+                  className={PI_INPUT}
+                  value={reportForm.fromDate}
+                  onChange={(e) => patchReport({ fromDate: e.target.value })}
+                />
+              </FieldWrapper>
+              <FieldWrapper borderLabel label="To Date" required>
+                <Input
+                  type="date"
+                  className={PI_INPUT}
+                  value={reportForm.toDate}
+                  onChange={(e) => patchReport({ toDate: e.target.value })}
+                />
+              </FieldWrapper>
+              <InscanLookupField
+                label="Customer"
+                lookup="customer"
+                value={reportForm.customer}
+                onChange={(customer) => patchReport({ customer })}
+              />
+              <InscanLookupField
+                label="Field Executive"
+                lookup="fieldExecutive"
+                value={reportForm.fieldExecutive}
+                onChange={(fieldExecutive) => patchReport({ fieldExecutive })}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 px-6 pb-6">
+            <Button
+              onClick={handleReportExcel}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              Excel
+            </Button>
+            <Button variant="destructive" onClick={closeReport}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={setupOpen} onOpenChange={(o) => !o && closeSetup()}>
         <DialogContent className="max-w-md gap-0 overflow-hidden p-0 sm:max-w-md">
@@ -498,57 +684,5 @@ function PickupInscanPage() {
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-function LookupPairInput({
-  value,
-  onChange,
-  lookup,
-  disabled,
-}: {
-  value: LookupPair;
-  onChange: (v: LookupPair) => void;
-  lookup: LookupKey;
-  disabled?: boolean;
-}) {
-  const [lookupOpen, setLookupOpen] = useState(false);
-
-  return (
-    <>
-      <div className="flex gap-1">
-        <Input
-          value={value.code}
-          disabled={disabled}
-          onChange={(e) => onChange({ ...value, code: e.target.value })}
-          className="w-24"
-          placeholder="Code"
-        />
-        <Input
-          value={value.name}
-          disabled={disabled}
-          onChange={(e) => onChange({ ...value, name: e.target.value })}
-          className="flex-1"
-          placeholder="Name"
-        />
-        <Button
-          size="icon"
-          variant="outline"
-          disabled={disabled}
-          className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-          aria-label="Search"
-          onClick={() => setLookupOpen(true)}
-        >
-          <Search className="h-4 w-4" />
-        </Button>
-      </div>
-      <MasterLookupDialog
-        open={lookupOpen}
-        onOpenChange={setLookupOpen}
-        lookup={lookup}
-        returnField="code"
-        onSelect={(_v, option: LookupOption) => onChange({ code: option.code, name: option.name })}
-      />
-    </>
   );
 }

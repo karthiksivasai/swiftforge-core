@@ -71,9 +71,49 @@ import {
   downloadCsv,
 } from "@/components/master-table-kit";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
+import {
+  SearchableLookupPair,
+  type LookupPairValue,
+} from "@/components/masters/searchable-lookup-pair";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
 
-type LookupPair = { code: string; name: string };
+type LookupPair = LookupPairValue;
+
+const BG_INPUT =
+  "h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0";
+const BG_SELECT =
+  "h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0";
+const BG_GRID =
+  "grid grid-cols-1 gap-x-3 gap-y-2.5 md:grid-cols-2 xl:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]";
+
+function BaggingLookupField({
+  label,
+  lookup,
+  value,
+  onChange,
+  required,
+  readOnlyCode = false,
+}: {
+  label: string;
+  lookup: LookupKey;
+  value: LookupPair;
+  onChange: (v: LookupPair) => void;
+  required?: boolean;
+  /** When true, code is filled from lookup and cannot be typed (Origin City). */
+  readOnlyCode?: boolean;
+}) {
+  return (
+    <FieldWrapper borderLabel lookupSplit={readOnlyCode} label={label} required={required}>
+      <SearchableLookupPair
+        lookup={lookup}
+        value={value}
+        onChange={onChange}
+        compact
+        splitCode={readOnlyCode}
+      />
+    </FieldWrapper>
+  );
+}
 type PageView = "list" | "entry";
 
 type BaggingAwbLine = {
@@ -184,7 +224,14 @@ type DownloadTiffForm = {
 
 const DOWNLOAD_ALL_TYPES = ["AWBNo", "Forwarding No 1", "Forwarding No 2"] as const;
 const DOWNLOAD_TIFF_TYPES = ["CSB-III", "CSB-IV", "CSB-V"] as const;
-const FORMAT_OPTIONS = ["Format 1", "Format 2", "Format 3"] as const;
+const FORMAT_OPTIONS = [
+  "Format 1",
+  "Format 2",
+  "Format 3",
+  "Format 4",
+  "Format 5",
+  "Format 6",
+] as const;
 
 const SEED_AWB_META: Record<
   string,
@@ -674,7 +721,7 @@ function BaggingPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ ...emptyForm(), date: todayIso() });
+    setForm({ ...emptyForm(), date: todayIso(), manifestNo: nextManifestNo(rows) });
     setAwbDraft(emptyAwbDraft());
     setSelectedLineId(null);
     setAwbInBagSearch("");
@@ -706,6 +753,12 @@ function BaggingPage() {
   };
 
   const persistEntry = () => {
+    if (!form.manifestNo.trim() || form.manifestNo.trim() === "0") {
+      return toast.error("Manifest No is required");
+    }
+    if (!form.date.trim()) {
+      return toast.error("Date is required");
+    }
     if (!form.originCity.code.trim() && !form.originCity.name.trim()) {
       return toast.error("Origin City is required");
     }
@@ -727,8 +780,8 @@ function BaggingPage() {
 
     const payloadForm: BaggingForm = {
       ...form,
-      date: editing ? form.date : todayIso(),
-      manifestNo: editing?.manifestNo ?? nextManifestNo(rows),
+      date: form.date || todayIso(),
+      manifestNo: form.manifestNo.trim() || nextManifestNo(rows),
     };
     const payload = formToRow(payloadForm, editing?.id ?? crypto.randomUUID(), editing ?? undefined);
 
@@ -971,8 +1024,6 @@ function BaggingPage() {
     toast.success(`Bag ${bagNo} removed`);
   };
 
-  const isEditing = editing !== null;
-  const displayDate = isEditing ? form.date : todayIso();
   const awbInBagCount = summary.totalBagNo || bagSummaries.length;
 
   if (view === "entry") {
@@ -981,163 +1032,178 @@ function BaggingPage() {
         <MasterBreadcrumb trail={["Transaction", "Bagging"]} />
 
         <Card className="min-w-0 overflow-hidden border p-4 md:p-6">
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <FieldWrapper label="Manifest No" required>
+          <div className={BG_GRID}>
+              <FieldWrapper
+                borderLabel
+                label="Manifest No"
+                required
+                invalid={!form.manifestNo.trim() || form.manifestNo.trim() === "0"}
+              >
                 <Input
+                  className={BG_INPUT}
                   value={form.manifestNo}
-                  disabled={!isEditing}
-                  readOnly={!isEditing}
                   onChange={(e) => patchForm({ manifestNo: e.target.value })}
                 />
               </FieldWrapper>
-              <FieldWrapper label="Date" required>
-                {isEditing ? (
-                  <Input
-                    type="date"
-                    value={form.date}
-                    onChange={(e) => patchForm({ date: e.target.value })}
-                  />
-                ) : (
-                  <Input value={formatDisplayDate(displayDate)} disabled readOnly />
-                )}
-              </FieldWrapper>
-              <FieldWrapper label="Origin City" required>
-                <NameCodeLookupInput
-                  lookup="destination"
-                  value={form.originCity}
-                  onChange={(originCity) => patchForm({ originCity })}
-                />
-              </FieldWrapper>
-              <FieldWrapper label="Origin Country" required>
-                <DualPairInput value={form.originCountry} onChange={(originCountry) => patchForm({ originCountry })} />
-              </FieldWrapper>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <FieldWrapper label="Airlines Code" required>
-                <NameCodeLookupInput
-                  lookup="destination"
-                  value={form.airlinesCode}
-                  onChange={(airlinesCode) => patchForm({ airlinesCode })}
-                />
-              </FieldWrapper>
-              <FieldWrapper label="Arrival Airport">
+              <FieldWrapper borderLabel label="Date" required>
                 <Input
+                  type="date"
+                  className={BG_INPUT}
+                  value={form.date}
+                  onChange={(e) => patchForm({ date: e.target.value })}
+                />
+              </FieldWrapper>
+              <BaggingLookupField
+                label="Origin City"
+                lookup="destination"
+                value={form.originCity}
+                onChange={(originCity) => patchForm({ originCity })}
+                required
+                readOnlyCode
+              />
+              <FieldWrapper borderLabel label="Origin Country" required>
+                <DualPairInput
+                  value={form.originCountry}
+                  onChange={(originCountry) => patchForm({ originCountry })}
+                  inputClass={BG_INPUT}
+                />
+              </FieldWrapper>
+
+              <BaggingLookupField
+                label="Airlines Code"
+                lookup="destination"
+                value={form.airlinesCode}
+                onChange={(airlinesCode) => patchForm({ airlinesCode })}
+                required
+              />
+              <FieldWrapper borderLabel label="Arrival Airport">
+                <Input
+                  className={BG_INPUT}
                   value={form.arrivalAirport}
                   onChange={(e) => patchForm({ arrivalAirport: e.target.value })}
                 />
               </FieldWrapper>
-              <FieldWrapper label="Master No">
-                <div className="grid grid-cols-3 gap-1">
+              <FieldWrapper borderLabel label="Master No">
+                <div className="grid min-w-0 flex-1 grid-cols-3 gap-0 divide-x divide-input">
                   <Input
+                    className={BG_INPUT}
                     value={form.masterAirlinesPrefix}
                     onChange={(e) => patchForm({ masterAirlinesPrefix: e.target.value })}
                     placeholder="807"
                   />
                   <Input
+                    className={BG_INPUT}
                     value={form.masterAwbNoPart}
                     onChange={(e) => patchForm({ masterAwbNoPart: e.target.value })}
                     placeholder="3814"
                   />
                   <Input
+                    className={BG_INPUT}
                     value={form.masterNoPart3}
                     onChange={(e) => patchForm({ masterNoPart3: e.target.value })}
                     placeholder="2580"
                   />
                 </div>
               </FieldWrapper>
-              <FieldWrapper label="MAWB No.">
+              <FieldWrapper borderLabel label="MAWB No.">
                 <Input
+                  className={BG_INPUT}
                   value={form.mawbMasterNo}
                   onChange={(e) => patchForm({ mawbMasterNo: e.target.value })}
                   placeholder="Master AWB No."
                 />
               </FieldWrapper>
-            </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <FieldWrapper label="Vendor" required>
-                <NameCodeLookupInput lookup="vendor" value={form.vendor} onChange={(vendor) => patchForm({ vendor })} />
+              <BaggingLookupField
+                label="Vendor"
+                lookup="vendor"
+                value={form.vendor}
+                onChange={(vendor) => patchForm({ vendor })}
+                required
+              />
+              <FieldWrapper borderLabel label="CD No.">
+                <Input className={BG_INPUT} value={form.cdNo} onChange={(e) => patchForm({ cdNo: e.target.value })} />
               </FieldWrapper>
-              <FieldWrapper label="CD No.">
-                <Input value={form.cdNo} onChange={(e) => patchForm({ cdNo: e.target.value })} />
+              <FieldWrapper borderLabel label="EDI Master No.">
+                <Input
+                  className={BG_INPUT}
+                  value={form.ediMasterNo}
+                  onChange={(e) => patchForm({ ediMasterNo: e.target.value })}
+                />
               </FieldWrapper>
-              <FieldWrapper label="EDI Master No.">
-                <Input value={form.ediMasterNo} onChange={(e) => patchForm({ ediMasterNo: e.target.value })} />
-              </FieldWrapper>
-              <FieldWrapper label="Bagging Remark" className="xl:col-span-1">
+              <FieldWrapper borderLabel label="Bagging Remark" className="xl:col-span-1">
                 <Textarea
+                  className="min-h-8 resize-none rounded-none border-0 bg-transparent px-1.5 py-1.5 text-[13px] shadow-none focus-visible:ring-0"
                   value={form.baggingRemark}
                   onChange={(e) => patchForm({ baggingRemark: e.target.value })}
                   rows={2}
                 />
               </FieldWrapper>
-            </div>
           </div>
         </Card>
 
-        <Card className="min-w-0 overflow-hidden border p-4 md:p-6">
-          <FormSection title="Destination">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <FieldWrapper label="Service Center" required>
-                <NameCodeLookupInput
-                  lookup="serviceCentre"
-                  value={form.serviceCenter}
-                  onChange={(serviceCenter) => patchForm({ serviceCenter })}
+        <FormSection title="Destination">
+            <div className={BG_GRID}>
+              <BaggingLookupField
+                label="Service Center"
+                lookup="serviceCentre"
+                value={form.serviceCenter}
+                onChange={(serviceCenter) => patchForm({ serviceCenter })}
+                required
+              />
+              <FieldWrapper borderLabel label="Dest Country" required>
+                <DualPairInput
+                  value={form.destCountry}
+                  onChange={(destCountry) => patchForm({ destCountry })}
+                  inputClass={BG_INPUT}
                 />
               </FieldWrapper>
-              <FieldWrapper label="Dest Country" required>
-                <DualPairInput value={form.destCountry} onChange={(destCountry) => patchForm({ destCountry })} />
-              </FieldWrapper>
-              <FieldWrapper label="Dest City" required>
-                <NameCodeLookupInput
-                  lookup="destination"
-                  value={form.destCity}
-                  onChange={(destCity) => patchForm({ destCity })}
-                />
-              </FieldWrapper>
-              <FieldWrapper label="Flight No 1" required>
-                <NameCodeLookupInput
-                  lookup="destination"
-                  value={form.flightNo1}
-                  onChange={(flightNo1) => patchForm({ flightNo1 })}
-                />
-              </FieldWrapper>
-              <FieldWrapper label="Flight No 2">
-                <NameCodeLookupInput
-                  lookup="destination"
-                  value={form.flightNo2}
-                  onChange={(flightNo2) => patchForm({ flightNo2 })}
-                />
-              </FieldWrapper>
-              <FieldWrapper label="Arrival Date">
+              <BaggingLookupField
+                label="Dest City"
+                lookup="destination"
+                value={form.destCity}
+                onChange={(destCity) => patchForm({ destCity })}
+                required
+              />
+              <BaggingLookupField
+                label="Flight No 1"
+                lookup="destination"
+                value={form.flightNo1}
+                onChange={(flightNo1) => patchForm({ flightNo1 })}
+                required
+              />
+              <BaggingLookupField
+                label="Flight No 2"
+                lookup="destination"
+                value={form.flightNo2}
+                onChange={(flightNo2) => patchForm({ flightNo2 })}
+              />
+              <FieldWrapper borderLabel label="Arrival Date">
                 <Input
                   type="date"
+                  className={BG_INPUT}
                   value={form.arrivalDate}
                   onChange={(e) => patchForm({ arrivalDate: e.target.value })}
                 />
               </FieldWrapper>
-              <div className="flex items-end pb-2">
-                <div className="flex items-center gap-2">
+              <FieldWrapper borderLabel label="IsForwarding">
+                <div className="flex min-h-8 items-center px-1.5">
                   <Checkbox
                     id="isForwarding"
                     checked={form.isForwarding}
                     onCheckedChange={(c) => patchForm({ isForwarding: c === true })}
                   />
-                  <label htmlFor="isForwarding" className="text-sm text-foreground">
-                    IsForwarding
-                  </label>
                 </div>
-              </div>
-              <FieldWrapper label="Search AWB Bag No">
-                <div className="flex gap-1">
+              </FieldWrapper>
+              <FieldWrapper borderLabel label="Search AWB Bag No">
+                <div className="flex min-w-0 flex-1 items-stretch">
                   <Input
+                    className={`min-w-0 flex-1 ${BG_INPUT}`}
                     value={form.searchAwbBagNo}
                     onChange={(e) => patchForm({ searchAwbBagNo: e.target.value })}
                   />
                   <Button
-                    className="shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                    className="h-8 shrink-0 rounded-none border-0 border-l border-input bg-sidebar px-3 text-sidebar-foreground hover:bg-sidebar/90"
                     onClick={() => toast.info("Bag search will be enabled with backend wiring")}
                   >
                     Search
@@ -1145,14 +1211,13 @@ function BaggingPage() {
                 </div>
               </FieldWrapper>
             </div>
-          </FormSection>
-        </Card>
+        </FormSection>
 
         <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
-          <Card className="min-w-0 overflow-hidden border p-4">
-            <FormSection title={`AWB No in Bags (${awbInBagCount})`}>
-              <FieldWrapper label="Search AWB No. In Bag">
+          <FormSection title={`AWB No in Bags (${awbInBagCount})`}>
+              <FieldWrapper borderLabel label="Search AWB No. In Bag">
                 <Input
+                  className={BG_INPUT}
                   value={awbInBagSearch}
                   onChange={(e) => setAwbInBagSearch(e.target.value)}
                   placeholder="Type to search"
@@ -1205,11 +1270,9 @@ function BaggingPage() {
                   </TableBody>
                 </table>
               </div>
-            </FormSection>
-          </Card>
+          </FormSection>
 
-          <Card className="min-w-0 overflow-hidden border p-4">
-            <FormSection title="Details">
+          <FormSection title="Details">
               <div className="max-h-56 overflow-auto">
                 <table className="w-full caption-bottom text-xs">
                   <TableHeader>
@@ -1250,12 +1313,10 @@ function BaggingPage() {
                   </TableBody>
                 </table>
               </div>
-            </FormSection>
-          </Card>
+          </FormSection>
 
-          <Card className="min-w-0 overflow-hidden border p-4">
-            <FormSection title="AWB No Details">
-              <div className="space-y-2 text-sm">
+          <FormSection title="AWB No Details">
+              <div className="space-y-1">
                 {(
                   [
                     ["AWB No.", selectedLine?.awbNo ?? ""],
@@ -1266,30 +1327,35 @@ function BaggingPage() {
                     ["Service", selectedLine?.service ?? ""],
                     ["Weight", selectedLine?.weight ?? ""],
                     ["Pieces", selectedLine?.pcs ?? ""],
+                    [
+                      "Destination",
+                      selectedLine
+                        ? form.destCity.name.trim() || form.destCity.code.trim()
+                        : "",
+                    ],
                   ] as const
                 ).map(([label, value]) => (
-                  <div key={label} className="flex gap-2">
-                    <span className="min-w-[5.5rem] font-medium text-foreground">{label} :</span>
-                    <span className="text-muted-foreground">{value}</span>
+                  <div key={label} className="flex gap-2 text-sm">
+                    <span className="min-w-[5.5rem] shrink-0 font-medium text-foreground">{label} :</span>
+                    <span className="min-w-0 flex-1 text-muted-foreground">{value || "\u00a0"}</span>
                   </div>
                 ))}
               </div>
-            </FormSection>
-          </Card>
+          </FormSection>
         </div>
 
-        <Card className="min-w-0 overflow-hidden border p-4 md:p-6">
-          <FormSection title="Bag/AWB Details">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <FieldWrapper label="Bag No">
-                <div className="flex gap-1">
+        <FormSection title="Bag/AWB Details">
+            <div className={BG_GRID}>
+              <FieldWrapper borderLabel label="Bag No">
+                <div className="flex min-w-0 flex-1 items-stretch">
                   <Input
+                    className={`min-w-0 flex-1 ${BG_INPUT}`}
                     value={awbDraft.bagNo}
                     onChange={(e) => setAwbDraft((d) => ({ ...d, bagNo: e.target.value }))}
                     inputMode="numeric"
                   />
                   <Button
-                    className="shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                    className="h-8 shrink-0 rounded-none border-0 border-l border-input bg-sidebar px-3 text-sidebar-foreground hover:bg-sidebar/90"
                     onClick={incrementBagNo}
                   >
                     <Plus className="mr-1 h-4 w-4" />
@@ -1297,20 +1363,23 @@ function BaggingPage() {
                   </Button>
                 </div>
               </FieldWrapper>
-              <FieldWrapper label="CRN MHBS No">
+              <FieldWrapper borderLabel label="CRN MHBS No">
                 <Input
+                  className={BG_INPUT}
                   value={awbDraft.crnMhbsNo}
                   onChange={(e) => setAwbDraft((d) => ({ ...d, crnMhbsNo: e.target.value }))}
                 />
               </FieldWrapper>
-              <FieldWrapper label="Forwarding No.">
+              <FieldWrapper borderLabel label="Forwarding No.">
                 <Input
+                  className={BG_INPUT}
                   value={awbDraft.forwardingNo}
                   onChange={(e) => setAwbDraft((d) => ({ ...d, forwardingNo: e.target.value }))}
                 />
               </FieldWrapper>
-              <FieldWrapper label="AWB No.">
+              <FieldWrapper borderLabel label="AWB No.">
                 <Input
+                  className={BG_INPUT}
                   value={awbDraft.awbNo}
                   onChange={(e) => setAwbDraft((d) => ({ ...d, awbNo: e.target.value }))}
                   onKeyDown={(e) => {
@@ -1323,23 +1392,25 @@ function BaggingPage() {
               </FieldWrapper>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <FieldWrapper label="Weight">
+            <div className={`${BG_GRID} mt-2.5`}>
+              <FieldWrapper borderLabel label="Weight">
                 <Input
+                  className={BG_INPUT}
                   value={awbDraft.weight}
                   onChange={(e) => setAwbDraft((d) => ({ ...d, weight: e.target.value }))}
                   inputMode="decimal"
                 />
               </FieldWrapper>
-              <FieldWrapper label="PCS">
-                <div className="flex gap-1">
+              <FieldWrapper borderLabel label="PCS">
+                <div className="flex min-w-0 flex-1 items-stretch">
                   <Input
+                    className={`min-w-0 flex-1 ${BG_INPUT}`}
                     value={awbDraft.pcs}
                     onChange={(e) => setAwbDraft((d) => ({ ...d, pcs: e.target.value.replace(/\D/g, "") }))}
                     inputMode="numeric"
                   />
                   <Button
-                    className="shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                    className="h-8 shrink-0 rounded-none border-0 border-l border-input bg-sidebar px-3 text-sidebar-foreground hover:bg-sidebar/90"
                     onClick={addAwbLine}
                   >
                     <Plus className="mr-1 h-4 w-4" />
@@ -1395,7 +1466,6 @@ function BaggingPage() {
               </Button>
             </div>
           </FormSection>
-        </Card>
       </div>
     );
   }
@@ -1410,33 +1480,31 @@ function BaggingPage() {
       </div>
 
       <Card className="min-w-0 overflow-hidden border p-4 md:p-6">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <FieldWrapper label="Product">
-            <LookupPairInput
-              lookup="product"
-              value={listFilters.product}
-              onChange={(product) => {
-                setListFilters((f) => ({ ...f, product }));
-                setPage(1);
-              }}
-            />
-          </FieldWrapper>
-          <FieldWrapper label="Vendor">
-            <LookupPairInput
-              lookup="vendor"
-              value={listFilters.vendor}
-              onChange={(vendor) => {
-                setListFilters((f) => ({ ...f, vendor }));
-                setPage(1);
-              }}
-            />
-          </FieldWrapper>
-          <FieldWrapper label="Format">
+        <div className={BG_GRID}>
+          <BaggingLookupField
+            label="Product"
+            lookup="product"
+            value={listFilters.product}
+            onChange={(product) => {
+              setListFilters((f) => ({ ...f, product }));
+              setPage(1);
+            }}
+          />
+          <BaggingLookupField
+            label="Vendor"
+            lookup="vendor"
+            value={listFilters.vendor}
+            onChange={(vendor) => {
+              setListFilters((f) => ({ ...f, vendor }));
+              setPage(1);
+            }}
+          />
+          <FieldWrapper borderLabel label="Format">
             <Select
               value={listFilters.format}
               onValueChange={(format) => setListFilters((f) => ({ ...f, format }))}
             >
-              <SelectTrigger>
+              <SelectTrigger className={BG_SELECT}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1986,79 +2054,41 @@ function FormSection({
   className?: string;
 }) {
   return (
-    <div className={`relative rounded-md border p-4 pt-6 ${className ?? ""}`}>
-      <span className="absolute -top-2.5 left-3 bg-card px-2 text-sm font-medium text-foreground">{title}</span>
+    <div
+      className={cn(
+        "relative min-w-0 rounded border border-border bg-card p-4 pt-6 shadow-none md:p-5 md:pt-7",
+        className,
+      )}
+    >
+      <span className="absolute left-2.5 top-1 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[14px] font-semibold leading-none text-sidebar-foreground">
+        {title}
+      </span>
       {children}
     </div>
-  );
-}
-
-function NameCodeLookupInput({
-  value,
-  onChange,
-  lookup,
-}: {
-  value: LookupPair;
-  onChange: (v: LookupPair) => void;
-  lookup: LookupKey;
-}) {
-  const [lookupOpen, setLookupOpen] = useState(false);
-
-  return (
-    <>
-      <div className="flex gap-1">
-        <Input
-          value={value.name}
-          onChange={(e) => onChange({ ...value, name: e.target.value })}
-          className="min-w-0 flex-1"
-          placeholder="Name"
-        />
-        <Input
-          value={value.code}
-          onChange={(e) => onChange({ ...value, code: e.target.value })}
-          className="w-20"
-          placeholder="Code"
-        />
-        <Button
-          size="icon"
-          variant="outline"
-          className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-          aria-label="Search"
-          onClick={() => setLookupOpen(true)}
-        >
-          <Search className="h-4 w-4" />
-        </Button>
-      </div>
-      <MasterLookupDialog
-        open={lookupOpen}
-        onOpenChange={setLookupOpen}
-        lookup={lookup}
-        returnField="code"
-        onSelect={(_v, option: LookupOption) => onChange({ code: option.code, name: option.name })}
-      />
-    </>
   );
 }
 
 function DualPairInput({
   value,
   onChange,
+  inputClass,
 }: {
   value: LookupPair;
   onChange: (v: LookupPair) => void;
+  inputClass?: string;
 }) {
   return (
-    <div className="flex gap-1">
+    <div className="flex min-w-0 flex-1 items-stretch">
       <Input
         value={value.name}
         onChange={(e) => onChange({ ...value, name: e.target.value })}
-        className="min-w-0 flex-1"
+        className={cn("min-w-0 flex-1", inputClass)}
         placeholder="Name"
       />
       <Input
         value={value.code}
         onChange={(e) => onChange({ ...value, code: e.target.value })}
-        className="w-20"
+        className={cn("w-20 shrink-0 border-l border-input", inputClass)}
         placeholder="Code"
       />
     </div>

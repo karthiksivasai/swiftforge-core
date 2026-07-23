@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { RefreshCw, Plus, Search, Pencil, Trash2 } from "lucide-react";
+import { RefreshCw, Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -43,8 +43,7 @@ import {
   TablePager,
 } from "@/components/master-table-kit";
 import { DataIoToolbar } from "@/components/data-io-toolbar";
-import { MasterLookupDialog } from "@/components/master-lookup-dialog";
-import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { MASTER_LOOKUPS } from "@/lib/master-lookups";
 
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
@@ -61,6 +60,8 @@ import {
 } from "@/lib/masters/schemas/fieldExecutives";
 import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
 import { LookupCombobox } from "@/components/masters/lookup-combobox";
+import { lookup } from "@/lib/masters/core/lookup";
+import { supabase } from "@/integrations/supabase/client";
 
 type LookupPair = { code: string; name: string };
 
@@ -98,6 +99,71 @@ type FieldExecutiveForm = {
 };
 
 const SERVICE_CENTRES = MASTER_LOOKUPS.serviceCentre.options;
+
+const DEMO_SERVICE_CENTER_DESTINATIONS: Record<string, LookupPair> = {
+  HYD: { code: "HYD", name: "HYDERABAD" },
+  BAN: { code: "BLR", name: "Bangalore" },
+  MUM: { code: "BOM", name: "Mumbai" },
+  GUN: { code: "HYD", name: "HYDERABAD" },
+};
+
+function destinationForDemoServiceCenter(code: string, name: string): LookupPair {
+  return (
+    DEMO_SERVICE_CENTER_DESTINATIONS[code] ?? {
+      code,
+      name: name.toUpperCase(),
+    }
+  );
+}
+
+async function resolveDestinationFromServiceCenter(
+  serviceCenterId: string,
+  fallbackCode: string,
+  fallbackName: string,
+): Promise<{ destinationId: string; destination: LookupPair }> {
+  const { data: sc, error } = await supabase
+    .from("service_centers")
+    .select("destination, branch")
+    .eq("id", serviceCenterId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+
+  const destCode = (sc?.branch ?? fallbackCode).trim();
+  const destName = (sc?.destination ?? fallbackName).trim().toUpperCase();
+
+  let destinationId = "";
+  if (destCode) {
+    const rows = await lookup("destination", destCode, 20);
+    const exact = rows.find((r) => r.code.toUpperCase() === destCode.toUpperCase());
+    destinationId = exact?.id ?? rows[0]?.id ?? "";
+  }
+
+  return {
+    destinationId,
+    destination: { code: destCode, name: destName },
+  };
+}
+
+function ReadOnlyDestinationPair({ value }: { value: LookupPair }) {
+  return (
+    <div className="flex w-full min-w-0 items-stretch gap-1">
+      <Input
+        value={value.name}
+        readOnly
+        tabIndex={-1}
+        className="min-w-0 flex-1 bg-muted/30"
+        placeholder="Name"
+      />
+      <Input
+        value={value.code}
+        readOnly
+        tabIndex={-1}
+        className="w-28 bg-muted/30"
+        placeholder="Code"
+      />
+    </div>
+  );
+}
 
 const SEED_ROWS: Omit<FieldExecutiveRow, "id">[] = [
   {
@@ -368,6 +434,56 @@ function FieldExecutivePage() {
     setForm(emptyForm());
   };
 
+  const patchServiceCenter = async (
+    serviceCenterId: string,
+    code: string,
+    name: string,
+  ) => {
+    if (!serviceCenterId) {
+      setForm((f) => ({
+        ...f,
+        serviceCenterId: "",
+        serviceCenter: code,
+        serviceCenterName: name,
+        destinationId: "",
+        destination: { code: "", name: "" },
+      }));
+      return;
+    }
+
+    try {
+      const resolved = await resolveDestinationFromServiceCenter(serviceCenterId, code, name);
+      setForm((f) => ({
+        ...f,
+        serviceCenterId,
+        serviceCenter: code,
+        serviceCenterName: name,
+        destinationId: resolved.destinationId,
+        destination: resolved.destination,
+      }));
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Could not load destination for service center"));
+      setForm((f) => ({
+        ...f,
+        serviceCenterId,
+        serviceCenter: code,
+        serviceCenterName: name,
+        destination: { code, name: name.toUpperCase() },
+      }));
+    }
+  };
+
+  const patchDemoServiceCenter = (code: string) => {
+    const sc = SERVICE_CENTRES.find((row) => row.code === code);
+    const scName = sc?.name ?? code;
+    setForm((f) => ({
+      ...f,
+      serviceCenter: code,
+      serviceCenterName: scName,
+      destination: destinationForDemoServiceCenter(code, scName),
+    }));
+  };
+
   const handleSave = async () => {
     if (authed) {
       const raw = {
@@ -578,27 +694,13 @@ function FieldExecutivePage() {
                     lookupKey="service-center"
                     value={form.serviceCenterId}
                     valueLabel={form.serviceCenterName || form.serviceCenter}
-                    onChange={(id, item) =>
-                      setForm((f) => ({
-                        ...f,
-                        serviceCenterId: id,
-                        serviceCenter: item?.code ?? "",
-                        serviceCenterName: item?.name ?? "",
-                      }))
-                    }
+                    onChange={(id, item) => {
+                      void patchServiceCenter(id, item?.code ?? "", item?.name ?? "");
+                    }}
                     placeholder="Select Service Center"
                   />
                 ) : (
-                  <Select
-                    value={form.serviceCenter}
-                    onValueChange={(v) =>
-                      setForm((f) => ({
-                        ...f,
-                        serviceCenter: v,
-                        serviceCenterName: SERVICE_CENTRES.find((sc) => sc.code === v)?.name ?? v,
-                      }))
-                    }
-                  >
+                  <Select value={form.serviceCenter} onValueChange={patchDemoServiceCenter}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select Service Center" />
                     </SelectTrigger>
@@ -612,28 +714,8 @@ function FieldExecutivePage() {
                   </Select>
                 )}
               </FieldWrapper>
-              <FieldWrapper label="Destination">
-                {authed ? (
-                  <LookupCombobox
-                    lookupKey="destination"
-                    value={form.destinationId}
-                    valueLabel={form.destination.name || form.destination.code}
-                    onChange={(id, item) =>
-                      setForm((f) => ({
-                        ...f,
-                        destinationId: id,
-                        destination: { code: item?.code ?? "", name: item?.name ?? "" },
-                      }))
-                    }
-                    placeholder="Select Destination"
-                  />
-                ) : (
-                  <LookupPairInput
-                    lookup="destination"
-                    value={form.destination}
-                    onChange={(v) => setForm((f) => ({ ...f, destination: v }))}
-                  />
-                )}
+              <FieldWrapper label="Destination" required>
+                <ReadOnlyDestinationPair value={form.destination} />
               </FieldWrapper>
               <FieldWrapper label="TLD Batch No">
                 <Input
@@ -861,53 +943,6 @@ function FieldExecutivePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  );
-}
-
-function LookupPairInput({
-  value,
-  onChange,
-  lookup,
-}: {
-  value: LookupPair;
-  onChange: (v: LookupPair) => void;
-  lookup: LookupKey;
-}) {
-  const [lookupOpen, setLookupOpen] = useState(false);
-
-  return (
-    <div className="flex gap-1">
-      <Input
-        value={value.name}
-        onChange={(e) => onChange({ ...value, name: e.target.value })}
-        className="flex-1"
-        placeholder="Name"
-      />
-      <Input
-        value={value.code}
-        onChange={(e) => onChange({ ...value, code: e.target.value })}
-        className="w-28"
-        placeholder="Code"
-      />
-      <Button
-        size="icon"
-        variant="outline"
-        className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-        aria-label="Search"
-        onClick={() => setLookupOpen(true)}
-      >
-        <Search className="h-4 w-4" />
-      </Button>
-      <MasterLookupDialog
-        open={lookupOpen}
-        onOpenChange={setLookupOpen}
-        lookup={lookup}
-        returnField="code"
-        onSelect={(_v, option: LookupOption) =>
-          onChange({ code: option.code, name: option.name.toUpperCase() })
-        }
-      />
     </div>
   );
 }

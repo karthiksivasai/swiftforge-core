@@ -235,7 +235,12 @@ const matchesRegisterFilters = (row: PickupRow, f: RegisterFilters) => {
   return true;
 };
 
-const formToRow = (form: PickupForm, pickupNo: number, id?: string): PickupRow => ({
+const formToRow = (
+  form: PickupForm,
+  pickupNo: number,
+  id?: string,
+  profileFallback = "",
+): PickupRow => ({
   id: id ?? crypto.randomUUID(),
   pickupNo,
   status: form.fieldExecutive.code || form.fieldExecutive.name ? "ASSIGNED" : "OPEN",
@@ -244,9 +249,10 @@ const formToRow = (form: PickupForm, pickupNo: number, id?: string): PickupRow =
   awbNo: "",
   confirm: "",
   cancel: "",
+  userId: form.bookedBy || profileFallback || "SURYAA",
   ...form,
-  bookedBy: form.bookedBy || "SURYAA",
-  editedBy: "SURYAA",
+  bookedBy: form.bookedBy || profileFallback || "SURYAA",
+  editedBy: profileFallback || "SURYAA",
 });
 
 type ColFilterKey =
@@ -261,7 +267,8 @@ type ColFilterKey =
   | "area"
   | "reason"
   | "passed"
-  | "awbNo";
+  | "awbNo"
+  | "userId";
 
 const emptyColFilters = (): Record<ColFilterKey, string> => ({
   pickupNo: "",
@@ -276,6 +283,7 @@ const emptyColFilters = (): Record<ColFilterKey, string> => ({
   reason: "",
   passed: "",
   awbNo: "",
+  userId: "",
 });
 
 /** Keeps wide pickup columns readable; table scrolls horizontally inside the card. */
@@ -295,6 +303,7 @@ const pickupCol = {
   awbNo: "min-w-[112px] whitespace-nowrap",
   confirm: "min-w-[96px] whitespace-nowrap",
   cancel: "min-w-[96px] whitespace-nowrap",
+  userId: "min-w-[112px] whitespace-nowrap",
   action: "min-w-[104px] whitespace-nowrap text-center",
   actionCell: "min-w-[104px] whitespace-nowrap text-center",
   filter: "h-8 w-full min-w-0",
@@ -311,7 +320,7 @@ export const Route = createFileRoute("/transaction/pickup")({
 });
 
 function PickupPage() {
-  const { isAuthenticated: authed } = useAuth();
+  const { isAuthenticated: authed, profile } = useAuth();
   const queryClient = useQueryClient();
   const [demoRows, setDemoRows] = useState<PickupRow[]>([]);
   const [search, setSearch] = useState("");
@@ -371,6 +380,7 @@ function PickupPage() {
         reason: r.reason,
         passed: r.passed,
         awbNo: r.awbNo,
+        userId: r.userId,
       };
       if (q) {
         const haystack = Object.values(display).join(" ").toLowerCase();
@@ -392,7 +402,11 @@ function PickupPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm(emptyForm());
+    setForm({
+      ...emptyForm(),
+      bookedBy: profile?.username ?? "",
+      editedBy: profile?.username ?? "",
+    });
     setShowForm(true);
   };
 
@@ -432,17 +446,18 @@ function PickupPage() {
     }
 
     if (editing) {
-      const updated = formToRow(form, editing.pickupNo, editing.id);
+      const updated = formToRow(form, editing.pickupNo, editing.id, profile?.username);
       updated.passed = editing.passed;
       updated.awbNo = editing.awbNo;
       updated.confirm = editing.confirm;
       updated.cancel = editing.cancel;
+      updated.userId = editing.userId;
       updated.rowVersion = editing.rowVersion;
       updated.status = editing.status;
       setDemoRows((prev) => prev.map((r) => (r.id === editing.id ? updated : r)));
       toast.success("Pickup updated");
     } else {
-      setDemoRows((prev) => [formToRow(form, nextPickupNo), ...prev]);
+      setDemoRows((prev) => [formToRow(form, nextPickupNo, undefined, profile?.username), ...prev]);
       toast.success("Pickup saved");
     }
     closeForm();
@@ -832,6 +847,7 @@ function PickupPage() {
                         { key: "reason", header: "Reason" },
                         { key: "passed", header: "Passed" },
                         { key: "awbNo", header: "AWB No" },
+                        { key: "userId", header: "User ID" },
                       ],
                       getRows: () =>
                         filtered.map((r) => ({
@@ -847,6 +863,7 @@ function PickupPage() {
                           reason: r.reason,
                           passed: r.passed,
                           awbNo: r.awbNo,
+                          userId: r.userId,
                         })),
                     }}
                   />
@@ -965,6 +982,7 @@ function PickupPage() {
                     <TableHead className={cn("text-sidebar-foreground", pickupCol.awbNo)}>AWB No</TableHead>
                     <TableHead className={cn("text-sidebar-foreground", pickupCol.confirm)}>Confirm</TableHead>
                     <TableHead className={cn("text-sidebar-foreground", pickupCol.cancel)}>Cancel</TableHead>
+                    <TableHead className={cn("text-sidebar-foreground", pickupCol.userId)}>User ID</TableHead>
                     <TableHead className={cn("text-sidebar-foreground", pickupCol.action)}>Action</TableHead>
                   </TableRow>
                   <TableRow className="bg-muted/20 hover:bg-muted/20">
@@ -998,13 +1016,24 @@ function PickupPage() {
                     )}
                     <TableHead className={pickupCol.confirm} />
                     <TableHead className={pickupCol.cancel} />
+                    <TableHead className={cn("py-2", pickupCol.userId)}>
+                      <Input
+                        value={colFilters.userId}
+                        onChange={(e) => {
+                          setColFilters((f) => ({ ...f, userId: e.target.value }));
+                          setPage(1);
+                        }}
+                        placeholder="User ID"
+                        className={pickupCol.filter}
+                      />
+                    </TableHead>
                     <TableHead className={pickupCol.action} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pageRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={16} className="h-32 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={17} className="h-32 text-center text-sm text-muted-foreground">
                         No data available in table
                       </TableCell>
                     </TableRow>
@@ -1032,6 +1061,7 @@ function PickupPage() {
                         <TableCell className={pickupCol.awbNo}>{r.awbNo}</TableCell>
                         <TableCell className={pickupCol.confirm}>{r.confirm}</TableCell>
                         <TableCell className={pickupCol.cancel}>{r.cancel}</TableCell>
+                        <TableCell className={pickupCol.userId}>{r.userId}</TableCell>
                         <TableCell className={pickupCol.actionCell}>
                           <div className="flex justify-center gap-1">
                             <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)} aria-label={`Edit pickup ${r.pickupNo}`}>

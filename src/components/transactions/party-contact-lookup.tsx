@@ -264,8 +264,7 @@ export function PartyContactLookup({
 
   const manualQueryRaw = (value.name || value.code || "").trim();
   const debouncedManualQuery = useDebouncedValue(manualQueryRaw, debounceMs);
-  const canDebouncedManualSearch =
-    manualSearch && debouncedManualQuery.length >= minChars;
+  const canDebouncedManualSearch = false;
 
   const debouncedInline = useDebouncedValue(inlineQuery, debounceMs);
   const debouncedPopup = useDebouncedValue(popupQuery, debounceMs);
@@ -509,7 +508,8 @@ export function PartyContactLookup({
         if (manualDropdownOpen && manualDropdownHits[highlight]) {
           void pick(manualDropdownHits[highlight]);
         } else {
-          void runManualSearch();
+          clearManualDropdown();
+          onCommit?.();
         }
       }
       return;
