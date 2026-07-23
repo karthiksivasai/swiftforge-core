@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { ERP_MANUAL_SEARCH, ERP_NAV_GROUP, ERP_NAV_ORDER, ERP_NAV_SKIP } from "@/lib/forms/erp-keyboard-nav";
 import {
   isLookupDropdownOutside,
+  LOOKUP_SEARCH_BTN_ATTR,
   LookupDropdownPortal,
 } from "@/components/masters/lookup-dropdown-portal";
 import {
@@ -68,6 +69,7 @@ export function VendorServiceLookup({
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const explicitSearchSeqRef = useRef(0);
   const hasVendor = Boolean(vendor.id || vendor.code.trim() || vendor.name.trim());
   const locked = disabled || !hasVendor;
 
@@ -133,7 +135,7 @@ export function VendorServiceLookup({
         q: debouncedPopup.trim() || null,
         limit: 100,
       }),
-    enabled: Boolean(live && hasVendor && popupOpen && manualPopupHits === null && !manualSearch),
+    enabled: Boolean(live && hasVendor && popupOpen && manualPopupHits === null),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
   });
@@ -161,6 +163,7 @@ export function VendorServiceLookup({
     }
 
     let cancelled = false;
+    const seqAtStart = explicitSearchSeqRef.current;
     setManualSearching(true);
     void (live
       ? listVendorServices({
@@ -174,7 +177,7 @@ export function VendorServiceLookup({
       : Promise.resolve(filterDemoVendorServices(vendor.code, vendor.name, debouncedManualQuery))
     )
       .then((hits) => {
-        if (cancelled) return;
+        if (cancelled || seqAtStart !== explicitSearchSeqRef.current) return;
         if (hits.length === 0) {
           setManualDropdownHits([]);
           setManualDropdownOpen(false);
@@ -240,47 +243,79 @@ export function VendorServiceLookup({
     setHighlight(0);
   }, []);
 
-  const runManualSearch = useCallback(async () => {
-    if (!hasVendor) return;
-    const q = searchQuery();
-    if (!q) {
-      if (emptySearchMessage) toast.error(emptySearchMessage);
-      return;
-    }
-    setManualSearching(true);
-    try {
-      const hits = live
-        ? await listVendorServices({ ...vendorArgs, q, limit: 100 })
-        : filterDemoVendorServices(vendor.code, vendor.name, q);
+  const applyManualHits = useCallback(
+    (hits: VendorServiceHit[], opts?: { autoSelectSingle?: boolean }) => {
+      const autoSelectSingle = opts?.autoSelectSingle ?? false;
       if (hits.length === 0) {
         clearManualDropdown();
-        toast.error(noResultsMessage);
-        return;
+        return false;
       }
-      if (hits.length === 1) {
+      if (autoSelectSingle && hits.length === 1) {
         pick(hits[0]);
-        return;
+        return true;
       }
       setManualDropdownHits(hits);
       setManualDropdownOpen(true);
       setHighlight(0);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Search failed");
-    } finally {
-      setManualSearching(false);
-    }
-  }, [
-    clearManualDropdown,
-    emptySearchMessage,
-    hasVendor,
-    live,
-    noResultsMessage,
-    pick,
-    searchQuery,
-    vendor.code,
-    vendor.name,
-    vendorArgs,
-  ]);
+      return true;
+    },
+    [clearManualDropdown, pick],
+  );
+
+  const openBrowsePopup = useCallback(() => {
+    setInlineOpen(false);
+    setManualDropdownOpen(false);
+    setManualDropdownHits([]);
+    setPopupQuery("");
+    setManualPopupHits(null);
+    setPopupOpen(true);
+  }, []);
+
+  const runManualSearch = useCallback(
+    async (opts?: { autoSelectSingle?: boolean; showEmptyToast?: boolean }) => {
+      if (!hasVendor) return;
+      const autoSelectSingle = opts?.autoSelectSingle ?? true;
+      const q = searchQuery();
+      if (!q) {
+        openBrowsePopup();
+        return;
+      }
+      const seq = ++explicitSearchSeqRef.current;
+      setManualSearching(true);
+      try {
+        const hits = live
+          ? await listVendorServices({ ...vendorArgs, q, limit: 100 })
+          : filterDemoVendorServices(vendor.code, vendor.name, q);
+        if (seq !== explicitSearchSeqRef.current) return;
+        if (hits.length === 0) {
+          clearManualDropdown();
+          toast.error(noResultsMessage);
+          return;
+        }
+        applyManualHits(hits, { autoSelectSingle });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Search failed");
+      } finally {
+        if (seq === explicitSearchSeqRef.current) setManualSearching(false);
+      }
+    },
+    [
+      applyManualHits,
+      clearManualDropdown,
+      hasVendor,
+      live,
+      noResultsMessage,
+      openBrowsePopup,
+      searchQuery,
+      vendor.code,
+      vendor.name,
+      vendorArgs,
+    ],
+  );
+
+  const triggerExplicitSearch = useCallback(() => {
+    void runManualSearch({ autoSelectSingle: false, showEmptyToast: true });
+  }, [runManualSearch]);
 
   const openInline = (text: string) => {
     if (manualSearch || !hasVendor) return;
@@ -292,7 +327,7 @@ export function VendorServiceLookup({
     if (manualSearch) {
       if (e.key === "F2") {
         e.preventDefault();
-        void runManualSearch();
+        triggerExplicitSearch();
         return;
       }
       if (manualDropdownHits.length > 0) {
@@ -375,9 +410,11 @@ export function VendorServiceLookup({
 
   const inputDisabled = locked;
 
+  const searchBtnProps = { [LOOKUP_SEARCH_BTN_ATTR]: "" } as const;
+
   const triggerSearch = () => {
     if (manualSearch) {
-      void runManualSearch();
+      triggerExplicitSearch();
       return;
     }
     setInlineOpen(false);
@@ -468,7 +505,13 @@ export function VendorServiceLookup({
                   compact ? "h-8 w-8" : "h-9 w-9",
                 )}
                 aria-label="Search services"
-                onClick={triggerSearch}
+                {...searchBtnProps}
+                onMouseDown={(e) => {
+                  if (inputDisabled) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  triggerSearch();
+                }}
                 {...(navOrder != null ? navSkipProps : {})}
               >
                 {manualSearching ? (
@@ -542,10 +585,12 @@ export function VendorServiceLookup({
                 compact ? "h-8 w-8" : "h-9 w-9",
               )}
               aria-label="Search services"
-              onClick={() => {
-                setInlineOpen(false);
-                setPopupQuery("");
-                setPopupOpen(true);
+              {...searchBtnProps}
+              onMouseDown={(e) => {
+                if (locked) return;
+                e.preventDefault();
+                e.stopPropagation();
+                triggerSearch();
               }}
             >
               <Search className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />

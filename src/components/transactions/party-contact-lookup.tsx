@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { ERP_MANUAL_SEARCH, ERP_NAV_GROUP, ERP_NAV_ORDER, ERP_NAV_SKIP } from "@/lib/forms/erp-keyboard-nav";
 import {
   isLookupDropdownOutside,
+  LOOKUP_SEARCH_BTN_ATTR,
   LookupDropdownPortal,
 } from "@/components/masters/lookup-dropdown-portal";
 import {
@@ -223,6 +224,7 @@ export function PartyContactLookup({
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const explicitSearchSeqRef = useRef(0);
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupQuery, setPopupQuery] = useState("");
   const [inlineOpen, setInlineOpen] = useState(false);
@@ -262,7 +264,7 @@ export function PartyContactLookup({
   const { data: livePopup, isFetching: popupFetching } = useQuery({
     queryKey: ["party-contacts", role, "popup", debouncedPopup.trim() || null],
     queryFn: () => searchPartyContacts(role, debouncedPopup.trim() || null, 100),
-    enabled: Boolean(live && popupOpen && manualPopupHits === null && !manualSearch),
+    enabled: Boolean(live && popupOpen && manualPopupHits === null),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
@@ -294,13 +296,14 @@ export function PartyContactLookup({
     }
 
     let cancelled = false;
+    const seqAtStart = explicitSearchSeqRef.current;
     setManualSearching(true);
     void (live
       ? searchPartyContacts(role, debouncedManualQuery, 100)
       : Promise.resolve(filterDemoHits(role, debouncedManualQuery))
     )
       .then((hits) => {
-        if (cancelled) return;
+        if (cancelled || seqAtStart !== explicitSearchSeqRef.current) return;
         if (hits.length === 0) {
           setManualDropdownHits([]);
           setManualDropdownOpen(false);
@@ -367,35 +370,75 @@ export function PartyContactLookup({
     setHighlight(0);
   }, []);
 
-  const runManualSearch = useCallback(async () => {
-    const q = searchQuery();
-    if (!q) {
-      if (emptySearchMessage) toast.error(emptySearchMessage);
-      return;
-    }
-    setManualSearching(true);
-    try {
-      const hits = live
-        ? await searchPartyContacts(role, q, 100)
-        : filterDemoHits(role, q);
+  const applyManualHits = useCallback(
+    async (hits: PartyContactHit[], opts?: { autoSelectSingle?: boolean }) => {
+      const autoSelectSingle = opts?.autoSelectSingle ?? false;
       if (hits.length === 0) {
         clearManualDropdown();
-        toast.error(noResultsMessage);
-        return;
+        return false;
       }
-      if (hits.length === 1) {
+      if (autoSelectSingle && hits.length === 1) {
         await pick(hits[0]);
-        return;
+        return true;
       }
       setManualDropdownHits(hits);
       setManualDropdownOpen(true);
       setHighlight(0);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Search failed");
-    } finally {
-      setManualSearching(false);
-    }
-  }, [clearManualDropdown, emptySearchMessage, live, noResultsMessage, pick, role, searchQuery]);
+      return true;
+    },
+    [clearManualDropdown, pick],
+  );
+
+  const openBrowsePopup = useCallback(() => {
+    setInlineOpen(false);
+    setManualDropdownOpen(false);
+    setManualDropdownHits([]);
+    setPopupQuery("");
+    setManualPopupHits(null);
+    setPopupOpen(true);
+  }, []);
+
+  const runManualSearch = useCallback(
+    async (opts?: { autoSelectSingle?: boolean; showEmptyToast?: boolean }) => {
+      const autoSelectSingle = opts?.autoSelectSingle ?? true;
+      const q = searchQuery();
+      if (!q) {
+        openBrowsePopup();
+        return;
+      }
+      const seq = ++explicitSearchSeqRef.current;
+      setManualSearching(true);
+      try {
+        const hits = live
+          ? await searchPartyContacts(role, q, 100)
+          : filterDemoHits(role, q);
+        if (seq !== explicitSearchSeqRef.current) return;
+        if (hits.length === 0) {
+          clearManualDropdown();
+          toast.error(noResultsMessage);
+          return;
+        }
+        await applyManualHits(hits, { autoSelectSingle });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Search failed");
+      } finally {
+        if (seq === explicitSearchSeqRef.current) setManualSearching(false);
+      }
+    },
+    [
+      applyManualHits,
+      clearManualDropdown,
+      live,
+      noResultsMessage,
+      openBrowsePopup,
+      role,
+      searchQuery,
+    ],
+  );
+
+  const triggerExplicitSearch = useCallback(() => {
+    void runManualSearch({ autoSelectSingle: false, showEmptyToast: true });
+  }, [runManualSearch]);
 
   const startInline = (text: string) => {
     if (manualSearch) return;
@@ -408,7 +451,7 @@ export function PartyContactLookup({
     if (manualSearch) {
       if (e.key === "F2") {
         e.preventDefault();
-        void runManualSearch();
+        triggerExplicitSearch();
         return;
       }
       if (manualDropdownHits.length > 0) {
@@ -547,6 +590,8 @@ export function PartyContactLookup({
     />
   );
 
+  const searchBtnProps = { [LOOKUP_SEARCH_BTN_ATTR]: "" } as const;
+
   const searchButton = (
     <Button
       size="icon"
@@ -558,9 +603,13 @@ export function PartyContactLookup({
         btnSize,
       )}
       aria-label={`Search ${title}`}
-      onClick={() => {
+      {...searchBtnProps}
+      onMouseDown={(e) => {
+        if (disabled || hydrating) return;
+        e.preventDefault();
+        e.stopPropagation();
         if (manualSearch) {
-          void runManualSearch();
+          triggerExplicitSearch();
           return;
         }
         setInlineOpen(false);

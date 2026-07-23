@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 export const LOOKUP_DROPDOWN_ATTR = "data-lookup-dropdown";
+export const LOOKUP_SEARCH_BTN_ATTR = "data-lookup-search-btn";
 
 /** Fixed-position listbox portal so AWB lookup results are not clipped by later sections. */
 export function LookupDropdownPortal({
@@ -67,10 +68,13 @@ export function LookupDropdownPortal({
   );
 }
 
-/** Ignore mousedown outside lookup anchor + portaled dropdown. */
+/** Ignore mousedown outside lookup anchor, portaled dropdown, and search button. */
 export function isLookupDropdownOutside(target: EventTarget | null, anchor: HTMLElement | null): boolean {
   if (!(target instanceof Node)) return true;
   if (anchor?.contains(target)) return false;
-  if (target instanceof Element && target.closest(`[${LOOKUP_DROPDOWN_ATTR}]`)) return false;
+  if (target instanceof Element) {
+    if (target.closest(`[${LOOKUP_DROPDOWN_ATTR}]`)) return false;
+    if (target.closest(`[${LOOKUP_SEARCH_BTN_ATTR}]`)) return false;
+  }
   return true;
 }

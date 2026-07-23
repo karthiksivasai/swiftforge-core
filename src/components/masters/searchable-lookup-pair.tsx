@@ -29,6 +29,7 @@ import {
 } from "@/lib/forms/erp-keyboard-nav";
 import {
   isLookupDropdownOutside,
+  LOOKUP_SEARCH_BTN_ATTR,
   LookupDropdownPortal,
 } from "@/components/masters/lookup-dropdown-portal";
 
@@ -148,6 +149,7 @@ export function SearchableLookupPair({
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const explicitSearchSeqRef = useRef(0);
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupQuery, setPopupQuery] = useState("");
   const [inlineOpen, setInlineOpen] = useState(false);
@@ -244,10 +246,11 @@ export function SearchableLookupPair({
     }
 
     let cancelled = false;
+    const seqAtStart = explicitSearchSeqRef.current;
     setManualSearching(true);
     void fetchLookupHits(lookupKey, live, liveKey, debouncedManualQuery)
       .then((hits) => {
-        if (cancelled) return;
+        if (cancelled || seqAtStart !== explicitSearchSeqRef.current) return;
         if (hits.length === 0) {
           setManualDropdownRows([]);
           setManualDropdownOpen(false);
@@ -317,46 +320,74 @@ export function SearchableLookupPair({
     setHighlight(0);
   }, []);
 
+  const applyManualHits = useCallback(
+    (hits: SearchHit[], opts?: { autoSelectSingle?: boolean }) => {
+      const autoSelectSingle = opts?.autoSelectSingle ?? false;
+      if (hits.length === 0) {
+        clearManualDropdown();
+        return false;
+      }
+      if (autoSelectSingle && hits.length === 1) {
+        pick(hits[0]);
+        return true;
+      }
+      setManualDropdownRows(hits);
+      setManualDropdownOpen(true);
+      setHighlight(0);
+      return true;
+    },
+    [clearManualDropdown, pick],
+  );
+
+  const openBrowsePopup = useCallback(() => {
+    setInlineOpen(false);
+    setManualDropdownOpen(false);
+    setManualDropdownRows([]);
+    setPopupQuery("");
+    setManualPopupRows(null);
+    setPopupOpen(true);
+  }, []);
+
   const runManualSearch = useCallback(
-    async (opts?: { autoSelectSingle?: boolean }) => {
+    async (opts?: { autoSelectSingle?: boolean; showEmptyToast?: boolean }) => {
       const autoSelectSingle = opts?.autoSelectSingle ?? true;
       const q = searchQuery();
       if (!q) {
-        if (emptySearchMessage) toast.error(emptySearchMessage);
+        openBrowsePopup();
         return;
       }
+      const seq = ++explicitSearchSeqRef.current;
       setManualSearching(true);
       try {
         const hits = await fetchLookupHits(lookupKey, live, liveKey, q);
+        if (seq !== explicitSearchSeqRef.current) return;
         if (hits.length === 0) {
           clearManualDropdown();
           toast.error(noResultsMessage);
           return;
         }
-        if (autoSelectSingle && hits.length === 1) {
-          pick(hits[0]);
-          return;
-        }
-        setManualDropdownRows(hits);
-        setManualDropdownOpen(true);
-        setHighlight(0);
+        applyManualHits(hits, { autoSelectSingle });
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Search failed");
       } finally {
-        setManualSearching(false);
+        if (seq === explicitSearchSeqRef.current) setManualSearching(false);
       }
     },
     [
+      applyManualHits,
       clearManualDropdown,
-      emptySearchMessage,
       live,
       liveKey,
       lookupKey,
       noResultsMessage,
-      pick,
+      openBrowsePopup,
       searchQuery,
     ],
   );
+
+  const triggerExplicitSearch = useCallback(() => {
+    void runManualSearch({ autoSelectSingle: false, showEmptyToast: true });
+  }, [runManualSearch]);
 
   const startInlineFrom = (_field: "code" | "name", text: string) => {
     if (manualSearch) return;
@@ -368,7 +399,7 @@ export function SearchableLookupPair({
     if (manualSearch) {
       if (e.key === "F2") {
         e.preventDefault();
-        void runManualSearch();
+        triggerExplicitSearch();
         return;
       }
       if (manualDropdownRows.length > 0) {
@@ -518,9 +549,7 @@ export function SearchableLookupPair({
     />
   );
 
-  const openSearchPopup = () => {
-    void runManualSearch();
-  };
+  const searchBtnProps = { [LOOKUP_SEARCH_BTN_ATTR]: "" } as const;
 
   const searchButton = (
     <Button
@@ -533,9 +562,13 @@ export function SearchableLookupPair({
         btnSize,
       )}
       aria-label="Search"
-      onClick={() => {
+      {...searchBtnProps}
+      onMouseDown={(e) => {
+        if (disabled) return;
+        e.preventDefault();
+        e.stopPropagation();
         if (manualSearch) {
-          openSearchPopup();
+          triggerExplicitSearch();
           return;
         }
         setInlineOpen(false);
