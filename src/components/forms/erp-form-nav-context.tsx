@@ -4,10 +4,19 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
+  type KeyboardEvent,
   type RefObject,
 } from "react";
 
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   erpNavOrder,
   ERP_MANUAL_SEARCH,
@@ -17,11 +26,13 @@ import {
   resolveErpNavAnchor,
   scheduleErpFocusAdvance,
   shouldEnterAdvanceFocus,
+  shouldTabAdvanceFocus,
 } from "@/lib/forms/erp-keyboard-nav";
 
 type ErpFormNavContextValue = {
   advanceFocus: (from?: HTMLElement | null) => void;
   focusFieldByOrder: (order: number) => void;
+  focusFieldByOrderImmediate: (order: number) => void;
   bindSelectChange: <T extends string>(handler: (value: T) => void) => (value: T) => void;
   bindDateChange: (handler: (value: string) => void) => (value: string) => void;
 };
@@ -82,6 +93,15 @@ export function ErpFormNavProvider({
     [containerRef, enabled],
   );
 
+  const focusFieldByOrderImmediate = useCallback(
+    (order: number) => {
+      const container = containerRef.current;
+      if (!container || !enabled) return;
+      focusErpFieldByOrder(container, order);
+    },
+    [containerRef, enabled],
+  );
+
   const bindSelectChange = useCallback(
     <T extends string>(handler: (value: T) => void) =>
       (value: T) => {
@@ -115,16 +135,22 @@ export function ErpFormNavProvider({
       ) {
         return;
       }
-      if (!shouldEnterAdvanceFocus(target)) return;
 
       if (e.key === "Enter") {
-        if (e.shiftKey) return;
+        if (e.shiftKey) {
+          if (!shouldTabAdvanceFocus(target)) return;
+          e.preventDefault();
+          tryAdvance(target, "prev");
+          return;
+        }
+        if (!shouldEnterAdvanceFocus(target)) return;
         e.preventDefault();
         tryAdvance(target, "next");
         return;
       }
 
       if (e.key === "Tab") {
+        if (!shouldTabAdvanceFocus(target)) return;
         e.preventDefault();
         tryAdvance(target, e.shiftKey ? "prev" : "next");
       }
@@ -135,8 +161,14 @@ export function ErpFormNavProvider({
   }, [containerRef, enabled, tryAdvance]);
 
   const value = useMemo(
-    () => ({ advanceFocus, focusFieldByOrder, bindSelectChange, bindDateChange }),
-    [advanceFocus, focusFieldByOrder, bindSelectChange, bindDateChange],
+    () => ({
+      advanceFocus,
+      focusFieldByOrder,
+      focusFieldByOrderImmediate,
+      bindSelectChange,
+      bindDateChange,
+    }),
+    [advanceFocus, focusFieldByOrder, focusFieldByOrderImmediate, bindSelectChange, bindDateChange],
   );
 
   return <ErpFormNavContext.Provider value={value}>{children}</ErpFormNavContext.Provider>;
@@ -152,6 +184,55 @@ export function useErpFormNav() {
 
 export function useErpFormNavOptional() {
   return useContext(ErpFormNavContext);
+}
+
+type ErpNavSelectItem = { value: string; label: string };
+
+/** Radix Select registered in ERP navigation order. */
+export function ErpNavSelect({
+  order,
+  value,
+  onValueChange,
+  nextOrder,
+  disabled,
+  placeholder,
+  triggerClassName,
+  contentClassName,
+  items,
+}: {
+  order: number;
+  value: string | undefined;
+  onValueChange: (value: string) => void;
+  nextOrder?: number;
+  disabled?: boolean;
+  placeholder?: string;
+  triggerClassName?: string;
+  contentClassName?: string;
+  items: readonly ErpNavSelectItem[] | readonly string[];
+}) {
+  const { onValueChange: onNavChange, contentProps, itemProps } = useErpSelectNav(
+    onValueChange,
+    { nextOrder },
+  );
+  const normalizedItems: ErpNavSelectItem[] =
+    items.length > 0 && typeof items[0] === "string"
+      ? (items as readonly string[]).map((v) => ({ value: v, label: v }))
+      : [...(items as readonly ErpNavSelectItem[])];
+
+  return (
+    <Select value={value} onValueChange={onNavChange} disabled={disabled}>
+      <SelectTrigger className={triggerClassName} {...erpNavOrder(order)}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent className={contentClassName} {...contentProps}>
+        {normalizedItems.map((item) => (
+          <SelectItem key={item.value} value={item.value} {...itemProps}>
+            {item.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 }
 
 /** Plain input registered in ERP navigation order. */
@@ -195,16 +276,77 @@ export function ErpNavDateInput({
   );
 }
 
-/** Wrap a Radix Select onValueChange to advance focus after selection. */
-export function useErpSelectHandler<T extends string>(handler: (value: T) => void) {
+/** Wrap Radix Select value change + content/item props for ERP keyboard navigation. */
+export function useErpSelectNav<T extends string>(
+  handler: (value: T) => void,
+  opts?: { nextOrder?: number },
+) {
   const nav = useErpFormNavOptional();
-  return useCallback(
+  const shouldFocusNextRef = useRef(false);
+
+  const markSelectionCommitted = useCallback(() => {
+    shouldFocusNextRef.current = true;
+  }, []);
+
+  const focusAfterSelectClose = useCallback(() => {
+    window.setTimeout(() => {
+      if (opts?.nextOrder != null) {
+        nav?.focusFieldByOrderImmediate(opts.nextOrder);
+      } else {
+        nav?.advanceFocus();
+      }
+    }, 0);
+  }, [nav, opts?.nextOrder]);
+
+  const onValueChange = useCallback(
     (value: T) => {
       handler(value);
-      nav?.advanceFocus();
+      markSelectionCommitted();
     },
-    [handler, nav],
+    [handler, markSelectionCommitted],
   );
+
+  const onCloseAutoFocus = useCallback(
+    (event: Event) => {
+      if (!shouldFocusNextRef.current) return;
+      event.preventDefault();
+      shouldFocusNextRef.current = false;
+      focusAfterSelectClose();
+    },
+    [focusAfterSelectClose],
+  );
+
+  const onEscapeKeyDown = useCallback(() => {
+    shouldFocusNextRef.current = false;
+  }, []);
+
+  const onKeyDownCapture = useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key === "Enter") markSelectionCommitted();
+    },
+    [markSelectionCommitted],
+  );
+
+  const itemProps = useMemo(
+    () => ({
+      onSelect: () => markSelectionCommitted(),
+    }),
+    [markSelectionCommitted],
+  );
+
+  return {
+    onValueChange,
+    contentProps: { onCloseAutoFocus, onEscapeKeyDown, onKeyDownCapture },
+    itemProps,
+  };
+}
+
+/** @deprecated Prefer useErpSelectNav and spread `contentProps` onto SelectContent. */
+export function useErpSelectHandler<T extends string>(
+  handler: (value: T) => void,
+  opts?: { nextOrder?: number },
+) {
+  return useErpSelectNav(handler, opts).onValueChange;
 }
 
 /** Callback for lookup components after a value is committed. */

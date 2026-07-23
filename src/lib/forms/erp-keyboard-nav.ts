@@ -167,8 +167,12 @@ export function focusErpFieldByOrder(container: HTMLElement, order: number): HTM
   return el;
 }
 
+function isRadixSelectTrigger(target: HTMLElement): boolean {
+  return target.getAttribute("role") === "combobox";
+}
+
 function isRadixSelectOpen(target: HTMLElement): boolean {
-  return target.getAttribute("role") === "combobox" && target.getAttribute("data-state") === "open";
+  return isRadixSelectTrigger(target) && target.getAttribute("data-state") === "open";
 }
 
 function isInlineComboboxOpen(target: HTMLElement): boolean {
@@ -185,8 +189,20 @@ function isInsideOpenDialog(target: HTMLElement): boolean {
   return dialog.getAttribute("data-state") === "open" || dialog.hasAttribute("open");
 }
 
-/** Enter/Tab should advance focus (same as Tab), not submit or override widget behaviour. */
+/** Enter should advance focus, not submit or override widget behaviour. */
 export function shouldEnterAdvanceFocus(target: HTMLElement): boolean {
+  if (target.tagName === "BUTTON") return false;
+  if (target.tagName === "TEXTAREA") return false;
+  if (isInsideOpenDialog(target)) return false;
+  if (isRadixSelectOpen(target)) return false;
+  if (isInlineComboboxOpen(target)) return false;
+  // Radix Select uses Enter to open (closed) or commit (open).
+  if (isRadixSelectTrigger(target)) return false;
+  return true;
+}
+
+/** Tab should advance ERP order; block only while inline/listbox widgets are open. */
+export function shouldTabAdvanceFocus(target: HTMLElement): boolean {
   if (target.tagName === "BUTTON") return false;
   if (target.tagName === "TEXTAREA") return false;
   if (isInsideOpenDialog(target)) return false;

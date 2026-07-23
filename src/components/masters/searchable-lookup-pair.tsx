@@ -430,6 +430,16 @@ export function SearchableLookupPair({
     setInlineOpen(text.trim().length >= minChars);
   };
 
+  const manualQueryActive =
+    manualSearch && manualQueryEditedRef.current && manualQueryRaw.length >= minChars;
+  const activeHighlightQuery = manualSearch ? debouncedManualQuery : debouncedInline;
+  const manualDropdownVisible =
+    manualSearch && manualDropdownOpen && manualQueryActive && manualDropdownRows.length > 0;
+
+  const showDropdown = manualSearch
+    ? manualDropdownVisible
+    : inlineOpen && canInlineSearch && inlineResults.length > 0;
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (manualSearch) {
       if (manualDropdownVisible) {
@@ -500,16 +510,6 @@ export function SearchableLookupPair({
       return;
     }
   };
-
-  const manualQueryActive =
-    manualSearch && manualQueryEditedRef.current && manualQueryRaw.length >= minChars;
-  const activeHighlightQuery = manualSearch ? debouncedManualQuery : debouncedInline;
-  const manualDropdownVisible =
-    manualSearch && manualDropdownOpen && manualQueryActive && manualDropdownRows.length > 0;
-
-  const showDropdown = manualSearch
-    ? manualDropdownVisible
-    : inlineOpen && canInlineSearch && inlineResults.length > 0;
 
   const inputH = compact ? "h-8" : "h-9";
   const codeW = compact ? "w-14" : "w-20";

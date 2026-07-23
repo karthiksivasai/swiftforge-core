@@ -65,7 +65,7 @@ import {
 import { PartyContactLookup } from "@/components/transactions/party-contact-lookup";
 import { VendorServiceLookup } from "@/components/transactions/vendor-service-lookup";
 import { PincodeAutocomplete } from "@/components/pincode-autocomplete";
-import { ErpFormNavProvider, ErpNavDateInput, ErpNavInput, useErpFormNav, useErpNavCommit, useErpSelectHandler } from "@/components/forms/erp-form-nav-context";
+import { ErpFormNavProvider, ErpNavDateInput, ErpNavInput, ErpNavSelect, useErpFormNavOptional, useErpNavCommit, useErpSelectNav } from "@/components/forms/erp-form-nav-context";
 import { AWB_NAV } from "@/lib/forms/awb-entry-nav-order";
 import {
   AWB_REQUIRED_NAV_ORDERS,
@@ -1270,7 +1270,7 @@ function AwbEntryPage() {
   const [kycSearchField, setKycSearchField] = useState<SearchField>("awbNo");
   const [kycSearchInput, setKycSearchInput] = useState("");
   const kycFileRef = useRef<HTMLInputElement | null>(null);
-  const awbNavRef = useRef<HTMLFieldSetElement>(null);
+  const awbFormNavRef = useRef<HTMLDivElement>(null);
   const [navInvalidOrders, setNavInvalidOrders] = useState<Set<number>>(() => new Set());
   const [formSetupOpen, setFormSetupOpen] = useState(false);
   const [formSetupSettings, setFormSetupSettings] =
@@ -3110,7 +3110,7 @@ function AwbEntryPage() {
 
   const validateAwbNavAdvance = useCallback(
     (anchor: HTMLElement) => {
-      const container = awbNavRef.current;
+      const container = awbFormNavRef.current;
       if (!container) return true;
       const order = getErpNavOrderFromElement(anchor, container);
       if (order == null || !AWB_REQUIRED_NAV_ORDERS.has(order)) return true;
@@ -3122,7 +3122,7 @@ function AwbEntryPage() {
   );
 
   const handleAwbNavAdvanceBlocked = useCallback((anchor: HTMLElement) => {
-    const container = awbNavRef.current;
+    const container = awbFormNavRef.current;
     if (!container) return;
     const order = getErpNavOrderFromElement(anchor, container);
     if (order == null) return;
@@ -3238,14 +3238,15 @@ function AwbEntryPage() {
               </TooltipProvider>
             </div>
 
+            <div ref={awbFormNavRef}>
+              <ErpFormNavProvider
+                containerRef={awbFormNavRef}
+                enabled={!isReadOnly}
+                validateBeforeAdvance={validateAwbNavAdvance}
+                onAdvanceBlocked={handleAwbNavAdvanceBlocked}
+              >
             <TabsContent value="awb" className="mt-0">
-              <fieldset disabled={isReadOnly} ref={awbNavRef} className="min-w-0 border-0 p-0 disabled:opacity-90">
-                <ErpFormNavProvider
-                  containerRef={awbNavRef}
-                  enabled={!isReadOnly}
-                  validateBeforeAdvance={validateAwbNavAdvance}
-                  onAdvanceBlocked={handleAwbNavAdvanceBlocked}
-                >
+              <fieldset disabled={isReadOnly} className="min-w-0 border-0 p-0 disabled:opacity-90">
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 border-b bg-muted/10 px-2.5 py-0.5 text-[12px] leading-tight text-muted-foreground">
                   <span>
                     AWB UserID:{" "}
@@ -3458,64 +3459,60 @@ function AwbEntryPage() {
 
                       <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(7.5rem,1.2fr)_minmax(5.25rem,0.85fr)_minmax(4.75rem,0.8fr)_repeat(3,minmax(3.75rem,0.72fr))_minmax(4.5rem,0.78fr)_minmax(11.5rem,1.35fr)_minmax(5.25rem,0.85fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                         <FieldWrapper borderLabel label="Measurement Unit">
-                          <Select
+                          <ErpNavSelect
+                            order={AWB_NAV.PIECES_MEASUREMENT_UNIT}
                             value={piecesDraft.measurementUnit}
                             onValueChange={(v) => patchPiecesDraft({ measurementUnit: v })}
-                          >
-                            <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {MEASUREMENT_UNITS.map((u) => (
-                                <SelectItem key={u} value={u}>
-                                  {u}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            items={MEASUREMENT_UNITS}
+                            triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                          />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Actl Weight/PCS">
-                          <Input
+                          <ErpNavInput
+                            order={AWB_NAV.PIECES_ACTUAL_WEIGHT_PCS}
                             className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.actualWeightPerPc}
-                            onChange={(e) =>
-                              patchPiecesDraft({ actualWeightPerPc: e.target.value })
-                            }
+                            onValueChange={(v) => patchPiecesDraft({ actualWeightPerPc: v })}
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="No. Of Pieces">
-                          <Input
+                          <ErpNavInput
+                            order={AWB_NAV.PIECES_NO_OF_PIECES}
                             className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.noOfPieces}
-                            onChange={(e) => patchPiecesDraft({ noOfPieces: e.target.value })}
+                            onValueChange={(v) => patchPiecesDraft({ noOfPieces: v })}
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Length">
-                          <Input
+                          <ErpNavInput
+                            order={AWB_NAV.PIECES_LENGTH}
                             className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.length}
-                            onChange={(e) => patchPiecesDraft({ length: e.target.value })}
+                            onValueChange={(v) => patchPiecesDraft({ length: v })}
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Width">
-                          <Input
+                          <ErpNavInput
+                            order={AWB_NAV.PIECES_WIDTH}
                             className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.width}
-                            onChange={(e) => patchPiecesDraft({ width: e.target.value })}
+                            onValueChange={(v) => patchPiecesDraft({ width: v })}
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Height">
-                          <Input
+                          <ErpNavInput
+                            order={AWB_NAV.PIECES_HEIGHT}
                             className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.height}
-                            onChange={(e) => patchPiecesDraft({ height: e.target.value })}
+                            onValueChange={(v) => patchPiecesDraft({ height: v })}
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Division">
-                          <Input
+                          <ErpNavInput
+                            order={AWB_NAV.PIECES_DIVISION}
                             className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={piecesDraft.division}
-                            onChange={(e) => patchPiecesDraft({ division: e.target.value })}
+                            onValueChange={(v) => patchPiecesDraft({ division: v })}
                           />
                         </FieldWrapper>
                         <FieldWrapper
@@ -3702,7 +3699,8 @@ function AwbEntryPage() {
                       ) : null}
                       <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                         <FieldWrapper borderLabel label="Description" required>
-                          <Select
+                          <ErpNavSelect
+                            order={AWB_NAV.CHARGE_DESCRIPTION}
                             value={chargeDraft.description || undefined}
                             onValueChange={(v) =>
                               setChargeDraft((d) => ({
@@ -3711,49 +3709,34 @@ function AwbEntryPage() {
                                 itemTotal: d.itemAmount || "0",
                               }))
                             }
-                          >
-                            <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
-                              <SelectValue placeholder="Select" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {CHARGE_DESCRIPTIONS.map((d) => (
-                                <SelectItem key={d} value={d}>
-                                  {d}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            placeholder="Select"
+                            items={CHARGE_DESCRIPTIONS}
+                            triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                          />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Item Amount" required>
-                          <Input
+                          <ErpNavInput
+                            order={AWB_NAV.CHARGE_ITEM_AMOUNT}
                             className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={chargeDraft.itemAmount}
-                            onChange={(e) =>
+                            onValueChange={(v) =>
                               setChargeDraft((d) => ({
                                 ...d,
-                                itemAmount: e.target.value,
-                                itemTotal: e.target.value || "0",
+                                itemAmount: v,
+                                itemTotal: v || "0",
                               }))
                             }
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Item Fuel (0%)">
                           <div className="flex w-full min-w-0 items-stretch">
-                            <Select
+                            <ErpNavSelect
+                              order={AWB_NAV.CHARGE_ITEM_FUEL}
                               value={chargeDraft.itemFuel}
                               onValueChange={(v) => setChargeDraft((d) => ({ ...d, itemFuel: v }))}
-                            >
-                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {YES_NO.map((v) => (
-                                  <SelectItem key={v} value={v}>
-                                    {v}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              items={YES_NO}
+                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                            />
                             <Input
                               value="0.00"
                               readOnly
@@ -3763,21 +3746,13 @@ function AwbEntryPage() {
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Tax On Fuel">
                           <div className="flex w-full min-w-0 items-stretch">
-                            <Select
+                            <ErpNavSelect
+                              order={AWB_NAV.CHARGE_TAX_ON_FUEL}
                               value={chargeDraft.taxOnFuel}
                               onValueChange={(v) => setChargeDraft((d) => ({ ...d, taxOnFuel: v }))}
-                            >
-                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {YES_NO.map((v) => (
-                                  <SelectItem key={v} value={v}>
-                                    {v}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              items={YES_NO}
+                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                            />
                             <Input
                               value="0.00"
                               readOnly
@@ -3787,21 +3762,13 @@ function AwbEntryPage() {
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Tax">
                           <div className="flex w-full min-w-0 items-stretch">
-                            <Select
+                            <ErpNavSelect
+                              order={AWB_NAV.CHARGE_TAX}
                               value={chargeDraft.tax}
                               onValueChange={(v) => setChargeDraft((d) => ({ ...d, tax: v }))}
-                            >
-                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {YES_NO.map((v) => (
-                                  <SelectItem key={v} value={v}>
-                                    {v}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              items={YES_NO}
+                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                            />
                             <Input
                               value="0.00"
                               readOnly
@@ -3910,7 +3877,6 @@ function AwbEntryPage() {
                     />
                   </FormSection>
                 </div>
-                </ErpFormNavProvider>
               </fieldset>
               {editing?.id &&
               (showShipmentDocumentsCenter || vendorShippingActive || vendorBookingBusy) ? (
@@ -4066,100 +4032,75 @@ function AwbEntryPage() {
                   <FormSection title="Manifest GST Detail">
                     <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                       <FieldWrapper borderLabel label="CSB_Type">
-                        <Select
+                        <ErpNavSelect
+                          order={AWB_NAV.PROFORMA_CSB_TYPE}
                           value={form.proforma.csbType}
                           onValueChange={(v) => patchProforma({ csbType: v })}
-                        >
-                          <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {CSB_TYPES.map((t) => (
-                              <SelectItem key={t} value={t}>
-                                {t}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          items={CSB_TYPES}
+                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                        />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Term Of Invoice">
-                        <Select
+                        <ErpNavSelect
+                          order={AWB_NAV.PROFORMA_TERM_OF_INVOICE}
                           value={form.proforma.termOfInvoice || undefined}
                           onValueChange={(v) => patchProforma({ termOfInvoice: v })}
-                        >
-                          <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
-                            <SelectValue placeholder="Select" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {TERM_OF_INVOICE.map((t) => (
-                              <SelectItem key={t} value={t}>
-                                {t}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          placeholder="Select"
+                          items={TERM_OF_INVOICE}
+                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                        />
                       </FieldWrapper>
-                      <YesNoField
-                        borderLabel
-                        label="GST Invoice"
-                        value={form.proforma.gstInvoice}
-                        onChange={(v) => patchProforma({ gstInvoice: v })}
-                      />
+                      <FieldWrapper borderLabel label="GST Invoice">
+                        <ErpNavSelect
+                          order={AWB_NAV.PROFORMA_GST_INVOICE}
+                          value={form.proforma.gstInvoice ? "Yes" : "No"}
+                          onValueChange={(v) => patchProforma({ gstInvoice: v === "Yes" })}
+                          items={YES_NO}
+                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                        />
+                      </FieldWrapper>
                       <FieldWrapper borderLabel label="Invoice No">
-                        <Input
+                        <ErpNavInput
+                          order={AWB_NAV.PROFORMA_INVOICE_NO}
                           className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={form.proforma.invoiceNo}
-                          onChange={(e) => patchProforma({ invoiceNo: e.target.value })}
+                          onValueChange={(v) => patchProforma({ invoiceNo: v })}
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Invoice Date">
-                        <Input
-                          type="date"
+                        <ErpNavDateInput
+                          order={AWB_NAV.PROFORMA_INVOICE_DATE}
                           className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={form.proforma.invoiceDate}
-                          onChange={(e) => patchProforma({ invoiceDate: e.target.value })}
+                          onValueChange={(v) => patchProforma({ invoiceDate: v })}
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Department No">
-                        <Input
+                        <ErpNavInput
+                          order={AWB_NAV.PROFORMA_DEPARTMENT_NO}
                           className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={form.proforma.departmentNo}
-                          onChange={(e) => patchProforma({ departmentNo: e.target.value })}
+                          onValueChange={(v) => patchProforma({ departmentNo: v })}
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Export Reason">
-                        <Select
+                        <ErpNavSelect
+                          order={AWB_NAV.PROFORMA_EXPORT_REASON}
                           value={form.proforma.exportReason}
                           onValueChange={(v) => patchProforma({ exportReason: v })}
-                        >
-                          <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {EXPORT_REASONS.map((r) => (
-                              <SelectItem key={r} value={r}>
-                                {r}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          items={EXPORT_REASONS}
+                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                        />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Format">
-                        <Select
+                        <ErpNavSelect
+                          order={AWB_NAV.PROFORMA_FORMAT}
                           value={form.proforma.format || undefined}
                           onValueChange={(v) => patchProforma({ format: v })}
-                        >
-                          <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
-                            <SelectValue placeholder="Select" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {PROFORMA_FORMATS.map((f) => (
-                              <SelectItem key={f} value={f}>
-                                {f}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          placeholder="Select"
+                          items={PROFORMA_FORMATS}
+                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                        />
                       </FieldWrapper>
                     </div>
                   </FormSection>
@@ -4201,21 +4142,14 @@ function AwbEntryPage() {
                     </div>
                     <div className="min-w-[12rem]">
                       <FormSection title="Currency">
-                        <Select
+                        <ErpNavSelect
+                          order={AWB_NAV.PROFORMA_CURRENCY}
                           value={form.proforma.currency}
                           onValueChange={(v) => patchProforma({ currency: v })}
-                        >
-                          <SelectTrigger className="h-8 text-[13px]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-64">
-                            {PROFORMA_CURRENCIES.map((c) => (
-                              <SelectItem key={c} value={c}>
-                                {c}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          items={PROFORMA_CURRENCIES}
+                          triggerClassName="h-8 text-[13px]"
+                          contentClassName="max-h-64"
+                        />
                       </FormSection>
                     </div>
                   </div>
@@ -4223,74 +4157,63 @@ function AwbEntryPage() {
                   <div className="mt-4 rounded-md border bg-card">
                     <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(4rem,0.72fr)_minmax(4.5rem,0.78fr)_minmax(8rem,1.35fr)_minmax(5rem,0.9fr)_minmax(3.75rem,0.68fr)_minmax(3.75rem,0.68fr)_minmax(6.75rem,1fr)_minmax(3.75rem,0.68fr)_minmax(4.25rem,0.75fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                       <FieldWrapper borderLabel label="Box No">
-                        <Select
+                        <ErpNavSelect
+                          order={AWB_NAV.PROFORMA_BOX_NO}
                           value={proformaDraft.boxNo}
                           onValueChange={(v) => patchProformaDraft({ boxNo: v })}
-                        >
-                          <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {BOX_NUMBERS.map((b) => (
-                              <SelectItem key={b} value={b}>
-                                {b}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          items={BOX_NUMBERS}
+                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                        />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Packages">
-                        <Input
+                        <ErpNavInput
+                          order={AWB_NAV.PROFORMA_PACKAGES}
                           className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={proformaDraft.packages}
-                          onChange={(e) => patchProformaDraft({ packages: e.target.value })}
+                          onValueChange={(v) => patchProformaDraft({ packages: v })}
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Description">
-                        <Input
+                        <ErpNavInput
+                          order={AWB_NAV.PROFORMA_DESCRIPTION}
                           className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={proformaDraft.description}
-                          onChange={(e) => patchProformaDraft({ description: e.target.value })}
+                          onValueChange={(v) => patchProformaDraft({ description: v })}
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="HSN Code">
-                        <Input
+                        <ErpNavInput
+                          order={AWB_NAV.PROFORMA_HSN_CODE}
                           className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={proformaDraft.hsnCode}
-                          onChange={(e) => patchProformaDraft({ hsnCode: e.target.value })}
+                          onValueChange={(v) => patchProformaDraft({ hsnCode: v })}
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Quantity">
-                        <Input
+                        <ErpNavInput
+                          order={AWB_NAV.PROFORMA_QUANTITY}
                           className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={proformaDraft.quantity}
-                          onChange={(e) => patchProformaDraft({ quantity: e.target.value })}
+                          onValueChange={(v) => patchProformaDraft({ quantity: v })}
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Weight">
-                        <Input
+                        <ErpNavInput
+                          order={AWB_NAV.PROFORMA_WEIGHT}
                           className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={proformaDraft.weight}
-                          onChange={(e) => patchProformaDraft({ weight: e.target.value })}
+                          onValueChange={(v) => patchProformaDraft({ weight: v })}
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Unit">
                         <div className="flex w-full min-w-0 items-stretch">
-                          <Select
+                          <ErpNavSelect
+                            order={AWB_NAV.PROFORMA_UNIT}
                             value={proformaDraft.unit}
                             onValueChange={(v) => patchProformaDraft({ unit: v })}
-                          >
-                            <SelectTrigger className="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {proformaUnits.map((u) => (
-                                <SelectItem key={u} value={u}>
-                                  {u}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            items={proformaUnits}
+                            triggerClassName="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                          />
                           <Button
                             type="button"
                             size="sm"
@@ -4308,16 +4231,11 @@ function AwbEntryPage() {
                         </div>
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Rate">
-                        <Input
+                        <ErpNavInput
+                          order={AWB_NAV.PROFORMA_RATE}
                           className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={proformaDraft.rate}
-                          onChange={(e) => patchProformaDraft({ rate: e.target.value })}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              addProformaLine();
-                            }
-                          }}
+                          onValueChange={(v) => patchProformaDraft({ rate: v })}
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Amount">
@@ -4453,17 +4371,19 @@ function AwbEntryPage() {
                 <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
                   <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                     <FieldWrapper borderLabel label="Delivery AWB">
-                      <Input
+                      <ErpNavInput
+                        order={AWB_NAV.FWD_DELIVERY_AWB}
                         className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                         value={form.forwarding.deliveryAwb}
-                        onChange={(e) => patchForwarding({ deliveryAwb: e.target.value })}
+                        onValueChange={(v) => patchForwarding({ deliveryAwb: v })}
                       />
                     </FieldWrapper>
                     <FieldWrapper borderLabel label="Forwarding AWB">
-                      <Input
+                      <ErpNavInput
+                        order={AWB_NAV.FWD_FORWARDING_AWB}
                         className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                         value={form.forwarding.forwardingAwb}
-                        onChange={(e) => patchForwarding({ forwardingAwb: e.target.value })}
+                        onValueChange={(v) => patchForwarding({ forwardingAwb: v })}
                       />
                     </FieldWrapper>
                     <FieldWrapper borderLabel lookupSplit label="Delivery Product">
@@ -4471,6 +4391,7 @@ function AwbEntryPage() {
                         lookup="product"
                         value={form.forwarding.deliveryProduct}
                         onChange={(v) => patchForwarding({ deliveryProduct: v })}
+                        navOrder={AWB_NAV.FWD_DELIVERY_PRODUCT}
                       />
                     </FieldWrapper>
                     <FieldWrapper borderLabel lookupSplit label="Delivery Vendor">
@@ -4478,6 +4399,7 @@ function AwbEntryPage() {
                         lookup="vendor"
                         value={form.forwarding.deliveryVendor}
                         onChange={(v) => patchForwarding({ deliveryVendor: v })}
+                        navOrder={AWB_NAV.FWD_DELIVERY_VENDOR}
                       />
                     </FieldWrapper>
                     <FieldWrapper borderLabel lookupSplit label="Delivery Service">
@@ -4485,27 +4407,31 @@ function AwbEntryPage() {
                         lookup="product"
                         value={form.forwarding.deliveryService}
                         onChange={(v) => patchForwarding({ deliveryService: v })}
+                        navOrder={AWB_NAV.FWD_DELIVERY_SERVICE}
                       />
                     </FieldWrapper>
                     <FieldWrapper borderLabel label="Vendor Weight">
-                      <Input
+                      <ErpNavInput
+                        order={AWB_NAV.FWD_VENDOR_WEIGHT}
                         className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                         value={form.forwarding.vendorWeight}
-                        onChange={(e) => patchForwarding({ vendorWeight: e.target.value })}
+                        onValueChange={(v) => patchForwarding({ vendorWeight: v })}
                       />
                     </FieldWrapper>
                     <FieldWrapper borderLabel label="Vendor Amount">
-                      <Input
+                      <ErpNavInput
+                        order={AWB_NAV.FWD_VENDOR_AMOUNT}
                         className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                         value={form.forwarding.vendorAmount}
-                        onChange={(e) => patchForwarding({ vendorAmount: e.target.value })}
+                        onValueChange={(v) => patchForwarding({ vendorAmount: v })}
                       />
                     </FieldWrapper>
                     <FieldWrapper borderLabel label="Vendor Invoice">
-                      <Input
+                      <ErpNavInput
+                        order={AWB_NAV.FWD_VENDOR_INVOICE}
                         className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                         value={form.forwarding.vendorInvoice}
-                        onChange={(e) => patchForwarding({ vendorInvoice: e.target.value })}
+                        onValueChange={(v) => patchForwarding({ vendorInvoice: v })}
                       />
                     </FieldWrapper>
                   </div>
@@ -4549,46 +4475,32 @@ function AwbEntryPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                         <FieldWrapper borderLabel label="Description" required>
-                          <Select
+                          <ErpNavSelect
+                            order={AWB_NAV.VENDOR_CHARGE_DESCRIPTION}
                             value={vendorChargeDraft.description || undefined}
                             onValueChange={(v) => patchVendorChargeDraft({ description: v })}
-                          >
-                            <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0">
-                              <SelectValue placeholder="Select" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {VENDOR_CHARGE_DESCRIPTIONS.map((d) => (
-                                <SelectItem key={d} value={d}>
-                                  {d}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            placeholder="Select"
+                            items={VENDOR_CHARGE_DESCRIPTIONS}
+                            triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                          />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Amount" required>
-                          <Input
+                          <ErpNavInput
+                            order={AWB_NAV.VENDOR_CHARGE_AMOUNT}
                             className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={vendorChargeDraft.amount}
-                            onChange={(e) => patchVendorChargeDraft({ amount: e.target.value })}
+                            onValueChange={(v) => patchVendorChargeDraft({ amount: v })}
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Fuel(0)">
                           <div className="flex w-full min-w-0 items-stretch">
-                            <Select
+                            <ErpNavSelect
+                              order={AWB_NAV.VENDOR_CHARGE_FUEL}
                               value={vendorChargeDraft.fuel}
                               onValueChange={(v) => patchVendorChargeDraft({ fuel: v })}
-                            >
-                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {YES_NO.map((v) => (
-                                  <SelectItem key={v} value={v}>
-                                    {v}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              items={YES_NO}
+                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                            />
                             <Input
                               value={vendorChargeDraft.fuelAmt}
                               readOnly
@@ -4598,21 +4510,13 @@ function AwbEntryPage() {
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Tax On Fuel">
                           <div className="flex w-full min-w-0 items-stretch">
-                            <Select
+                            <ErpNavSelect
+                              order={AWB_NAV.VENDOR_CHARGE_TAX_ON_FUEL}
                               value={vendorChargeDraft.taxOnFuel}
                               onValueChange={(v) => patchVendorChargeDraft({ taxOnFuel: v })}
-                            >
-                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {YES_NO.map((v) => (
-                                  <SelectItem key={v} value={v}>
-                                    {v}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              items={YES_NO}
+                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                            />
                             <Input
                               value={vendorChargeDraft.taxOnFuelAmt}
                               readOnly
@@ -4622,21 +4526,13 @@ function AwbEntryPage() {
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Tax">
                           <div className="flex w-full min-w-0 items-stretch">
-                            <Select
+                            <ErpNavSelect
+                              order={AWB_NAV.VENDOR_CHARGE_TAX}
                               value={vendorChargeDraft.tax}
                               onValueChange={(v) => patchVendorChargeDraft({ tax: v })}
-                            >
-                              <SelectTrigger className="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {YES_NO.map((v) => (
-                                  <SelectItem key={v} value={v}>
-                                    {v}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              items={YES_NO}
+                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                            />
                             <Input
                               value={vendorChargeDraft.taxAmt}
                               readOnly
@@ -4783,24 +4679,17 @@ function AwbEntryPage() {
                         <List className="h-4 w-4" />
                       </IconButton>
                     </TooltipProvider>
-                    <Select
+                    <ErpNavSelect
+                      order={AWB_NAV.KYC_SEARCH_FIELD}
                       value={kycSearchField}
                       onValueChange={(v) => setKycSearchField(v as SearchField)}
-                    >
-                      <SelectTrigger className="h-9 w-[8.5rem]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SEARCH_FIELDS.map((f) => (
-                          <SelectItem key={f.value} value={f.value}>
-                            {f.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
+                      items={SEARCH_FIELDS.map((f) => ({ value: f.value, label: f.label }))}
+                      triggerClassName="h-9 w-[8.5rem]"
+                    />
+                    <ErpNavInput
+                      order={AWB_NAV.KYC_SEARCH_INPUT}
                       value={kycSearchInput}
-                      onChange={(e) => setKycSearchInput(e.target.value)}
+                      onValueChange={setKycSearchInput}
                       placeholder="Search"
                       className="h-9 w-40"
                     />
@@ -4816,18 +4705,12 @@ function AwbEntryPage() {
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,280px)_1fr]">
                     <div className="flex flex-col gap-4">
                       <FieldWrapper label="Type">
-                        <Select value={kycDocType} onValueChange={setKycDocType}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {KYC_TYPES.map((t) => (
-                              <SelectItem key={t} value={t}>
-                                {t}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <ErpNavSelect
+                          order={AWB_NAV.KYC_TYPE}
+                          value={kycDocType}
+                          onValueChange={setKycDocType}
+                          items={KYC_TYPES}
+                        />
                       </FieldWrapper>
                       <input
                         ref={kycFileRef}
@@ -4916,6 +4799,8 @@ function AwbEntryPage() {
                 </div>
               </div>
             </TabsContent>
+              </ErpFormNavProvider>
+            </div>
           </Tabs>
 
           <Dialog open={addUnitOpen} onOpenChange={setAddUnitOpen}>
@@ -5506,7 +5391,8 @@ function PartySection({
         docType: AWB_NAV.SHIPPER_DOC_TYPE,
         docNo: AWB_NAV.SHIPPER_DOC_NO,
       };
-  const onDocTypeChange = useErpSelectHandler((v: string) => onChange({ documentType: v }));
+  const { onValueChange: onDocTypeChange, contentProps: docTypeSelectContentProps, itemProps: docTypeSelectItemProps } =
+    useErpSelectNav((v: string) => onChange({ documentType: v }), { nextOrder: nav.docNo });
   const inputClass = "h-8 px-1.5 text-[13px]";
 
   return (
@@ -5682,9 +5568,9 @@ function PartySection({
               <SelectTrigger className={inputClass} {...erpNavOrder(nav.docType)}>
                 <SelectValue placeholder="Select" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent {...docTypeSelectContentProps}>
                 {DOCUMENT_TYPES.map((d) => (
-                  <SelectItem key={d} value={d}>
+                  <SelectItem key={d} value={d} {...docTypeSelectItemProps}>
                     {d}
                   </SelectItem>
                 ))}
@@ -5934,9 +5820,8 @@ function ShipmentDetailsFields({
   clientLoading: boolean;
   isReadOnly: boolean;
 }) {
-  const onPaymentTypeChange = useErpSelectHandler((v: string) =>
-    setForm((f) => ({ ...f, paymentType: v })),
-  );
+  const { onValueChange: onPaymentTypeChange, contentProps: paymentTypeSelectContentProps, itemProps: paymentTypeSelectItemProps } =
+    useErpSelectNav((v: string) => setForm((f) => ({ ...f, paymentType: v })));
   const inputClass = "h-8 px-1.5 text-[13px]";
 
   return (
@@ -5954,9 +5839,9 @@ function ShipmentDetailsFields({
             >
               <SelectValue placeholder="Select" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent {...paymentTypeSelectContentProps}>
               {PAYMENT_TYPES.map((p) => (
-                <SelectItem key={p} value={p}>
+                <SelectItem key={p} value={p} {...paymentTypeSelectItemProps}>
                   {p}
                 </SelectItem>
               ))}
@@ -6237,7 +6122,7 @@ function ClientNameLookupInput({
   onSelect: (v: LookupPair) => void;
   disabled?: boolean;
 }) {
-  const { focusFieldByOrder } = useErpFormNav();
+  const nav = useErpFormNavOptional();
   return (
     <LookupPairInput
       lookup="customer"
@@ -6248,7 +6133,7 @@ function ClientNameLookupInput({
       displayVariant="client"
       navOrder={AWB_NAV.CLIENT}
       emptySearchMessage="Please enter a client name."
-      onCommit={() => focusFieldByOrder(AWB_NAV.SHIPPER_ORIGIN)}
+      onCommit={() => nav?.focusFieldByOrder(AWB_NAV.SHIPPER_ORIGIN)}
     />
   );
 }

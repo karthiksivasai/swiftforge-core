@@ -374,6 +374,17 @@ export function VendorServiceLookup({
     }
   };
 
+  const manualQueryActive =
+    manualSearch && manualQueryEditedRef.current && manualQueryRaw.length >= 1;
+  const activeHighlightQuery = manualSearch ? debouncedManualQuery : debouncedInline;
+  const manualDropdownVisible =
+    manualSearch && manualDropdownOpen && manualQueryActive && manualDropdownHits.length > 0;
+
+  const showInlineDropdown = manualSearch
+    ? manualDropdownVisible
+    : inlineOpen && hasVendor && inlineHits.length > 0;
+  const dropdownHits = manualSearch && manualDropdownOpen ? manualDropdownHits : inlineHits;
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (manualSearch) {
       if (manualDropdownVisible) {
@@ -444,17 +455,6 @@ export function VendorServiceLookup({
   const emptyMsg = !hasVendor
     ? "Select a Vendor first"
     : "No services are configured for this vendor.";
-
-  const manualQueryActive =
-    manualSearch && manualQueryEditedRef.current && manualQueryRaw.length >= 1;
-  const activeHighlightQuery = manualSearch ? debouncedManualQuery : debouncedInline;
-  const manualDropdownVisible =
-    manualSearch && manualDropdownOpen && manualQueryActive && manualDropdownHits.length > 0;
-
-  const showInlineDropdown = manualSearch
-    ? manualDropdownVisible
-    : inlineOpen && hasVendor && inlineHits.length > 0;
-  const dropdownHits = manualSearch && manualDropdownOpen ? manualDropdownHits : inlineHits;
 
   const navGroupProps =
     navOrder != null ? ({ [ERP_NAV_GROUP]: "" } as const) : undefined;

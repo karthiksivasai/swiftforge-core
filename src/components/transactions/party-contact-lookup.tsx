@@ -486,6 +486,16 @@ export function PartyContactLookup({
     setInlineOpen(trimmed.length >= minChars);
   };
 
+  const manualQueryActive =
+    manualSearch && manualQueryEditedRef.current && manualQueryRaw.length >= minChars;
+  const activeHighlightQuery = manualSearch ? debouncedManualQuery : trimmedDebouncedInline;
+  const manualDropdownVisible =
+    manualSearch && manualDropdownOpen && manualQueryActive && manualDropdownHits.length > 0;
+  const dropdownHits = manualSearch && manualDropdownOpen ? manualDropdownHits : inlineHits;
+  const showDropdown = manualSearch
+    ? manualDropdownVisible
+    : inlineOpen && canInline && inlineHits.length > 0;
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (manualSearch) {
       if (manualDropdownVisible) {
@@ -554,15 +564,6 @@ export function PartyContactLookup({
   };
 
   const title = role === "shipper" ? "Shipper" : "Consignee";
-  const manualQueryActive =
-    manualSearch && manualQueryEditedRef.current && manualQueryRaw.length >= minChars;
-  const activeHighlightQuery = manualSearch ? debouncedManualQuery : trimmedDebouncedInline;
-  const manualDropdownVisible =
-    manualSearch && manualDropdownOpen && manualQueryActive && manualDropdownHits.length > 0;
-  const dropdownHits = manualSearch && manualDropdownOpen ? manualDropdownHits : inlineHits;
-  const showDropdown = manualSearch
-    ? manualDropdownVisible
-    : inlineOpen && canInline && inlineHits.length > 0;
   const inputH = compact ? "h-8" : "h-9";
   const codeW = compact ? "w-14" : "w-20";
   const btnSize = compact ? "h-8 w-8" : "h-9 w-9";
