@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type KeyboardEvent,
   type RefObject,
 } from "react";
@@ -325,6 +326,7 @@ export function ErpNavSelect({
   triggerClassName,
   contentClassName,
   items,
+  beforeOpen,
 }: {
   order: number;
   value: string | undefined;
@@ -335,7 +337,10 @@ export function ErpNavSelect({
   triggerClassName?: string;
   contentClassName?: string;
   items: readonly ErpNavSelectItem[] | readonly string[];
+  /** Return false to block opening the dropdown (e.g. prerequisite validation). */
+  beforeOpen?: () => boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const { onValueChange: onNavChange, contentProps, itemProps } = useErpSelectNav(
     onValueChange,
     { nextOrder, fromOrder: order },
@@ -345,8 +350,25 @@ export function ErpNavSelect({
       ? (items as readonly string[]).map((v) => ({ value: v, label: v }))
       : [...(items as readonly ErpNavSelectItem[])];
 
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (next && beforeOpen && !beforeOpen()) {
+        setOpen(false);
+        return;
+      }
+      setOpen(next);
+    },
+    [beforeOpen],
+  );
+
   return (
-    <Select value={value} onValueChange={onNavChange} disabled={disabled}>
+    <Select
+      open={beforeOpen ? open : undefined}
+      onOpenChange={beforeOpen ? handleOpenChange : undefined}
+      value={value}
+      onValueChange={onNavChange}
+      disabled={disabled}
+    >
       <SelectTrigger className={triggerClassName} {...erpNavOrder(order)}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>

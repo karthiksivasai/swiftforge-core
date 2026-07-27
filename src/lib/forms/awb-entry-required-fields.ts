@@ -15,6 +15,35 @@ export function isAwbLookupSelected(pair: LookupPair): boolean {
   return Boolean(pair.id || pair.code.trim() || pair.name.trim());
 }
 
+export function getVendorChargePrerequisiteErrors(
+  form: {
+    clientName: LookupPair;
+    consignee: { origin: LookupPair };
+    product: LookupPair;
+    service: LookupPair;
+    vendor: LookupPair;
+  },
+  opts?: { consigneeNotRequired?: boolean },
+): string[] {
+  const errors: string[] = [];
+  if (!isAwbLookupSelected(form.clientName)) {
+    errors.push("Please fill Client Name before adding charges.");
+  }
+  if (!opts?.consigneeNotRequired && !isAwbLookupSelected(form.consignee.origin)) {
+    errors.push("Please fill Destination before adding charges.");
+  }
+  if (!form.product.code.trim() && !form.product.name.trim()) {
+    errors.push("Please fill Product before adding charges.");
+  }
+  if (!isAwbLookupSelected(form.service)) {
+    errors.push("Please fill Service before adding charges.");
+  }
+  if (!isAwbLookupSelected(form.vendor)) {
+    errors.push("Please fill Vendor before adding charges.");
+  }
+  return errors;
+}
+
 export function validateAwbNavField(
   order: number,
   form: {

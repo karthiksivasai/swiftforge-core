@@ -18,6 +18,7 @@ import {
   FileSpreadsheet,
   Loader2,
   Check,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -69,6 +70,7 @@ import { ErpFormNavProvider, ErpNavCycleSelect, ErpNavDateInput, ErpNavInput, Er
 import { AWB_NAV } from "@/lib/forms/awb-entry-nav-order";
 import {
   AWB_REQUIRED_NAV_ORDERS,
+  getVendorChargePrerequisiteErrors,
   isAwbLookupSelected,
   validateAwbNavField,
 } from "@/lib/forms/awb-entry-required-fields";
@@ -483,6 +485,7 @@ const EXPORT_REASONS = [
 ] as const;
 
 const PROFORMA_FORMATS = ["B2B", "B2C", "C2C"] as const;
+const PROFORMA_DROPDOWN_SELECT = "Select";
 
 const PROFORMA_CURRENCIES = [
   "INR",
@@ -1286,6 +1289,7 @@ function AwbEntryPage() {
   const kycFileRef = useRef<HTMLInputElement | null>(null);
   const awbFormNavRef = useRef<HTMLDivElement>(null);
   const [navInvalidOrders, setNavInvalidOrders] = useState<Set<number>>(() => new Set());
+  const [vendorChargePrereqErrors, setVendorChargePrereqErrors] = useState<string[] | null>(null);
   const [formSetupOpen, setFormSetupOpen] = useState(false);
   const [formSetupSettings, setFormSetupSettings] =
     useState<AwbFormSetupSettings>(defaultAwbFormSetup);
@@ -3026,7 +3030,17 @@ function AwbEntryPage() {
     }));
   };
 
+  const ensureVendorChargePrerequisites = useCallback((): boolean => {
+    const errors = getVendorChargePrerequisiteErrors(form, {
+      consigneeNotRequired: formSetupSettings.consigneeNotRequired,
+    });
+    if (errors.length === 0) return true;
+    setVendorChargePrereqErrors(errors);
+    return false;
+  }, [form, formSetupSettings.consigneeNotRequired]);
+
   const addVendorChargeLine = () => {
+    if (!ensureVendorChargePrerequisites()) return;
     if (!vendorChargeDraft.description) return toast.error("Description is required");
     if (!vendorChargeDraft.amount.trim()) return toast.error("Amount is required");
     const amount = vendorChargeDraft.amount;
@@ -4130,10 +4144,14 @@ function AwbEntryPage() {
                       <FieldWrapper borderLabel label="Term Of Invoice">
                         <ErpNavSelect
                           order={AWB_NAV.PROFORMA_TERM_OF_INVOICE}
-                          value={form.proforma.termOfInvoice || undefined}
-                          onValueChange={(v) => patchProforma({ termOfInvoice: v })}
-                          placeholder="Select"
-                          items={TERM_OF_INVOICE}
+                          value={form.proforma.termOfInvoice || PROFORMA_DROPDOWN_SELECT}
+                          onValueChange={(v) =>
+                            patchProforma({
+                              termOfInvoice: v === PROFORMA_DROPDOWN_SELECT ? "" : v,
+                            })
+                          }
+                          placeholder={PROFORMA_DROPDOWN_SELECT}
+                          items={[PROFORMA_DROPDOWN_SELECT, ...TERM_OF_INVOICE]}
                           triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                         />
                       </FieldWrapper>
@@ -4163,11 +4181,10 @@ function AwbEntryPage() {
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Department No">
-                        <ErpNavInput
-                          order={AWB_NAV.PROFORMA_DEPARTMENT_NO}
-                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                        <Input
+                          readOnly
+                          className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                           value={form.proforma.departmentNo}
-                          onValueChange={(v) => patchProforma({ departmentNo: v })}
                         />
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Export Reason">
@@ -4182,10 +4199,14 @@ function AwbEntryPage() {
                       <FieldWrapper borderLabel label="Format">
                         <ErpNavSelect
                           order={AWB_NAV.PROFORMA_FORMAT}
-                          value={form.proforma.format || undefined}
-                          onValueChange={(v) => patchProforma({ format: v })}
-                          placeholder="Select"
-                          items={PROFORMA_FORMATS}
+                          value={form.proforma.format || PROFORMA_DROPDOWN_SELECT}
+                          onValueChange={(v) =>
+                            patchProforma({
+                              format: v === PROFORMA_DROPDOWN_SELECT ? "" : v,
+                            })
+                          }
+                          placeholder={PROFORMA_DROPDOWN_SELECT}
+                          items={[PROFORMA_DROPDOWN_SELECT, ...PROFORMA_FORMATS]}
                           triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                         />
                       </FieldWrapper>
@@ -4600,6 +4621,7 @@ function AwbEntryPage() {
                             order={AWB_NAV.VENDOR_CHARGE_DESCRIPTION}
                             value={vendorChargeDraft.description || undefined}
                             onValueChange={(v) => patchVendorChargeDraft({ description: v })}
+                            beforeOpen={ensureVendorChargePrerequisites}
                             placeholder="Select"
                             items={VENDOR_CHARGE_DESCRIPTIONS}
                             triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
@@ -4611,6 +4633,11 @@ function AwbEntryPage() {
                             className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             value={vendorChargeDraft.amount}
                             onValueChange={(v) => patchVendorChargeDraft({ amount: v })}
+                            onFocus={() => {
+                              if (!ensureVendorChargePrerequisites()) {
+                                (document.activeElement as HTMLElement | null)?.blur();
+                              }
+                            }}
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Fuel(0)">
@@ -4619,6 +4646,7 @@ function AwbEntryPage() {
                               order={AWB_NAV.VENDOR_CHARGE_FUEL}
                               value={vendorChargeDraft.fuel}
                               onValueChange={(v) => patchVendorChargeDraft({ fuel: v })}
+                              beforeOpen={ensureVendorChargePrerequisites}
                               items={YES_NO}
                               triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
                             />
@@ -4635,6 +4663,7 @@ function AwbEntryPage() {
                               order={AWB_NAV.VENDOR_CHARGE_TAX_ON_FUEL}
                               value={vendorChargeDraft.taxOnFuel}
                               onValueChange={(v) => patchVendorChargeDraft({ taxOnFuel: v })}
+                              beforeOpen={ensureVendorChargePrerequisites}
                               items={YES_NO}
                               triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
                             />
@@ -4651,6 +4680,7 @@ function AwbEntryPage() {
                               order={AWB_NAV.VENDOR_CHARGE_TAX}
                               value={vendorChargeDraft.tax}
                               onValueChange={(v) => patchVendorChargeDraft({ tax: v })}
+                              beforeOpen={ensureVendorChargePrerequisites}
                               items={YES_NO}
                               triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
                             />
@@ -5335,6 +5365,32 @@ function AwbEntryPage() {
           }
         }}
       />
+
+      <AlertDialog
+        open={vendorChargePrereqErrors != null}
+        onOpenChange={(open) => {
+          if (!open) setVendorChargePrereqErrors(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+              <AlertTriangle className="h-8 w-8" aria-hidden />
+            </div>
+            <AlertDialogTitle className="sr-only">Vendor charge validation</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <ul className="list-disc space-y-1 pl-5 text-left text-sm text-foreground">
+                {vendorChargePrereqErrors?.map((msg) => (
+                  <li key={msg}>{msg}</li>
+                ))}
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setVendorChargePrereqErrors(null)}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!restoreDraft && !showForm}>
         <AlertDialogContent>
