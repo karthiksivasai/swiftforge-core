@@ -9,6 +9,8 @@ import {
   type RefObject,
 } from "react";
 
+import { ChevronDown } from "lucide-react";
+
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -23,18 +25,24 @@ import {
   ERP_NAV_ACTION,
   ERP_NAV_ACTION_NEXT_TAB,
   ERP_NAV_ACTION_PREV_TAB,
+  ERP_NAV_ACTIVE,
   ERP_NAV_ORDER,
   focusErpFieldByOrder,
   focusFirstErpField,
   focusNextAfterOrder,
   focusNextErpField,
+  focusPrevBeforeOrder,
   focusPrevErpField,
+  isDateInputNavField,
+  peekNextErpField,
+  peekPrevErpField,
   resolveErpNavAction,
   resolveErpNavAnchor,
   scheduleErpFocusAdvance,
   shouldEnterAdvanceFocus,
   shouldShiftEnterAdvanceFocus,
 } from "@/lib/forms/erp-keyboard-nav";
+import { cn } from "@/lib/utils";
 
 type ErpFormNavContextValue = {
   advanceFocus: (from?: HTMLElement | null) => void;
@@ -63,6 +71,20 @@ export function ErpFormNavProvider({
   children: React.ReactNode;
 }) {
   const lastNavAnchorRef = useRef<HTMLElement | null>(null);
+  const activeNavAnchorRef = useRef<HTMLElement | null>(null);
+
+  const clearActiveNavAnchor = useCallback(() => {
+    activeNavAnchorRef.current?.removeAttribute(ERP_NAV_ACTIVE);
+    activeNavAnchorRef.current = null;
+  }, []);
+
+  const setActiveNavAnchor = useCallback((anchor: HTMLElement | null) => {
+    if (activeNavAnchorRef.current === anchor) return;
+    clearActiveNavAnchor();
+    if (!anchor) return;
+    anchor.setAttribute(ERP_NAV_ACTIVE, "");
+    activeNavAnchorRef.current = anchor;
+  }, [clearActiveNavAnchor]);
 
   const resolveAdvanceFrom = useCallback(
     (from: HTMLElement | null | undefined): HTMLElement | null => {
@@ -82,13 +104,23 @@ export function ErpFormNavProvider({
       const container = containerRef.current;
       if (!container || !enabled) return;
 
-      const active = resolveAdvanceFrom(from);
-      if (!active) return;
+      const resolved = resolveAdvanceFrom(from);
+      if (!resolved) return;
 
-      const anchor = resolveErpNavAnchor(active, container) ?? active;
+      const anchor = resolveErpNavAnchor(resolved, container) ?? resolved;
       if (validateBeforeAdvance && !validateBeforeAdvance(anchor)) {
         onAdvanceBlocked?.(anchor);
         anchor.focus();
+        return;
+      }
+
+      const target =
+        direction === "next"
+          ? peekNextErpField(container, resolved)
+          : peekPrevErpField(container, resolved);
+      if (target && isDateInputNavField(target)) {
+        if (direction === "next") focusNextErpField(container, resolved);
+        else focusPrevErpField(container, resolved);
         return;
       }
 
@@ -166,12 +198,28 @@ export function ErpFormNavProvider({
       if (!(target instanceof HTMLElement)) return;
       if (!container.contains(target)) return;
       const anchor = resolveErpNavAnchor(target, container);
-      if (anchor?.hasAttribute(ERP_NAV_ORDER)) lastNavAnchorRef.current = anchor;
+      if (anchor?.hasAttribute(ERP_NAV_ORDER)) {
+        setActiveNavAnchor(anchor);
+        lastNavAnchorRef.current = anchor;
+        return;
+      }
+      clearActiveNavAnchor();
+    };
+
+    const onFocusOut = (event: FocusEvent) => {
+      const related = event.relatedTarget;
+      if (related instanceof HTMLElement && container.contains(related)) return;
+      clearActiveNavAnchor();
     };
 
     container.addEventListener("focusin", onFocusIn, true);
-    return () => container.removeEventListener("focusin", onFocusIn, true);
-  }, [containerRef, enabled]);
+    container.addEventListener("focusout", onFocusOut, true);
+    return () => {
+      container.removeEventListener("focusin", onFocusIn, true);
+      container.removeEventListener("focusout", onFocusOut, true);
+      clearActiveNavAnchor();
+    };
+  }, [clearActiveNavAnchor, containerRef, enabled, setActiveNavAnchor]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -331,21 +379,141 @@ export function ErpNavInput({
   );
 }
 
+function findErpNavContainer(from: HTMLElement): HTMLElement {
+  let node: HTMLElement | null = from;
+  while (node) {
+    if (node.querySelectorAll(`[${ERP_NAV_ORDER}]`).length > 1) return node;
+    node = node.parentElement;
+  }
+  return from.ownerDocument.body;
+}
+
+/** Cycle options with arrow keys; Enter advances without opening a dropdown. */
+export function ErpNavCycleSelect({
+  order,
+  value,
+  onValueChange,
+  items,
+  nextOrder,
+  placeholder = "Select",
+  className,
+  disabled,
+}: {
+  order: number;
+  value: string | undefined;
+  onValueChange: (value: string) => void;
+  items: readonly string[];
+  nextOrder?: number;
+  placeholder?: string;
+  className?: string;
+  disabled?: boolean;
+}) {
+  const nav = useErpFormNavOptional();
+
+  const cycle = useCallback(
+    (delta: number) => {
+      const list = [...items];
+      if (list.length === 0) return;
+      const idx = value ? list.indexOf(value) : -1;
+      let next =
+        idx === -1
+          ? delta > 0
+            ? 0
+            : list.length - 1
+          : idx + delta;
+      if (next < 0) next = list.length - 1;
+      if (next >= list.length) next = 0;
+      onValueChange(list[next]!);
+    },
+    [items, onValueChange, value],
+  );
+
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        cycle(1);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopPropagation();
+        cycle(-1);
+        return;
+      }
+      if (event.key === "Enter" && event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        focusPrevBeforeOrder(findErpNavContainer(event.currentTarget), order);
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (nextOrder != null) nav?.focusFieldByOrderImmediate(nextOrder);
+        else nav?.focusNextAfterOrder(order);
+      }
+    },
+    [cycle, nav, nextOrder, order],
+  );
+
+  return (
+    <div className="w-full min-w-0" {...{ [ERP_MANUAL_SEARCH]: "" }}>
+      <button
+        type="button"
+        disabled={disabled}
+        className={cn(
+          "flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+          !value && "text-muted-foreground",
+          className,
+        )}
+        {...erpNavOrder(order)}
+        onKeyDown={onKeyDown}
+      >
+        <span className="truncate">{value || placeholder}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
 /** Date input that advances focus after a value is picked. */
 export function ErpNavDateInput({
   order,
   onValueChange,
+  onFocus,
+  openPickerOnFocus = true,
   ...props
-}: Omit<React.ComponentProps<typeof Input>, "onChange" | "type"> & {
+}: Omit<React.ComponentProps<typeof Input>, "onChange" | "type" | "onFocus"> & {
   order: number;
   onValueChange: (value: string) => void;
+  onFocus?: React.FocusEventHandler<HTMLInputElement>;
+  openPickerOnFocus?: boolean;
 }) {
   const nav = useErpFormNavOptional();
+
+  const handleFocus = useCallback(
+    (event: React.FocusEvent<HTMLInputElement>) => {
+      onFocus?.(event);
+      if (!openPickerOnFocus) return;
+      try {
+        if (typeof event.currentTarget.showPicker === "function") {
+          event.currentTarget.showPicker();
+        }
+      } catch {
+        /* Some browsers block showPicker without a user gesture. */
+      }
+    },
+    [onFocus, openPickerOnFocus],
+  );
+
   return (
     <Input
       type="date"
       {...props}
       {...erpNavOrder(order)}
+      onFocus={handleFocus}
       onChange={(e) => {
         onValueChange(e.target.value);
         nav?.focusNextAfterOrder(order);

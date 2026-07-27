@@ -1,6 +1,7 @@
 /** Configured tab order for ERP-style Enter navigation. */
 export const ERP_NAV_ORDER = "data-erp-nav-order";
 export const ERP_NAV_SKIP = "data-erp-nav-skip";
+export const ERP_NAV_ACTIVE = "data-erp-nav-active";
 export const ERP_NAV_GROUP = "data-erp-nav-group";
 /** Lookup fields that search on F2 / search button; Enter advances via onCommit (AWB Entry). */
 export const ERP_MANUAL_SEARCH = "data-erp-manual-search";
@@ -114,9 +115,19 @@ export function getErpNavOrderFromElement(el: HTMLElement, container: HTMLElemen
   return parseErpNavOrder(anchor);
 }
 
+function openDatePicker(el: HTMLInputElement) {
+  try {
+    if (typeof el.showPicker === "function") el.showPicker();
+  } catch {
+    /* Some browsers block showPicker without a user gesture. */
+  }
+}
+
 function focusNavField(el: HTMLElement): HTMLElement {
   el.focus();
-  if (el instanceof HTMLInputElement && el.type !== "date" && el.type !== "file") {
+  if (el instanceof HTMLInputElement && el.type === "date") {
+    openDatePicker(el);
+  } else if (el instanceof HTMLInputElement && el.type !== "file") {
     try {
       el.select();
     } catch {
@@ -155,6 +166,40 @@ function resolveFromOrder(
     return null;
   }
   return getErpNavOrderFromElement(from, container);
+}
+
+export function isDateInputNavField(el: HTMLElement): boolean {
+  return el instanceof HTMLInputElement && el.type === "date";
+}
+
+export function peekNextErpField(
+  container: HTMLElement,
+  from?: HTMLElement | null,
+): HTMLElement | null {
+  const fromOrder = resolveFromOrder(container, from ?? (document.activeElement as HTMLElement | null));
+  if (fromOrder == null) return null;
+  const fields = getErpNavFields(container);
+  for (const field of fields) {
+    const order = parseErpNavOrder(field);
+    if (order != null && order > fromOrder) return field;
+  }
+  return null;
+}
+
+export function peekPrevErpField(
+  container: HTMLElement,
+  from?: HTMLElement | null,
+): HTMLElement | null {
+  const fromOrder = resolveFromOrder(container, from ?? (document.activeElement as HTMLElement | null));
+  if (fromOrder == null) return null;
+  const fields = getErpNavFields(container);
+  let candidate: HTMLElement | null = null;
+  for (const field of fields) {
+    const order = parseErpNavOrder(field);
+    if (order != null && order < fromOrder) candidate = field;
+    if (order != null && order >= fromOrder) break;
+  }
+  return candidate;
 }
 
 export function focusNextErpField(

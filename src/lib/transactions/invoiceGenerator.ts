@@ -217,9 +217,14 @@ function groupLinesByBox(lines: InvoiceLine[]) {
   return map;
 }
 
-function boxDims(pieces: InvoicePiece[] | undefined, boxNo: string, lineWeight?: string) {
+function resolvePieceForBox(pieces: InvoicePiece[] | undefined, boxNo: string): InvoicePiece | undefined {
+  if (!pieces?.length) return undefined;
   const idx = Math.max(0, (Number.parseInt(boxNo, 10) || 1) - 1);
-  const p = pieces?.[idx] ?? pieces?.[0];
+  return pieces[idx] ?? pieces[0];
+}
+
+function boxDims(pieces: InvoicePiece[] | undefined, boxNo: string, lineWeight?: string) {
+  const p = resolvePieceForBox(pieces, boxNo) ?? pieces?.[0];
   if (!p) {
     return { dims: "", weight: lineWeight || "" };
   }

@@ -169,3 +169,40 @@
     text-rendering: optimizeLegibility;
   }
 }
+
+@layer components {
+  /* ERP keyboard nav — only the current field gets a bold/dark border. */
+  [data-erp-form-nav] .erp-field-shell:has([data-erp-nav-active]),
+  [data-erp-form-nav] .lookup-name:has([data-erp-nav-active]) {
+    border-color: var(--color-primary) !important;
+    border-width: 2px !important;
+    z-index: 2;
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-primary) 18%, transparent);
+  }
+
+  [data-erp-form-nav] input[data-erp-nav-active],
+  [data-erp-form-nav] select[data-erp-nav-active],
+  [data-erp-form-nav] textarea[data-erp-nav-active] {
+    border-color: var(--color-primary) !important;
+    border-width: 2px !important;
+    outline: none;
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-primary) 18%, transparent);
+    z-index: 2;
+    position: relative;
+  }
+
+  [data-erp-form-nav] button[data-erp-nav-active] {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+    z-index: 2;
+    position: relative;
+  }
+
+  /* Flattened controls inside an already-highlighted shell should stay borderless. */
+  [data-erp-form-nav] .erp-field-shell:has([data-erp-nav-active]) [data-erp-nav-active],
+  [data-erp-form-nav] .lookup-name:has([data-erp-nav-active]) [data-erp-nav-active] {
+    border-width: 0 !important;
+    box-shadow: none !important;
+    outline: none !important;
+  }
+}

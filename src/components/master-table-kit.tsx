@@ -77,7 +77,7 @@ export function FieldWrapper({
       <div className={cn("relative min-w-0 pt-1.5", className)}>
         <div
           className={cn(
-            "relative flex h-8 w-full min-w-0 items-stretch overflow-visible rounded border bg-background",
+            "relative flex h-8 w-full min-w-0 items-stretch overflow-visible rounded border bg-background erp-field-shell",
             invalid ? "border-destructive ring-1 ring-destructive" : "border-input",
             // Flatten nested controls so the group reads as one outlined field
             "[&_input]:h-8 [&_input]:min-h-8 [&_input]:rounded-none [&_input]:border-0 [&_input]:bg-transparent [&_input]:px-1.5 [&_input]:text-[13px] [&_input]:shadow-none [&_input]:focus-visible:ring-0",

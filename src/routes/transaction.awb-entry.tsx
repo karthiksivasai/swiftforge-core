@@ -65,7 +65,7 @@ import {
 import { PartyContactLookup } from "@/components/transactions/party-contact-lookup";
 import { VendorServiceLookup } from "@/components/transactions/vendor-service-lookup";
 import { PincodeAutocomplete } from "@/components/pincode-autocomplete";
-import { ErpFormNavProvider, ErpNavDateInput, ErpNavInput, ErpNavSelect, useErpFormNavOptional, useErpNavCommit, useErpSelectNav } from "@/components/forms/erp-form-nav-context";
+import { ErpFormNavProvider, ErpNavCycleSelect, ErpNavDateInput, ErpNavInput, ErpNavSelect, useErpFormNavOptional, useErpNavCommit, useErpSelectNav } from "@/components/forms/erp-form-nav-context";
 import { AWB_NAV } from "@/lib/forms/awb-entry-nav-order";
 import {
   AWB_REQUIRED_NAV_ORDERS,
@@ -641,7 +641,6 @@ const PROFORMA_CURRENCIES = [
   "ZWL",
 ] as const;
 
-const BOX_NUMBERS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] as const;
 const PROFORMA_UNITS = ["PCS", "KGS", "NOS", "SET", "PAIR"] as const;
 
 const VENDOR_CHARGE_DESCRIPTIONS = [
@@ -931,6 +930,13 @@ const calcChargeWeight = (draft: PiecesDraft) => {
     (Number.parseFloat(draft.actualWeightPerPc) || 0) * (Number.parseFloat(draft.noOfPieces) || 0);
   return Math.max(vol, act).toFixed(3);
 };
+
+/** Box numbers 1..N — one box per row added in AWB Pieces details. */
+function deriveAwbBoxNumbers(piecesLines: PiecesLine[]): string[] {
+  const total = piecesLines.length;
+  if (total <= 0) return [];
+  return Array.from({ length: total }, (_, index) => String(index + 1));
+}
 
 const formatListWeightDisplay = (value: string): string => {
   const n = Number.parseFloat(value);
@@ -1529,6 +1535,19 @@ function AwbEntryPage() {
       amount: amount.toFixed(2),
     };
   }, [form.proforma.lines]);
+
+  const proformaBoxNumbers = useMemo(
+    () => deriveAwbBoxNumbers(form.piecesLines),
+    [form.piecesLines],
+  );
+
+  useEffect(() => {
+    setProformaDraft((draft) => {
+      if (proformaBoxNumbers.length === 0) return draft;
+      if (proformaBoxNumbers.includes(draft.boxNo)) return draft;
+      return { ...draft, boxNo: proformaBoxNumbers[0]! };
+    });
+  }, [proformaBoxNumbers]);
 
   const vendorChargeSummary = useMemo(() => {
     const lines = form.forwarding.vendorChargeLines;
@@ -2960,9 +2979,15 @@ function AwbEntryPage() {
     toast.success(`Unit ${unit} added`);
   };
 
-  const addProformaLine = () => {
-    if (!proformaDraft.description.trim()) return toast.error("Description is required");
-    if (!proformaDraft.rate.trim()) return toast.error("Rate is required");
+  const addProformaLine = (): boolean => {
+    if (!proformaDraft.description.trim()) {
+      toast.error("Description is required");
+      return false;
+    }
+    if (!proformaDraft.rate.trim()) {
+      toast.error("Rate is required");
+      return false;
+    }
     const amount = updateProformaDraftAmount(proformaDraft);
     const igstPct = Number.parseFloat(proformaDraft.igstPercent) || 0;
     const igstAmount = ((Number.parseFloat(amount) || 0) * igstPct) / 100;
@@ -2983,6 +3008,15 @@ function AwbEntryPage() {
     setForm((f) => ({ ...f, proforma: { ...f.proforma, lines: [...f.proforma.lines, line] } }));
     setProformaDraft(emptyProformaDraft());
     toast.success("Proforma line added");
+    return true;
+  };
+
+  const commitProformaLine = () => {
+    if (!addProformaLine()) return;
+    scheduleErpFocusAdvance(() => {
+      const container = awbFormNavRef.current;
+      if (container) focusErpFieldByOrder(container, AWB_NAV.PROFORMA_BOX_NO);
+    });
   };
 
   const removeProformaLine = (id: string) => {
@@ -3258,7 +3292,7 @@ function AwbEntryPage() {
               </TooltipProvider>
             </div>
 
-            <div ref={awbFormNavRef}>
+            <div ref={awbFormNavRef} className="erp-form-nav" data-erp-form-nav>
               <ErpFormNavProvider
                 containerRef={awbFormNavRef}
                 enabled={!isReadOnly}
@@ -4213,10 +4247,21 @@ function AwbEntryPage() {
                     <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(4rem,0.72fr)_minmax(4.5rem,0.78fr)_minmax(8rem,1.35fr)_minmax(5rem,0.9fr)_minmax(3.75rem,0.68fr)_minmax(3.75rem,0.68fr)_minmax(6.75rem,1fr)_minmax(3.75rem,0.68fr)_minmax(4.25rem,0.75fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                       <FieldWrapper borderLabel label="Box No">
                         <ErpNavSelect
+                          key={`proforma-box-${proformaBoxNumbers.join("-") || "none"}`}
                           order={AWB_NAV.PROFORMA_BOX_NO}
-                          value={proformaDraft.boxNo}
+                          value={
+                            proformaBoxNumbers.includes(proformaDraft.boxNo)
+                              ? proformaDraft.boxNo
+                              : undefined
+                          }
                           onValueChange={(v) => patchProformaDraft({ boxNo: v })}
-                          items={BOX_NUMBERS}
+                          items={proformaBoxNumbers}
+                          disabled={proformaBoxNumbers.length === 0}
+                          placeholder={
+                            proformaBoxNumbers.length === 0
+                              ? "Add pieces in AWB tab"
+                              : "Select"
+                          }
                           triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                         />
                       </FieldWrapper>
@@ -4287,12 +4332,28 @@ function AwbEntryPage() {
                         </div>
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Rate">
-                        <ErpNavInput
-                          order={AWB_NAV.PROFORMA_RATE}
-                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          value={proformaDraft.rate}
-                          onValueChange={(v) => patchProformaDraft({ rate: v })}
-                        />
+                        <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
+                          <ErpNavInput
+                            order={AWB_NAV.PROFORMA_RATE}
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            value={proformaDraft.rate}
+                            onValueChange={(v) => patchProformaDraft({ rate: v })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && e.shiftKey) {
+                                e.preventDefault();
+                                const container = awbFormNavRef.current;
+                                if (container) {
+                                  focusPrevBeforeOrder(container, AWB_NAV.PROFORMA_RATE);
+                                }
+                                return;
+                              }
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                commitProformaLine();
+                              }
+                            }}
+                          />
+                        </div>
                       </FieldWrapper>
                       <FieldWrapper borderLabel label="Amount">
                         <Input
@@ -4305,7 +4366,7 @@ function AwbEntryPage() {
                         <Button
                           type="button"
                           className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
-                          {...erpNavOrder(AWB_NAV.PROFORMA_ADD)}
+                          {...erpNavSkip()}
                           onClick={addProformaLine}
                         >
                           <Plus className="mr-1 h-4 w-4" />
@@ -5454,8 +5515,6 @@ function PartySection({
       };
   const onCommit = useErpNavCommit();
   const onPincodeCommit = useErpNavCommit(nav.pincode);
-  const { onValueChange: onDocTypeChange, contentProps: docTypeSelectContentProps, itemProps: docTypeSelectItemProps } =
-    useErpSelectNav((v: string) => onChange({ documentType: v }), { nextOrder: nav.docNo });
   const inputClass = "h-8 px-1.5 text-[13px]";
 
   return (
@@ -5627,18 +5686,15 @@ function PartySection({
         </div>
         <div className="grid grid-cols-2 gap-2">
           <FieldWrapper borderLabel label="Document Type">
-            <Select value={party.documentType || undefined} onValueChange={onDocTypeChange}>
-              <SelectTrigger className={inputClass} {...erpNavOrder(nav.docType)}>
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-              <SelectContent {...docTypeSelectContentProps}>
-                {DOCUMENT_TYPES.map((d) => (
-                  <SelectItem key={d} value={d} {...docTypeSelectItemProps}>
-                    {d}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ErpNavCycleSelect
+              order={nav.docType}
+              value={party.documentType || undefined}
+              onValueChange={(v) => onChange({ documentType: v })}
+              items={DOCUMENT_TYPES}
+              nextOrder={nav.docNo}
+              placeholder="Select"
+              className={inputClass}
+            />
           </FieldWrapper>
           <FieldWrapper borderLabel label="Document No.">
             <ErpNavInput
