@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { LOOKUP_DROPDOWN_ATTR } from "@/components/masters/lookup-dropdown-portal";
 import { handleLookupCommitKeyDown } from "@/components/masters/lookup-autocomplete-ui";
 import { usePincodeAutocomplete } from "@/hooks/use-pincode-autocomplete";
-import { erpNavOrder } from "@/lib/forms/erp-keyboard-nav";
+import { erpNavOrder, ERP_MANUAL_SEARCH } from "@/lib/forms/erp-keyboard-nav";
 import {
   toPincodeSelection,
   type PincodeRecord,
@@ -140,32 +140,30 @@ export function PincodeAutocomplete({
       return;
     }
 
-    if (showDropdown) {
-      if (
-        handleLookupCommitKeyDown(event, {
-          dropdownOpen: showDropdown,
-          resultsAvailable: results.length > 0,
-          highlightedIndex: highlight,
-          onPickHighlighted: () => {
-            const row = results[highlight];
-            if (row) commitSelection(row);
-          },
-          onCommitTyped: () => {
-            close();
-            onCommit?.();
-          },
-          onDismissDropdown: close,
-        })
-      ) {
-        return;
-      }
+    if (
+      handleLookupCommitKeyDown(event, {
+        dropdownOpen: showDropdown,
+        resultsAvailable: results.length > 0,
+        highlightedIndex: highlight,
+        onPickHighlighted: () => {
+          const row = results[highlight];
+          if (row) commitSelection(row);
+        },
+        onCommitTyped: () => {
+          close();
+          onCommit?.();
+        },
+        onDismissDropdown: close,
+      })
+    ) {
+      return;
     }
   };
 
   const navProps = navOrder != null ? erpNavOrder(navOrder) : undefined;
 
   return (
-    <div ref={wrapRef} className="relative w-full min-w-0">
+    <div ref={wrapRef} className="relative w-full min-w-0" {...{ [ERP_MANUAL_SEARCH]: "" }}>
       <div className="relative">
         <Input
           name={name}

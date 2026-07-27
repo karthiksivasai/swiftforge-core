@@ -72,7 +72,15 @@ import {
   isAwbLookupSelected,
   validateAwbNavField,
 } from "@/lib/forms/awb-entry-required-fields";
-import { erpNavOrder, erpNavSkip, getErpNavOrderFromElement } from "@/lib/forms/erp-keyboard-nav";
+import {
+  erpNavOrder,
+  erpNavSkip,
+  ERP_MANUAL_SEARCH,
+  focusErpFieldByOrder,
+  focusPrevBeforeOrder,
+  getErpNavOrderFromElement,
+  scheduleErpFocusAdvance,
+} from "@/lib/forms/erp-keyboard-nav";
 import type { LookupKey } from "@/lib/master-lookups";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
@@ -2875,6 +2883,18 @@ function AwbEntryPage() {
     toast.success("Piece line added");
   };
 
+  const commitPiecesLine = () => {
+    if (!piecesDraft.noOfPieces.trim()) {
+      toast.error("No. Of Pieces is required");
+      return;
+    }
+    addPiecesLine();
+    scheduleErpFocusAdvance(() => {
+      const container = awbFormNavRef.current;
+      if (container) focusErpFieldByOrder(container, AWB_NAV.PIECES_MEASUREMENT_UNIT);
+    });
+  };
+
   const removePiecesLine = (id: string) => {
     setForm((f) => ({ ...f, piecesLines: f.piecesLines.filter((l) => l.id !== id) }));
   };
@@ -3536,18 +3556,34 @@ function AwbEntryPage() {
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Chrg Weight">
-                          <Input
-                            value={piecesDraft.chargeWeight}
-                            readOnly
-                            {...erpNavOrder(AWB_NAV.PIECES_CHARGE_WEIGHT)}
-                            className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          />
+                          <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
+                            <Input
+                              value={piecesDraft.chargeWeight}
+                              readOnly
+                              {...erpNavOrder(AWB_NAV.PIECES_CHARGE_WEIGHT)}
+                              className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && e.shiftKey) {
+                                  e.preventDefault();
+                                  const container = awbFormNavRef.current;
+                                  if (container) {
+                                    focusPrevBeforeOrder(container, AWB_NAV.PIECES_CHARGE_WEIGHT);
+                                  }
+                                  return;
+                                }
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitPiecesLine();
+                                }
+                              }}
+                            />
+                          </div>
                         </FieldWrapper>
                         <div className="col-span-2 flex items-end justify-end sm:col-span-1 lg:col-span-1 xl:col-span-1">
                           <Button
                             type="button"
                             className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
-                            {...erpNavOrder(AWB_NAV.PIECES_ADD)}
+                            {...erpNavSkip()}
                             onClick={addPiecesLine}
                           >
                             <Plus className="mr-1 h-4 w-4" />
@@ -5379,7 +5415,6 @@ function PartySection({
   companyRequired?: boolean;
   invalidNavOrders?: Set<number>;
 }) {
-  const onCommit = useErpNavCommit();
   const isConsignee = title.includes("Consignee");
   const originLabel = isConsignee ? "Destination" : "Origin";
   const nav = isConsignee
@@ -5417,6 +5452,8 @@ function PartySection({
         docType: AWB_NAV.SHIPPER_DOC_TYPE,
         docNo: AWB_NAV.SHIPPER_DOC_NO,
       };
+  const onCommit = useErpNavCommit();
+  const onPincodeCommit = useErpNavCommit(nav.pincode);
   const { onValueChange: onDocTypeChange, contentProps: docTypeSelectContentProps, itemProps: docTypeSelectItemProps } =
     useErpSelectNav((v: string) => onChange({ documentType: v }), { nextOrder: nav.docNo });
   const inputClass = "h-8 px-1.5 text-[13px]";
@@ -5522,7 +5559,7 @@ function PartySection({
                   country: item.country,
                 })
               }
-              onCommit={onCommit}
+              onCommit={onPincodeCommit}
             />
           </FieldWrapper>
           <FieldWrapper borderLabel label="City">
@@ -5629,6 +5666,7 @@ function ServicesSection({
   invalidNavOrders?: Set<number>;
 }) {
   const onCommit = useErpNavCommit();
+  const onVendorCommit = useErpNavCommit(AWB_NAV.VENDOR);
   const hasVendor = Boolean(
     form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim(),
   );
@@ -5664,14 +5702,14 @@ function ServicesSection({
               }))
             }
             navOrder={AWB_NAV.VENDOR}
+            onCommit={onVendorCommit}
           />
         </FieldWrapper>
         <FieldWrapper borderLabel label="Airline" required={airlineRequired}>
-          <ErpNavInput
-            order={AWB_NAV.AIRLINE}
-            className={inputClass}
+          <Input
+            readOnly
+            className={`${inputClass} bg-muted/30`}
             value={form.airline}
-            onValueChange={(v) => setForm((f) => ({ ...f, airline: v }))}
           />
         </FieldWrapper>
         <div className="min-w-0">

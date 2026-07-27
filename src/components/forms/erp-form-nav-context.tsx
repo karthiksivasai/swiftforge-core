@@ -434,10 +434,11 @@ export function useErpSelectHandler<T extends string>(
   return useErpSelectNav(handler, opts).onValueChange;
 }
 
-/** Callback for lookup components after a value is committed. */
-export function useErpNavCommit() {
+/** Callback for lookup/pincode components after a value is committed. */
+export function useErpNavCommit(fromOrder?: number) {
   const nav = useErpFormNavOptional();
   return useCallback(() => {
-    nav?.advanceFocus();
-  }, [nav]);
+    if (fromOrder != null) nav?.focusNextAfterOrder(fromOrder);
+    else nav?.advanceFocus();
+  }, [nav, fromOrder]);
 }
