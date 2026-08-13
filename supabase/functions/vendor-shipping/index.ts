@@ -1,3 +1,6 @@
+// deno-lint-ignore-file
+/// <reference path="../shim.d.ts" />
+
 /**
  * Provider-agnostic Vendor Shipping Edge Function.
  * Resolves tenant integration secrets (service role) and dispatches to the
@@ -251,7 +254,7 @@ function buildXpresionPayload(
       Format: str(proforma.format, "C2C"),
       IECNo: str(shipper.iec_no),
       LUTIssueDate: "",
-    LUTTillDate: "",
+      LUTTillDate: "",
     },
   };
 }

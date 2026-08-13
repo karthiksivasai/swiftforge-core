@@ -1,3 +1,6 @@
+// deno-lint-ignore-file
+/// <reference path="../shim.d.ts" />
+
 /**
  * Live SMS edge function — MSG91 / Twilio.
  * Used for vendor booking OTP to shipper mobile.

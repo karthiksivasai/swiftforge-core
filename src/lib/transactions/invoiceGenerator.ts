@@ -286,6 +286,11 @@ export function buildInvoiceHtml(input: InvoiceInput): string {
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
+  html, body, table.wt th, table.goods th, tr.box-hdr td {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    color-adjust: exact;
+  }
   body {
     margin: 0;
     padding: 10px;
@@ -339,6 +344,7 @@ export function buildInvoiceHtml(input: InvoiceInput): string {
   }
   table.wt th, table.goods th {
     background: #f2f2f2;
+    background-image: linear-gradient(#f2f2f2, #f2f2f2);
     font-weight: 700;
     font-size: 9px;
     text-align: center;
@@ -346,9 +352,19 @@ export function buildInvoiceHtml(input: InvoiceInput): string {
   .center { text-align: center; }
   .right { text-align: right; }
   .left { text-align: left; }
-  tr.box-hdr td { background: #f7f7f7; font-weight: 700; }
+  tr.box-hdr td { background: #f7f7f7; background-image: linear-gradient(#f7f7f7, #f7f7f7); font-weight: 700; }
   .grow { flex: 1; }
   .no-bottom { border-bottom: 0; }
+  @page { size: A4 portrait; margin: 10mm; }
+  @media print {
+    html, body, table.wt th, table.goods th, tr.box-hdr td {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    body { padding: 0; }
+    .sheet { width: 100%; max-width: 780px; }
+  }
 </style>
 </head>
 <body>

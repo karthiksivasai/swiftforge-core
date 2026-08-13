@@ -135,6 +135,10 @@ function paymentFlags(paymentType?: string) {
   };
 }
 
+function hdrBar(label: string): string {
+  return `<div class="hdr"><svg class="hdr-bg" aria-hidden="true" preserveAspectRatio="none"><rect width="100%" height="100%" fill="#0b5c2e"/></svg><span class="hdr-txt">${label}</span></div>`;
+}
+
 /** Build print-ready HTML for the AWB label (CourierWala-style). */
 export function buildAwbLabelHtml(input: AwbLabelInput): string {
   const awb = input.awbNo || "";
@@ -159,6 +163,11 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
 <link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+128&family=Libre+Barcode+39&display=swap" rel="stylesheet" />
 <style>
   * { box-sizing: border-box; }
+  html, body, .hdr, .logo-title, table.wt th {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    color-adjust: exact;
+  }
   body {
     margin: 0;
     padding: 12px;
@@ -176,13 +185,24 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
   .cell { border-right: 1px solid #111; border-bottom: 1px solid #111; padding: 4px 6px; }
   .cell:last-child { border-right: 0; }
   .hdr {
-    background: #0b5c2e;
+    position: relative;
+    background-color: #0b5c2e;
+    background-image: linear-gradient(#0b5c2e, #0b5c2e);
     color: #fff;
     font-weight: 700;
     font-size: 11px;
     padding: 3px 6px;
     letter-spacing: 0.02em;
   }
+  .hdr-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 0;
+  }
+  .hdr-txt { position: relative; z-index: 1; color: #fff; }
   .muted { color: #333; font-size: 10px; }
   .tiny { font-size: 9px; line-height: 1.25; }
   .bold { font-weight: 700; }
@@ -198,10 +218,31 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
   .check { display: inline-block; width: 12px; height: 12px; border: 1px solid #111; text-align: center; line-height: 11px; font-size: 11px; margin-right: 4px; }
   table.wt { width: 100%; border-collapse: collapse; font-size: 10px; }
   table.wt th, table.wt td { border: 1px solid #111; padding: 3px 4px; text-align: center; }
-  table.wt th { background: #f3f3f3; font-weight: 600; }
+  table.wt th { background: #f3f3f3; background-image: linear-gradient(#f3f3f3, #f3f3f3); font-weight: 600; }
   .logo-title { font-size: 18px; font-weight: 800; color: #0b5c2e; line-height: 1.1; }
   .logo-tag { font-size: 9px; color: #444; }
   .box-nested { border: 1px solid #111; padding: 2px 4px; margin-top: 4px; display: inline-block; min-width: 140px; }
+  @page { size: A4 portrait; margin: 10mm; }
+  @media print {
+    html, body, .hdr, .logo-title, table.wt th {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    body { padding: 0; background: #fff !important; }
+    .sheet { width: 100%; max-width: 780px; }
+    .hdr {
+      background-color: #0b5c2e !important;
+      background-image: linear-gradient(#0b5c2e, #0b5c2e) !important;
+      color: #fff !important;
+    }
+    .hdr-txt { color: #fff !important; }
+    .logo-title { color: #0b5c2e !important; }
+    table.wt th {
+      background: #f3f3f3 !important;
+      background-image: linear-gradient(#f3f3f3, #f3f3f3) !important;
+    }
+  }
 </style>
 </head>
 <body>
@@ -229,7 +270,7 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
 
   <div class="row">
     <div class="cell" style="width: 50%; padding: 0;">
-      <div class="hdr">1. FROM (SENDER)</div>
+      ${hdrBar("1. FROM (SENDER)")}
       <div style="padding: 6px;">
         <div><span class="muted">Account No.</span> <b>${esc(input.clientCode || input.shipper.accountNo)}</b></div>
         <div><span class="muted">Name</span> <b>${esc(input.clientName || input.shipper.name || input.shipper.companyName)}</b></div>
@@ -240,7 +281,7 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
       </div>
     </div>
     <div class="cell" style="width: 50%; padding: 0;">
-      <div class="hdr">2. TO (RECEIVER)</div>
+      ${hdrBar("2. TO (RECEIVER)")}
       <div style="padding: 6px;">
         <div><span class="muted">Account No.</span> <b>${esc(input.consignee.accountNo)}</b></div>
         <div><span class="muted">Name</span> <b>${esc(input.consignee.name || input.consignee.companyName || input.consignee.contactName)}</b></div>
@@ -252,7 +293,7 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
     </div>
   </div>
 
-  <div class="hdr">3. SHIPMENT INFORMATION</div>
+  ${hdrBar("3. SHIPMENT INFORMATION")}
   <div class="row">
     <div class="cell grow">
       <div class="muted">Dimensions (in cm) L*W*H</div>
@@ -287,7 +328,7 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
     </div>
   </div>
 
-  <div class="hdr">4. SERVICE DETAILS</div>
+  ${hdrBar("4. SERVICE DETAILS")}
   <div class="row">
     <div class="cell" style="width: 50%;">
       <span class="muted">Vendor Name</span><br/><b>${esc(input.vendorName)}</b>
@@ -299,7 +340,7 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
 
   <div class="row">
     <div class="cell" style="width: 70%; padding: 0;">
-      <div class="hdr">5. Description of Content ${isDoc ? "(Document)" : "(Non-Document)"}</div>
+      ${hdrBar(`5. Description of Content ${isDoc ? "(Document)" : "(Non-Document)"}`)}
       <div style="padding: 6px; min-height: 48px;">${esc(input.content)}</div>
     </div>
     <div class="cell" style="width: 30%;">
@@ -310,12 +351,12 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
     </div>
   </div>
 
-  <div class="hdr">6. SPECIAL INSTRUCTIONS</div>
+  ${hdrBar("6. SPECIAL INSTRUCTIONS")}
   <div class="row">
     <div class="cell grow" style="min-height: 36px;">${esc(input.instruction)}</div>
   </div>
 
-  <div class="hdr">7. PICK UP</div>
+  ${hdrBar("7. PICK UP")}
   <div class="row">
     <div class="cell" style="width: 50%;"><span class="muted">Courier Code</span></div>
     <div class="cell" style="width: 50%;"><span class="muted">Date / Time</span></div>
@@ -323,7 +364,7 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
 
   <div class="row">
     <div class="cell" style="width: 60%; padding: 0;">
-      <div class="hdr">8. SHIPPER'S SIGNATURE &amp; AUTHORIZATION</div>
+      ${hdrBar("8. SHIPPER'S SIGNATURE &amp; AUTHORIZATION")}
       <div class="tiny" style="padding: 6px;">
         I/We agree that courierwala express standard terms apply to this shipment and that this shipment does not contain any unauthorized or illegal goods. I authorize courierwala express as my agent for export/customs purposes.
         <div style="margin-top: 8px;"><b>DECLARED VALUE FOR CUSTOMS</b> ________________</div>
@@ -332,7 +373,7 @@ export function buildAwbLabelHtml(input: AwbLabelInput): string {
       </div>
     </div>
     <div class="cell" style="width: 40%; padding: 0;">
-      <div class="hdr">9. RECEIVER</div>
+      ${hdrBar("9. RECEIVER")}
       <div class="tiny" style="padding: 6px;">
         Received in good order &amp; condition. I agree to terms &amp; conditions of carriage.
         <div style="margin-top: 14px;">Name &amp; Signature / Stamp</div>

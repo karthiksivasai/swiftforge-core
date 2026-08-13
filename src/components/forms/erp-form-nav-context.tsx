@@ -456,6 +456,7 @@ export function ErpNavCycleSelect({
           className,
         )}
         {...erpNavOrder(order)}
+        onClick={() => cycle(1)}
         onKeyDown={onKeyDown}
       >
         <span className="truncate">{value || placeholder}</span>

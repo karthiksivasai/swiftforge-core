@@ -2110,54 +2110,8 @@ function AwbEntryPage() {
   }, [userKey, authed]);
 
   useEffect(() => {
-    if (!showForm || isReadOnly) return;
-    if (skipNextAutosaveRef.current) {
-      skipNextAutosaveRef.current = false;
-      return;
-    }
-    if (!isAwbDraftWorthKeeping(form)) return;
-
-    setDraftUiStatus("saving");
-    const timer = window.setTimeout(() => {
-      const draft = buildCurrentDraft();
-      const snapshot = JSON.stringify({
-        form: draft.form,
-        editing: draft.editing,
-        activeTab: draft.activeTab,
-        piecesDraft: draft.piecesDraft,
-        chargeDraft: draft.chargeDraft,
-        proformaDraft: draft.proformaDraft,
-        vendorChargeDraft: draft.vendorChargeDraft,
-      });
-      if (snapshot === lastDraftSnapshotRef.current) {
-        setDraftUiStatus(draftSavedAt ? "saved" : "idle");
-        return;
-      }
-      void persistAwbDraft({ draft, syncRemote: authed })
-        .then(() => {
-          lastDraftSnapshotRef.current = snapshot;
-          setDraftSavedAt(draft.savedAt);
-          setDraftUiStatus("saved");
-        })
-        .catch(() => setDraftUiStatus("error"));
-    }, AWB_DRAFT_AUTOSAVE_MS);
-
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- debounce on form chrome + payload only
-  }, [
-    form,
-    piecesDraft,
-    chargeDraft,
-    proformaDraft,
-    vendorChargeDraft,
-    activeTab,
-    editing?.id,
-    editing?.rowVersion,
-    showForm,
-    isReadOnly,
-    userKey,
-    authed,
-  ]);
+    // Draft autosave disabled
+  }, []);
 
   useEffect(() => {
     if (navBlocker.status === "blocked") {
@@ -2345,23 +2299,14 @@ function AwbEntryPage() {
     setLeavePromptOpen(true);
   };
 
-  const finishLeavePrompt = async (mode: "continue" | "save" | "discard") => {
+  const finishLeavePrompt = async (mode: "continue" | "discard") => {
     if (mode === "continue") {
       setLeavePromptOpen(false);
       if (leaveSource === "nav") navBlocker.reset?.();
       return;
     }
 
-    if (mode === "save") {
-      const draft = buildCurrentDraft();
-      if (isAwbDraftWorthKeeping(draft.form)) {
-        await persistAwbDraft({ draft, syncRemote: authed });
-        setDraftSavedAt(draft.savedAt);
-        setDraftUiStatus("saved");
-      }
-    } else {
-      await clearDraftState();
-    }
+    await clearDraftState();
 
     setLeavePromptOpen(false);
     allowLeaveRef.current = true;
@@ -2590,7 +2535,7 @@ function AwbEntryPage() {
     if (isCommercialExport) {
       const shipperIec = (
         form.shipper.iecNo.trim() ||
-        (form.shipper.documentType === "IEC" ? form.shipper.documentNo.trim() : "")
+        ((form.shipper.documentType === "IEC" || form.shipper.documentType.includes("IEC")) ? form.shipper.documentNo.trim() : "")
       ).toUpperCase();
 
       if (!shipperIec) {
@@ -3686,34 +3631,6 @@ function AwbEntryPage() {
               </TabsList>
               <TooltipProvider delayDuration={200}>
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  {!isReadOnly ? (
-                    <div
-                      className="mr-1 flex items-center gap-1.5 text-xs text-muted-foreground"
-                      aria-live="polite"
-                    >
-                      {draftUiStatus === "saving" ? (
-                        <>
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          <span>Saving...</span>
-                        </>
-                      ) : draftUiStatus === "saved" ? (
-                        <>
-                          <Check className="h-3.5 w-3.5 text-emerald-600" />
-                          <span className="text-emerald-700 dark:text-emerald-400">Draft Saved</span>
-                          {draftSavedAt ? (
-                            <span className="text-muted-foreground">
-                              · Last saved: {formatDraftSavedAt(draftSavedAt)}
-                            </span>
-                          ) : null}
-                        </>
-                      ) : draftUiStatus === "error" ? (
-                        <>
-                          <Cloud className="h-3.5 w-3.5" />
-                          <span>Draft save failed (kept locally if possible)</span>
-                        </>
-                      ) : null}
-                    </div>
-                  ) : null}
                   <IconButton label="Form Setup" onClick={openFormSetup}>
                     <Settings className="h-4 w-4" />
                   </IconButton>
@@ -3904,19 +3821,26 @@ function AwbEntryPage() {
                     </div>
                   </div>
 
-                  {isSaved && editing?.id ? (
-                    <ShipmentDocumentQuickLinks
-                      shipmentId={editing.id}
-                      refreshKey={vendorPanelKey}
-                      onOpenCenter={() => {
-                        document
-                          .getElementById("shipment-documents-center")
-                          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                      }}
-                      onEnsureDocument={ensureInternalDocument}
-                    />
-                  ) : null}
+                </div>
+              </fieldset>
 
+              {isSaved && editing?.id ? (
+                <div className="px-2 md:px-2.5">
+                  <ShipmentDocumentQuickLinks
+                    shipmentId={editing.id}
+                    refreshKey={vendorPanelKey}
+                    onOpenCenter={() => {
+                      document
+                        .getElementById("shipment-documents-center")
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                    onEnsureDocument={ensureInternalDocument}
+                  />
+                </div>
+              ) : null}
+
+              <fieldset disabled={isReadOnly} className="min-w-0 border-0 p-0 disabled:opacity-90">
+                <div className="p-2 md:p-2.5">
                   <div className="mt-0.5 grid grid-cols-1 items-start gap-2 pt-2 md:grid-cols-2 xl:grid-cols-3 xl:gap-2.5">
                     <PartySection
                       title="Shipper Details"
@@ -5886,43 +5810,17 @@ function AwbEntryPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!restoreDraft && !showForm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>An unsaved AWB draft was found.</AlertDialogTitle>
-            <AlertDialogDescription>
-              Continue editing to restore every field from your last unfinished entry, or start a
-              new entry and discard the draft.
-              {restoreDraft?.savedAt
-                ? ` Last saved ${formatDraftSavedAt(restoreDraft.savedAt)}.`
-                : ""}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <Button type="button" variant="outline" onClick={() => void handleRestoreStartNew()}>
-              Start New Entry
-            </Button>
-            <Button type="button" onClick={handleRestoreContinue}>
-              Continue Editing
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       <AlertDialog open={leavePromptOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>You have an unfinished AWB entry.</AlertDialogTitle>
             <AlertDialogDescription>
-              Choose how to handle your current AWB Entry before leaving.
+              Are you sure you want to leave? Any unsaved changes will be discarded.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" onClick={() => void finishLeavePrompt("continue")}>
               Continue Editing
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => void finishLeavePrompt("save")}>
-              Save Draft & Leave
             </Button>
             <Button
               type="button"
@@ -6244,14 +6142,14 @@ function PartySection({
         </div>
         <div className="grid grid-cols-2 gap-2">
           <FieldWrapper borderLabel label="Document Type">
-            <ErpNavCycleSelect
+            <ErpNavSelect
               order={nav.docType}
               value={party.documentType || undefined}
               onValueChange={(v) => onChange({ documentType: v })}
               items={DOCUMENT_TYPES}
               nextOrder={nav.docNo}
               placeholder="Select"
-              className={inputClass}
+              triggerClassName={inputClass}
             />
           </FieldWrapper>
           <FieldWrapper borderLabel label="Document No.">

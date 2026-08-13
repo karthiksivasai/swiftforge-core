@@ -2,7 +2,16 @@
  * Shipment Documents Center — post vendor booking success.
  * Provider-agnostic tiles with preview drawer, print, download.
  */
-import { useEffect, useMemo, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
@@ -17,13 +26,6 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Checkbox } from "@/components/ui/checkbox";
 import { listVendorDocuments } from "@/lib/integrations/vendor-shipping/client";
 import type { VendorDocType, VendorDocumentRow } from "@/lib/integrations/vendor-shipping/types";
@@ -52,20 +54,20 @@ const AWB_DOCUMENT_QUICK_LINKS: ReadonlyArray<{
   canGenerate?: boolean;
   kind?: "link" | "excel";
 }> = [
-  { key: "LOI", label: "LOI" },
-  { key: "AUTHORITY_LETTER", label: "Authority Letter", centerType: "AUTHORITY_LETTER", vendorDocType: "AUTHORITY_LETTER" },
-  { key: "AWB", label: "AWB", centerType: "AWB_LABEL", canGenerate: true },
-  { key: "LABEL", label: "Label", centerType: "AWB_LABEL", vendorDocType: "SHIPPING_LABEL", canGenerate: true },
-  { key: "INVOICE", label: "Invoice", centerType: "INVOICE", canGenerate: true },
-  { key: "VENDOR_AWB", label: "Vendor AWB", centerType: "VENDOR_AWB", vendorDocType: "VENDOR_AWB" },
-  { key: "VENDOR_INVOICE", label: "Vendor Invoice", centerType: "VENDOR_INVOICE", vendorDocType: "VENDOR_INVOICE" },
-  { key: "FORWARDING_AWB", label: "Forwarding AWB" },
-  { key: "FORWARDING_BOX", label: "Forwarding Box", vendorDocType: "BOX_LABEL" },
-  { key: "FORWARDING_LABEL", label: "Forwarding Label", vendorDocType: "SHIPPING_LABEL" },
-  { key: "FIRST_MILE_LABEL", label: "First Mile Label" },
-  { key: "KYC", label: "KYC", centerType: "KYC", vendorDocType: "KYC" },
-  { key: "EXCEL", label: "Excel", kind: "excel" },
-];
+    { key: "LOI", label: "LOI" },
+    { key: "AUTHORITY_LETTER", label: "Authority Letter", centerType: "AUTHORITY_LETTER", vendorDocType: "AUTHORITY_LETTER" },
+    { key: "AWB", label: "AWB", centerType: "AWB_LABEL", canGenerate: true },
+    { key: "LABEL", label: "Label", centerType: "AWB_LABEL", vendorDocType: "SHIPPING_LABEL", canGenerate: true },
+    { key: "INVOICE", label: "Invoice", centerType: "INVOICE", canGenerate: true },
+    { key: "VENDOR_AWB", label: "Vendor AWB", centerType: "VENDOR_AWB", vendorDocType: "VENDOR_AWB" },
+    { key: "VENDOR_INVOICE", label: "Vendor Invoice", centerType: "VENDOR_INVOICE", vendorDocType: "VENDOR_INVOICE" },
+    { key: "FORWARDING_AWB", label: "Forwarding AWB" },
+    { key: "FORWARDING_BOX", label: "Forwarding Box", vendorDocType: "BOX_LABEL" },
+    { key: "FORWARDING_LABEL", label: "Forwarding Label", vendorDocType: "SHIPPING_LABEL" },
+    { key: "FIRST_MILE_LABEL", label: "First Mile Label" },
+    { key: "KYC", label: "KYC", centerType: "KYC", vendorDocType: "KYC" },
+    { key: "EXCEL", label: "Excel", kind: "excel" },
+  ];
 
 function vendorDocToItem(row: VendorDocumentRow, title: string): ShipmentDocumentItem {
   const hasFile = Boolean(row.source_url || row.content_b64);
@@ -99,59 +101,232 @@ function statusBadgeClass(status: ShipmentDocumentStatus): string {
   }
 }
 
-function downloadDocument(doc: ShipmentDocumentItem) {
-  if (doc.htmlPreview && !doc.contentB64 && !doc.url) {
-    const w = window.open("", "_blank", "noopener,noreferrer");
-    if (!w) return;
-    w.document.open();
-    w.document.write(doc.htmlPreview);
-    w.document.close();
-    return;
-  }
-  const href = documentObjectUrl(doc);
-  if (!href) return;
+function triggerFileDownload(href: string, fileName: string) {
   const a = document.createElement("a");
   a.href = href;
-  a.download = doc.fileName || `${doc.type.toLowerCase()}.pdf`;
-  a.target = "_blank";
-  a.rel = "noopener noreferrer";
+  a.download = fileName;
+  a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
   a.remove();
-  revokeDocumentObjectUrl(href);
 }
 
-function printDocument(doc: ShipmentDocumentItem) {
+function downloadDocument(doc: ShipmentDocumentItem) {
+  const fileName = doc.fileName || `${doc.type.toLowerCase()}.pdf`;
+  if (doc.contentB64 || doc.url) {
+    const href = documentObjectUrl(doc);
+    if (!href) {
+      toast.error("Nothing to download yet");
+      return;
+    }
+    triggerFileDownload(href, fileName);
+    toast.success("Download started");
+    window.setTimeout(() => revokeDocumentObjectUrl(href), 2000);
+    return;
+  }
   if (doc.htmlPreview) {
-    const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
-    if (!w) return;
-    w.document.open();
-    w.document.write(doc.htmlPreview);
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 300);
+    const blob = new Blob([doc.htmlPreview], { type: "text/html;charset=utf-8" });
+    const href = URL.createObjectURL(blob);
+    triggerFileDownload(href, fileName.replace(/\.pdf$/i, ".html"));
+    toast.success("Download started");
+    window.setTimeout(() => URL.revokeObjectURL(href), 2000);
+    return;
+  }
+  toast.error("Nothing to download yet");
+}
+
+const PRINT_COLOR_CSS = `
+html, body, * {
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+  color-adjust: exact !important;
+}
+.hdr {
+  background-color: #0b5c2e !important;
+  background-image: linear-gradient(#0b5c2e, #0b5c2e) !important;
+  color: #fff !important;
+}
+.logo-title { color: #0b5c2e !important; }
+@media print {
+  html, body, .hdr, .logo-title, table.wt th, table.goods th {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+  .hdr {
+    background-color: #0b5c2e !important;
+    background-image: linear-gradient(#0b5c2e, #0b5c2e) !important;
+    color: #fff !important;
+  }
+}
+`;
+
+function ensurePrintColors(doc: Document) {
+  if (!doc.getElementById("print-color-exact")) {
+    const style = doc.createElement("style");
+    style.id = "print-color-exact";
+    style.textContent = PRINT_COLOR_CSS;
+    doc.head.appendChild(style);
+  }
+  doc.querySelectorAll(".hdr").forEach((el) => {
+    if (el.querySelector(".hdr-bg")) return;
+    const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "hdr-bg");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("style", "position:absolute;inset:0;width:100%;height:100%;z-index:0");
+    const rect = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("width", "100%");
+    rect.setAttribute("height", "100%");
+    rect.setAttribute("fill", "#0b5c2e");
+    svg.appendChild(rect);
+    const host = el as HTMLElement;
+    host.style.position = host.style.position || "relative";
+    host.style.color = "#fff";
+    const text = doc.createElement("span");
+    text.style.position = "relative";
+    text.style.zIndex = "1";
+    text.style.color = "#fff";
+    while (host.firstChild) text.appendChild(host.firstChild);
+    host.insertBefore(svg, host.firstChild);
+    host.appendChild(text);
+  });
+}
+
+function printFrame(frame: HTMLIFrameElement | null) {
+  const win = frame?.contentWindow;
+  const doc = frame?.contentDocument;
+  if (!win || !doc) return false;
+  ensurePrintColors(doc);
+  win.focus();
+  win.print();
+  return true;
+}
+
+function printHtmlNow(html: string) {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute(
+    "style",
+    "position:fixed;left:-10000px;top:0;width:800px;height:1100px;border:0;opacity:0;pointer-events:none",
+  );
+  iframe.setAttribute("aria-hidden", "true");
+  document.body.appendChild(iframe);
+  const target = iframe.contentDocument;
+  if (!target) {
+    iframe.remove();
+    return;
+  }
+  target.open();
+  target.write(html);
+  target.close();
+  printFrame(iframe);
+  window.setTimeout(() => iframe.remove(), 2000);
+}
+
+function printDocument(doc: ShipmentDocumentItem, previewFrame?: HTMLIFrameElement | null) {
+  if (printFrame(previewFrame ?? null)) return;
+  if (doc.htmlPreview) {
+    printHtmlNow(doc.htmlPreview);
     return;
   }
   const href = documentObjectUrl(doc);
   if (!href) return;
-  const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
-  if (!w) {
-    downloadDocument(doc);
+  const mime = (doc.mimeType || "").toLowerCase();
+  if (mime.startsWith("image/")) {
+    printHtmlNow(
+      `<!doctype html><title>${doc.title ?? "Document"}</title><img src="${href}" style="max-width:100%" />`,
+    );
+    window.setTimeout(() => revokeDocumentObjectUrl(href), 4000);
     return;
   }
-  const mime = (doc.mimeType || "").toLowerCase();
-  const title = doc.title;
-  if (mime.startsWith("image/")) {
-    w.document.write(
-      `<!doctype html><title>${title}</title><img src="${href}" style="max-width:100%" onload="window.focus();window.print();" />`,
-    );
-  } else {
-    w.document.write(
-      `<!doctype html><title>${title}</title><iframe src="${href}" style="border:0;width:100%;height:100vh" onload="setTimeout(function(){window.focus();window.print();},400)"></iframe>`,
-    );
-  }
-  w.document.close();
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute(
+    "style",
+    "position:fixed;left:-10000px;top:0;width:800px;height:1100px;border:0;opacity:0;pointer-events:none",
+  );
+  iframe.src = href;
+  document.body.appendChild(iframe);
+  iframe.addEventListener("load", () => {
+    printFrame(iframe);
+    window.setTimeout(() => {
+      iframe.remove();
+      revokeDocumentObjectUrl(href);
+    }, 2000);
+  });
 }
+
+const FittedHtmlPreview = forwardRef<HTMLIFrameElement, { title: string; html: string }>(
+  function FittedHtmlPreview({ title, html }, ref) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const [docSize, setDocSize] = useState({ w: 780, h: 1100 });
+  const [scale, setScale] = useState(1);
+
+  const setFrame = (node: HTMLIFrameElement | null) => {
+    frameRef.current = node;
+    if (typeof ref === "function") ref(node);
+    else if (ref) ref.current = node;
+  };
+
+  const fit = useCallback(() => {
+    const wrap = wrapRef.current;
+    const frame = frameRef.current;
+    const root = frame?.contentDocument?.documentElement;
+    const body = frame?.contentDocument?.body;
+    if (!wrap || !root) return;
+    const w = Math.max(root.scrollWidth, body?.scrollWidth ?? 0, 780);
+    const h = Math.max(root.scrollHeight, body?.scrollHeight ?? 0, 1);
+    const availW = Math.max(wrap.clientWidth - 24, 1);
+    const availH = Math.max(wrap.clientHeight - 24, 1);
+    const fitPage = Math.min(availW / w, availH / h);
+    const fitWidth = availW / w;
+    // Larger than full-page fit, still mostly on screen; slight scroll if needed.
+    setDocSize({ w, h });
+    setScale(Math.min(fitWidth, Math.max(fitPage * 1.42, fitPage)));
+  }, []);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const observer = new ResizeObserver(() => fit());
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, [fit, html]);
+
+  return (
+    <div
+      ref={wrapRef}
+      className="flex h-full w-full items-start justify-center overflow-auto bg-slate-100 py-3"
+    >
+      <div
+        style={{
+          width: docSize.w * scale,
+          height: docSize.h * scale,
+          position: "relative",
+          flexShrink: 0,
+        }}
+      >
+        <iframe
+          ref={setFrame}
+          title={title}
+          srcDoc={html}
+          onLoad={fit}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: docSize.w,
+            height: docSize.h,
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+            border: 0,
+            background: "#fff",
+          }}
+        />
+      </div>
+    </div>
+  );
+});
 
 function DocumentPreviewDrawer({
   preview,
@@ -160,13 +335,49 @@ function DocumentPreviewDrawer({
   preview: ShipmentDocumentItem | null;
   onClose: () => void;
 }) {
+  const previewFrameRef = useRef<HTMLIFrameElement>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  /** Keep last document mounted during Sheet exit so the slide-out isn't blank. */
   const [displayed, setDisplayed] = useState<ShipmentDocumentItem | null>(null);
+  const [entered, setEntered] = useState(false);
+  const [backdropLive, setBackdropLive] = useState(false);
 
   useEffect(() => {
-    if (preview) setDisplayed(preview);
+    if (preview) {
+      setDisplayed(preview);
+      return;
+    }
+    setEntered(false);
+    setBackdropLive(false);
+    const timer = window.setTimeout(() => setDisplayed(null), 320);
+    return () => window.clearTimeout(timer);
   }, [preview]);
+
+  useLayoutEffect(() => {
+    if (!preview) return;
+    setEntered(false);
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => setEntered(true));
+    });
+    const timer = window.setTimeout(() => setBackdropLive(true), 360);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [preview]);
+
+  useEffect(() => {
+    if (!preview) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [preview, onClose]);
 
   const active = preview ?? displayed;
   const htmlPreview = active?.htmlPreview ?? null;
@@ -184,25 +395,67 @@ function DocumentPreviewDrawer({
 
   const canDownload = Boolean(active && (active.contentB64 || active.url || active.htmlPreview));
 
-  return (
-    <Sheet open={Boolean(preview)} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent
-        side="right"
-        className={cn(
-          "flex h-dvh w-[min(1100px,92vw)] max-w-[92vw] flex-col gap-0 overflow-hidden border-l p-0 sm:max-w-[92vw]",
-          "shadow-[-8px_0_24px_rgba(0,0,0,0.15)]",
-          "ease-in-out duration-300 data-[state=open]:duration-300 data-[state=closed]:duration-300",
-        )}
+  if (!active || typeof document === "undefined") return null;
+
+  const open = entered;
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="document-preview-title"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 2147483000,
+        pointerEvents: "auto",
+      }}
+    >
+      <div
+        aria-hidden
+        onMouseDown={() => {
+          if (backdropLive) onClose();
+        }}
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(0,0,0,0.45)",
+          opacity: open ? 1 : 0,
+          transition: "opacity 320ms ease",
+          pointerEvents: backdropLive ? "auto" : "none",
+        }}
+      />
+      <aside
+        style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          height: "100%",
+          width: "min(1100px, 92vw)",
+          maxWidth: "92vw",
+          display: "flex",
+          flexDirection: "column",
+          background: "#fff",
+          boxShadow: "-8px 0 24px rgba(0,0,0,0.15)",
+          transform: open ? "translateX(0)" : "translateX(100%)",
+          transition: "transform 320ms cubic-bezier(0.22, 1, 0.36, 1)",
+          pointerEvents: "auto",
+        }}
       >
-        <SheetHeader className="shrink-0 border-b px-5 py-4 text-left">
-          <div className="flex items-start justify-between gap-3 pr-8">
+        <header className="shrink-0 border-b px-5 py-4 text-left">
+          <div className="flex items-start justify-between gap-3">
             <div>
-              <SheetTitle>{active?.title ?? "Document"}</SheetTitle>
-              <SheetDescription>
-                {active?.fileName || active?.type || "Shipment document"}
-                {active?.version ? ` · v${active.version}` : ""}
-              </SheetDescription>
+              <h2 id="document-preview-title" className="text-lg font-semibold text-foreground">
+                {active.title ?? "Document"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {active.fileName || active.type || "Shipment document"}
+                {active.version ? ` · v${active.version}` : ""}
+              </p>
             </div>
+            <Button type="button" size="icon" variant="ghost" onClick={onClose} aria-label="Close">
+              <X className="h-4 w-4" />
+            </Button>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
@@ -210,7 +463,7 @@ function DocumentPreviewDrawer({
               size="sm"
               variant="outline"
               disabled={!canDownload}
-              onClick={() => active && printDocument(active)}
+              onClick={() => printDocument(active, previewFrameRef.current)}
             >
               <Printer className="mr-1.5 h-3.5 w-3.5" />
               Print
@@ -220,53 +473,51 @@ function DocumentPreviewDrawer({
               size="sm"
               variant="outline"
               disabled={!canDownload}
-              onClick={() => active && downloadDocument(active)}
+              onClick={() => downloadDocument(active)}
             >
               <Download className="mr-1.5 h-3.5 w-3.5" />
               Download
             </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={onClose}>
-              <X className="mr-1.5 h-3.5 w-3.5" />
-              Close
-            </Button>
           </div>
-        </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-auto bg-slate-50">
+        </header>
+        <div className="min-h-0 flex-1 overflow-hidden bg-slate-50">
           {htmlPreview ? (
-            <iframe
-              title={active?.title ?? "Document preview"}
-              srcDoc={htmlPreview}
-              className="h-full min-h-full w-full border-0 bg-white"
+            <FittedHtmlPreview
+              ref={previewFrameRef}
+              title={active.title ?? "Document preview"}
+              html={htmlPreview}
             />
           ) : !blobUrl ? (
             <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-              No file available
+              Loading document…
             </div>
           ) : !canPreviewFile ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-sm">
               <p className="text-muted-foreground">Preview not supported for this file type.</p>
-              <Button type="button" onClick={() => active && downloadDocument(active)}>
+              <Button type="button" onClick={() => downloadDocument(active)}>
                 Download instead
               </Button>
             </div>
-          ) : (active?.mimeType || "").toLowerCase().startsWith("image/") ? (
-            <div className="flex h-full items-center justify-center overflow-auto p-4">
+          ) : (active.mimeType || "").toLowerCase().startsWith("image/") ? (
+            <div className="flex h-full items-center justify-center overflow-hidden p-4">
               <img
                 src={blobUrl}
-                alt={active?.title ?? "Document"}
+                alt={active.title ?? "Document"}
                 className="max-h-full max-w-full object-contain"
               />
             </div>
           ) : (
             <iframe
-              title={active?.title ?? "Document preview"}
-              src={blobUrl}
-              className="h-full min-h-full w-full border-0"
+              ref={previewFrameRef}
+              title={active.title ?? "Document preview"}
+              src={`${blobUrl}#view=Fit`}
+              className="h-full w-full border-0"
             />
           )}
         </div>
-      </SheetContent>
-    </Sheet>
+      </aside>
+    </div>,
+    document.body,
   );
 }
 
@@ -302,9 +553,9 @@ export function ShipmentDocumentQuickLinks({
   const resolveLink = (def: (typeof AWB_DOCUMENT_QUICK_LINKS)[number]) => {
     const vendorHit = def.vendorDocType
       ? vendorDocs.find(
-          (d) =>
-            d.doc_type === def.vendorDocType && Boolean(d.source_url || d.content_b64),
-        )
+        (d) =>
+          d.doc_type === def.vendorDocType && Boolean(d.source_url || d.content_b64),
+      )
       : undefined;
     if (vendorHit) {
       return {
@@ -324,11 +575,11 @@ export function ShipmentDocumentQuickLinks({
       doc: centerHit
         ? { ...centerHit, title: def.label }
         : ({
-            type: def.centerType ?? "OTHER",
-            title: def.label,
-            status: "WAITING" as const,
-            available: false,
-          } satisfies ShipmentDocumentItem),
+          type: def.centerType ?? "OTHER",
+          title: def.label,
+          status: "WAITING" as const,
+          available: false,
+        } satisfies ShipmentDocumentItem),
       canGenerate,
       available,
     };
@@ -349,23 +600,34 @@ export function ShipmentDocumentQuickLinks({
 
     const isSystemDoc = doc.type === "AWB_LABEL" || doc.type === "INVOICE";
 
+    setPreview({
+      ...doc,
+      title: doc.title,
+      status: doc.status === "AVAILABLE" ? doc.status : "GENERATING",
+      available: true,
+      htmlPreview:
+        doc.htmlPreview ||
+        `<!doctype html><html><body style="font-family:sans-serif;padding:24px;color:#444">Opening ${doc.title}…</body></html>`,
+    });
     setBusyKey(key);
     try {
       let latest = doc;
 
       if (onEnsureDocument && (isSystemDoc || !available)) {
         const generated = await onEnsureDocument(doc.type);
-        if (generated?.htmlPreview || generated?.available) {
+        if (generated?.htmlPreview || generated?.available || generated?.url || generated?.contentB64) {
           setPreview({ ...generated, title: doc.title });
           void queryClient.invalidateQueries({ queryKey: ["shipment-documents-quick"] });
           void queryClient.invalidateQueries({ queryKey: ["shipment-documents"] });
           return;
         }
         if (!available) {
+          setPreview(null);
           toast.info(`${doc.title} is not available yet`);
           return;
         }
       } else if (!available) {
+        setPreview(null);
         toast.info(`${doc.title} is not available yet`);
         return;
       } else if (!latest.contentB64 && !latest.url && !latest.htmlPreview && doc.type) {
@@ -378,12 +640,14 @@ export function ShipmentDocumentQuickLinks({
         return;
       }
 
+      setPreview(null);
       toast.error(
         latest.type === "AUTHORITY_LETTER"
           ? "Authority Letter not received from vendor yet — complete live vendor booking"
           : `Could not open ${doc.title}`,
       );
     } catch (e) {
+      setPreview(null);
       toast.error(e instanceof Error ? e.message : `Could not open ${doc.title}`);
     } finally {
       setBusyKey(null);
@@ -413,12 +677,16 @@ export function ShipmentDocumentQuickLinks({
             <button
               key={def.key}
               type="button"
-              disabled={!active || busyKey === def.key}
-              onClick={() => void openDoc(def.key, resolved.doc, resolved)}
+              disabled={!active}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void openDoc(def.key, resolved.doc, resolved);
+              }}
               className={cn(
                 "inline-flex items-center gap-1.5 font-medium transition-colors",
                 active
-                  ? "text-foreground hover:text-sky-800 hover:underline"
+                  ? "cursor-pointer text-foreground hover:text-sky-800 hover:underline"
                   : "cursor-not-allowed text-muted-foreground/50",
               )}
               title={
@@ -573,6 +841,7 @@ function DocumentTile({
             size="sm"
             variant="outline"
             disabled={ensuring}
+            className="cursor-pointer"
             onClick={() => void open()}
           >
             {ensuring ? (

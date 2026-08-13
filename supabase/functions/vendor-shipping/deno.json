@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "lib": ["deno.window"],
+    "strict": true
+  },
+  "exclude": ["../shim.d.ts", "../tsconfig.json"],
+  "imports": {
+    "https://esm.sh/@supabase/supabase-js@2.49.1": "https://esm.sh/@supabase/supabase-js@2.49.1"
+  }
+}
