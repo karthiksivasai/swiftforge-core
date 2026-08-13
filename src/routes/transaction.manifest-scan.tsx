@@ -19,9 +19,18 @@ import {
   UserRound,
   Radio,
   CloudDownload,
+  Loader2,
+  Paperclip,
+  Upload,
+  FileText,
+  CheckCircle2,
+  AlertCircle,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { parseTabularFile } from "@/lib/io/tableIo";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,8 +94,11 @@ import {
   cancelManifest,
   closeManifest,
   fetchManifestChildren,
+  fetchShipmentForManifestScan,
   listManifests,
+  recordManifestProgress,
   saveManifest,
+  uploadManifestAttachment,
 } from "@/lib/transactions/resources/manifests";
 import {
   dbManifestToListRow,
@@ -114,6 +126,13 @@ type ManifestLine = {
   instruction: string;
 };
 
+type ManifestAttachmentItem = {
+  fileId: string;
+  label: string;
+  originalName?: string | null;
+  sizeBytes?: number | null;
+};
+
 type ManifestForm = {
   manifestNo: string;
   manifestDate: string;
@@ -138,15 +157,18 @@ type ManifestForm = {
   serviceCentre: string;
   connectStation: string;
   lines: ManifestLine[];
+  attachments: ManifestAttachmentItem[];
 };
 
 type ManifestRow = ManifestForm & { id: string; rowVersion?: number; status?: string };
 
 type LineDraft = {
   bagNo: string;
+  bagType: "Bags" | "Cartoon";
   crnMhbsNo: string;
   forwardingNo: string;
   awbNo: string;
+  repeat: boolean;
 };
 
 type ColFilterKey =
@@ -270,14 +292,16 @@ const formatDisplayDate = (iso: string) => {
   return `${d}/${m}/${y}`;
 };
 
-const emptyLineDraft = (): LineDraft => ({
-  bagNo: "",
-  crnMhbsNo: "",
+const emptyLineDraft = (prev?: Partial<LineDraft>): LineDraft => ({
+  bagNo: prev?.repeat ? prev.bagNo ?? "" : "",
+  bagType: prev?.repeat ? prev.bagType ?? "Bags" : "Bags",
+  crnMhbsNo: prev?.repeat ? prev.crnMhbsNo ?? "" : "",
   forwardingNo: "",
   awbNo: "",
+  repeat: prev?.repeat ?? false,
 });
 
-const emptyForm = (): ManifestForm => ({
+const emptyForm = (branchCode = "HYD"): ManifestForm => ({
   manifestNo: "0",
   manifestDate: todayIso(),
   manifestTime: nowManifestTime(),
@@ -297,10 +321,11 @@ const emptyForm = (): ManifestForm => ({
   arrival: "",
   remark: "",
   flight: emptyPair(),
-  location: "HYD",
+  location: branchCode,
   serviceCentre: "",
   connectStation: "",
   lines: [],
+  attachments: [],
 });
 
 const emptyColFilters = (): Record<ColFilterKey, string> => ({
@@ -320,11 +345,11 @@ const emptyReportFilters = (): ReportFilters => ({
   excel: false,
 });
 
-const emptyGenerateFilters = (): GenerateFilters => ({
+const emptyGenerateFilters = (branchCode = "HYD", branchName = "HYDERABAD"): GenerateFilters => ({
   fromDate: todayIso(),
   toDate: todayIso(),
-  origin: { code: "HYD", name: "HYDERABAD" },
-  serviceCentre: { code: "HYD", name: "HYD" },
+  origin: { code: branchCode, name: branchName },
+  serviceCentre: { code: branchCode, name: branchName },
   product: emptyPair(),
   vendor: emptyPair(),
   service: emptyPair(),
@@ -487,8 +512,31 @@ export const Route = createFileRoute("/transaction/manifest-scan")({
 });
 
 function ManifestScanPage() {
-  const { isAuthenticated: authed } = useAuth();
+  const { isAuthenticated: authed, profile } = useAuth();
   const queryClient = useQueryClient();
+
+  const userBranchQuery = useQuery({
+    queryKey: ["userBranch", profile?.home_branch_id],
+    queryFn: async () => {
+      if (!profile?.home_branch_id) return null;
+      const { data, error } = await supabase
+        .from("branches")
+        .select("id, code, name")
+        .eq("id", profile.home_branch_id)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data as { id: string; code: string; name: string };
+    },
+    enabled: Boolean(authed && profile?.home_branch_id),
+  });
+
+  const defaultBranchCode =
+    userBranchQuery.data?.code ||
+    (profile as unknown as { branchCode?: string })?.branchCode ||
+    "HYD";
+  const defaultBranchName =
+    userBranchQuery.data?.name || defaultBranchCode;
+
   const [demoRows, setDemoRows] = useState<ManifestRow[]>(seedRows);
   const [colFilters, setColFilters] = useState(emptyColFilters());
   const [reportFilters, setReportFilters] = useState<ReportFilters>(emptyReportFilters);
@@ -497,13 +545,16 @@ function ManifestScanPage() {
   const [showForm, setShowForm] = useState(false);
   const [showGenerate, setShowGenerate] = useState(false);
   const [editing, setEditing] = useState<ManifestRow | null>(null);
-  const [form, setForm] = useState<ManifestForm>(emptyForm());
+  const [form, setForm] = useState<ManifestForm>(() => emptyForm(defaultBranchCode));
   const [lineDraft, setLineDraft] = useState<LineDraft>(emptyLineDraft);
+  const [scanning, setScanning] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<ManifestRow | null>(null);
   const [saving, setSaving] = useState(false);
   const [generateHeader, setGenerateHeader] = useState<GenerateHeader>(emptyGenerateHeader);
-  const [generateFilters, setGenerateFilters] = useState<GenerateFilters>(emptyGenerateFilters);
+  const [generateFilters, setGenerateFilters] = useState<GenerateFilters>(() =>
+    emptyGenerateFilters(defaultBranchCode, defaultBranchName),
+  );
   const [generateResults, setGenerateResults] = useState<AwbCandidate[]>([]);
   const [selectedAwbs, setSelectedAwbs] = useState<Set<string>>(new Set());
   const [crnOpen, setCrnOpen] = useState(false);
@@ -516,6 +567,14 @@ function ManifestScanPage() {
   const [downloadAllRow, setDownloadAllRow] = useState<ManifestRow | null>(null);
   const [downloadAllForm, setDownloadAllForm] = useState<DownloadAllForm>(emptyDownloadAllForm);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const fileUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [importSummary, setImportSummary] = useState<{
+    open: boolean;
+    total: number;
+    accepted: number;
+    skipped: { awb: string; reason: string }[];
+  } | null>(null);
 
   const liveQuery = useQuery({
     queryKey: ["manifests", "list", search],
@@ -569,7 +628,7 @@ function ManifestScanPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm(emptyForm());
+    setForm(emptyForm(defaultBranchCode));
     setLineDraft(emptyLineDraft());
     setDetailsOpen(true);
     setShowForm(true);
@@ -602,6 +661,12 @@ function ManifestScanPage() {
           customer: l.customer_name ?? "",
           consignee: l.consignee_name ?? "",
           instruction: l.instruction ?? "",
+        }));
+        mapped.attachments = children.attachments.map((a) => ({
+          fileId: a.file_id,
+          label: a.label || "Signed Manifest Copy",
+          originalName: a.original_name,
+          sizeBytes: a.size_bytes,
         }));
         setEditing(mapped as ManifestRow);
         const { id: _id, rowVersion: _rv, status: _st, ...rest } = mapped;
@@ -653,12 +718,13 @@ function ManifestScanPage() {
     if (authed) {
       setSaving(true);
       try {
-        const { fields, lines } = uiFormToManifestPayload(form);
+        const { fields, lines, attachments } = uiFormToManifestPayload(form);
         const saved = await saveManifest({
           id: editing?.id ?? null,
           rowVersion: editing?.rowVersion ?? null,
           fields,
           lines,
+          attachments,
         });
         await refreshLive();
         toast.success(editing ? "Manifest updated" : `Manifest ${saved.manifest_no} saved (DRAFT)`);
@@ -700,12 +766,13 @@ function ManifestScanPage() {
     if (authed) {
       setSaving(true);
       try {
-        const { fields, lines } = uiFormToManifestPayload(form);
+        const { fields, lines, attachments } = uiFormToManifestPayload(form);
         const saved = await saveManifest({
           id: editing.id,
           rowVersion: editing.rowVersion ?? null,
           fields,
           lines,
+          attachments,
         });
         const closed = await closeManifest({ id: saved.id, rowVersion: saved.row_version });
         await refreshLive();
@@ -831,33 +898,358 @@ function ManifestScanPage() {
     toast.success("Refreshed");
   };
 
-  const addManifestLine = () => {
-    if (!lineDraft.awbNo.trim()) return toast.error("AWB No is required");
+  const addManifestLine = async () => {
+    const scanInput = lineDraft.awbNo.trim() || lineDraft.forwardingNo.trim();
+    if (!scanInput) return toast.error("AWB No or Forwarding No is required");
+
+    if (authed) {
+      setScanning(true);
+      try {
+        const res = await fetchShipmentForManifestScan({
+          scanInput,
+          currentManifestId: editing?.id ?? null,
+          existingShipmentIds: form.lines.map((l) => l.shipmentId).filter(Boolean) as string[],
+          existingAwbNos: form.lines.map((l) => l.awbNo),
+          bagNo: lineDraft.bagNo,
+          crnMhbsNo: lineDraft.crnMhbsNo,
+          forwardingNo: lineDraft.forwardingNo,
+        });
+
+        if (!res.valid || !res.line) {
+          toast.error(res.error || "Shipment could not be added to manifest");
+          return;
+        }
+
+        const line = res.line as unknown as ManifestLine;
+        setForm((f) => {
+          const nextLines = [...f.lines, line];
+          const uniqueBags = new Set(nextLines.map((x) => x.bagNo).filter(Boolean)).size;
+          const totalWeight = nextLines
+            .reduce((acc, cur) => acc + (Number(cur.chargeWeight) || 0), 0)
+            .toFixed(3);
+          return {
+            ...f,
+            lines: nextLines,
+            totalNoOfBags: String(uniqueBags || "1"),
+            vendorWeight: totalWeight,
+          };
+        });
+
+        setLineDraft((prev) => ({
+          ...prev,
+          bagNo: prev.repeat ? prev.bagNo : "",
+          bagType: prev.repeat ? prev.bagType : "Bags",
+          crnMhbsNo: prev.repeat ? prev.crnMhbsNo : "",
+          awbNo: "",
+          forwardingNo: "",
+        }));
+
+        toast.success(`Added AWB ${line.awbNo} (${line.pieces} pcs, ${line.chargeWeight} kg)`);
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setScanning(false);
+      }
+      return;
+    }
+
+    // Demo Mode Simulation
+    const existingAwb = form.lines.find(
+      (l) => l.awbNo.toLowerCase() === scanInput.toLowerCase() || l.forwardingNo.toLowerCase() === scanInput.toLowerCase(),
+    );
+    if (existingAwb) {
+      return toast.error(`Shipment ${scanInput} is already added to this manifest`);
+    }
+
+    const candidate = SEED_AWB_CANDIDATES.find(
+      (c) =>
+        c.awbNo.toLowerCase() === scanInput.toLowerCase() ||
+        c.refNo.toLowerCase() === scanInput.toLowerCase() ||
+        `FWD${c.awbNo}`.toLowerCase() === scanInput.toLowerCase() ||
+        (lineDraft.forwardingNo && `FWD${c.awbNo}`.toLowerCase() === lineDraft.forwardingNo.trim().toLowerCase()),
+    );
+
+    if (!candidate) {
+      return toast.error(`Shipment not found for "${scanInput}"`);
+    }
+
+    // Hold simulation for demo
+    if (candidate.instruction.toLowerCase().includes("hold") || candidate.awbNo === "30403925") {
+      return toast.error(`Shipment is on HOLD (reason: Address Verification) and cannot be manifested (AWB ${candidate.awbNo})`);
+    }
+
+    // International KYC simulation for demo
+    if (candidate.destinationCode === "AU" && candidate.awbNo === "30403926") {
+      return toast.error(`International shipment must have at least one valid KYC document attached before it can be manifested (AWB ${candidate.awbNo})`);
+    }
+
     const line: ManifestLine = {
       id: crypto.randomUUID(),
-      awbNo: lineDraft.awbNo.trim(),
-      refNo: "",
-      forwardingNo: lineDraft.forwardingNo.trim(),
+      shipmentId: candidate.awbNo,
+      awbNo: candidate.awbNo,
+      refNo: candidate.refNo,
+      forwardingNo: lineDraft.forwardingNo.trim() || `FWD${candidate.awbNo}`,
       crnMhbsNo: lineDraft.crnMhbsNo.trim(),
-      bagNo: lineDraft.bagNo.trim(),
-      pieces: "1",
-      chargeWeight: "0",
-      bookDate: formatDisplayDate(form.manifestDate),
-      origin: "HYD",
-      destination: form.destinationServiceCenter.name || form.destinationServiceCenter.code,
-      code: "",
-      customer: "",
-      consignee: "",
-      instruction: "",
+      bagNo: lineDraft.bagNo.trim() || candidate.bagNo,
+      pieces: candidate.pieces,
+      chargeWeight: candidate.chargeWeight,
+      bookDate: formatDisplayDate(candidate.bookDate),
+      origin: candidate.originCode,
+      destination: candidate.destination,
+      code: candidate.code,
+      customer: candidate.customer,
+      consignee: candidate.consignee,
+      instruction: candidate.instruction,
     };
-    setForm((f) => ({ ...f, lines: [...f.lines, line] }));
-    setLineDraft(emptyLineDraft());
-    toast.success("AWB added to manifest");
+
+    setForm((f) => {
+      const nextLines = [...f.lines, line];
+      const uniqueBags = new Set(nextLines.map((x) => x.bagNo).filter(Boolean)).size;
+      const totalWeight = nextLines
+        .reduce((acc, cur) => acc + (Number(cur.chargeWeight) || 0), 0)
+        .toFixed(3);
+      return {
+        ...f,
+        lines: nextLines,
+        totalNoOfBags: String(uniqueBags || "1"),
+        vendorWeight: totalWeight,
+      };
+    });
+
+    setLineDraft((prev) => ({
+      ...prev,
+      bagNo: prev.repeat ? prev.bagNo : "",
+      bagType: prev.repeat ? prev.bagType : "Bags",
+      crnMhbsNo: prev.repeat ? prev.crnMhbsNo : "",
+      awbNo: "",
+      forwardingNo: "",
+    }));
+
+    toast.success(`Added AWB ${line.awbNo} (${line.pieces} pcs, ${line.chargeWeight} kg)`);
+  };
+
+  const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    try {
+      const parsed = await parseTabularFile(file);
+      if (parsed.rows.length === 0) {
+        toast.error("Spreadsheet is empty");
+        return;
+      }
+
+      setSaving(true);
+      const accepted: ManifestLine[] = [];
+      const skipped: { awb: string; reason: string }[] = [];
+
+      const runningShipmentIds = form.lines.map((l) => l.shipmentId).filter(Boolean) as string[];
+      const runningAwbNos = form.lines.map((l) => l.awbNo);
+
+      for (const row of parsed.rows) {
+        const awbCandidate =
+          row.awb_no ||
+          row.awb ||
+          row.awbno ||
+          row.airwaybill ||
+          row["awb no"] ||
+          row["awb no."] ||
+          row.forwarding_no ||
+          row.forwarding_awb ||
+          row.forwardingno ||
+          row.ref_no ||
+          Object.values(row)[0];
+
+        const scanInput = String(awbCandidate ?? "").trim();
+        if (!scanInput) continue;
+
+        const bagVal = String(row.bag_no || row.bag || row.bagno || row["bag no"] || lineDraft.bagNo || "").trim();
+        const crnVal = String(row.crn_mhbs_no || row.crn || row.mhbs || lineDraft.crnMhbsNo || "").trim();
+        const fwdVal = String(row.forwarding_no || row.forwarding_awb || "").trim();
+
+        if (authed) {
+          try {
+            const res = await fetchShipmentForManifestScan({
+              scanInput,
+              currentManifestId: editing?.id ?? null,
+              existingShipmentIds: runningShipmentIds,
+              existingAwbNos: runningAwbNos,
+              bagNo: bagVal,
+              crnMhbsNo: crnVal,
+              forwardingNo: fwdVal,
+            });
+
+            if (res.valid && res.line) {
+              const line = res.line as unknown as ManifestLine;
+              accepted.push(line);
+              if (line.shipmentId) runningShipmentIds.push(line.shipmentId);
+              runningAwbNos.push(line.awbNo);
+            } else {
+              skipped.push({ awb: scanInput, reason: res.error || "Failed validation" });
+            }
+          } catch (err) {
+            skipped.push({ awb: scanInput, reason: toErrorMessage(err) });
+          }
+        } else {
+          const cand = SEED_AWB_CANDIDATES.find(
+            (c) =>
+              c.awbNo.toLowerCase() === scanInput.toLowerCase() ||
+              c.refNo.toLowerCase() === scanInput.toLowerCase() ||
+              `FWD${c.awbNo}`.toLowerCase() === scanInput.toLowerCase(),
+          );
+          if (!cand) {
+            skipped.push({ awb: scanInput, reason: "Shipment not found" });
+          } else if (runningAwbNos.some((a) => a.toLowerCase() === cand.awbNo.toLowerCase())) {
+            skipped.push({ awb: scanInput, reason: "Already added to manifest" });
+          } else if (cand.instruction.toLowerCase().includes("hold") || cand.awbNo === "30403925") {
+            skipped.push({ awb: scanInput, reason: "Shipment on HOLD" });
+          } else if (cand.destinationCode === "AU" && cand.awbNo === "30403926") {
+            skipped.push({ awb: scanInput, reason: "Missing KYC document" });
+          } else {
+            const line: ManifestLine = {
+              id: crypto.randomUUID(),
+              shipmentId: cand.awbNo,
+              awbNo: cand.awbNo,
+              refNo: cand.refNo,
+              forwardingNo: fwdVal || `FWD${cand.awbNo}`,
+              crnMhbsNo: crnVal,
+              bagNo: bagVal || cand.bagNo,
+              pieces: cand.pieces,
+              chargeWeight: cand.chargeWeight,
+              bookDate: formatDisplayDate(cand.bookDate),
+              origin: cand.originCode,
+              destination: cand.destination,
+              code: cand.code,
+              customer: cand.customer,
+              consignee: cand.consignee,
+              instruction: cand.instruction,
+            };
+            accepted.push(line);
+            runningAwbNos.push(line.awbNo);
+          }
+        }
+      }
+
+      if (accepted.length > 0) {
+        setForm((f) => {
+          const nextLines = [...f.lines, ...accepted];
+          const uniqueBags = new Set(nextLines.map((x) => x.bagNo).filter(Boolean)).size;
+          const totalWeight = nextLines
+            .reduce((acc, cur) => acc + (Number(cur.chargeWeight) || 0), 0)
+            .toFixed(3);
+          return {
+            ...f,
+            lines: nextLines,
+            totalNoOfBags: String(uniqueBags || "1"),
+            vendorWeight: totalWeight,
+          };
+        });
+      }
+
+      if (skipped.length > 0) {
+        setImportSummary({
+          open: true,
+          total: accepted.length + skipped.length,
+          accepted: accepted.length,
+          skipped,
+        });
+        toast.warning(`Imported ${accepted.length} shipments. ${skipped.length} skipped.`);
+      } else {
+        toast.success(`Successfully imported all ${accepted.length} shipments`);
+      }
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to parse spreadsheet"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUploadAttachment = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    if (authed && editing?.id) {
+      setUploadingAttachment(true);
+      try {
+        const fileExt = file.name.split(".").pop() || "pdf";
+        const storageKey = `tenants/manifests/${editing.id}/${crypto.randomUUID()}.${fileExt}`;
+        const res = await uploadManifestAttachment({
+          manifestId: editing.id,
+          originalName: file.name,
+          mime: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          storageKey,
+          label: "Signed Manifest Copy",
+        });
+        setForm((f) => ({
+          ...f,
+          attachments: [
+            ...f.attachments,
+            {
+              fileId: res.file_id,
+              label: "Signed Manifest Copy",
+              originalName: file.name,
+              sizeBytes: file.size,
+            },
+          ],
+        }));
+        toast.success(`Attached ${file.name}`);
+      } catch (err) {
+        toast.error(toErrorMessage(err, "Failed to upload attachment"));
+      } finally {
+        setUploadingAttachment(false);
+      }
+      return;
+    }
+
+    const fileId = crypto.randomUUID();
+    setForm((f) => ({
+      ...f,
+      attachments: [
+        ...f.attachments,
+        {
+          fileId,
+          label: "Signed Manifest Copy",
+          originalName: file.name,
+          sizeBytes: file.size,
+        },
+      ],
+    }));
+    toast.success(`Attached ${file.name} (will persist on save)`);
+  };
+
+  const removeAttachment = (fileId: string) => {
+    if (isReadOnly) return;
+    setForm((f) => ({
+      ...f,
+      attachments: f.attachments.filter((a) => a.fileId !== fileId),
+    }));
+    toast.success("Attachment removed");
+  };
+
+  const removeManifestLine = (lineId: string) => {
+    if (isReadOnly) return;
+    setForm((f) => {
+      const remaining = f.lines.filter((l) => l.id !== lineId);
+      const uniqueBags = new Set(remaining.map((x) => x.bagNo).filter(Boolean)).size;
+      const totalWeight = remaining
+        .reduce((acc, cur) => acc + (Number(cur.chargeWeight) || 0), 0)
+        .toFixed(3);
+      return {
+        ...f,
+        lines: remaining,
+        totalNoOfBags: String(uniqueBags || "0"),
+        vendorWeight: totalWeight,
+      };
+    });
+    toast.success("Line removed from manifest");
   };
 
   const openGenerate = () => {
     setGenerateHeader(emptyGenerateHeader());
-    setGenerateFilters(emptyGenerateFilters());
+    setGenerateFilters(emptyGenerateFilters(defaultBranchCode, defaultBranchName));
     setGenerateResults([]);
     setSelectedAwbs(new Set());
     setShowGenerate(true);
@@ -981,10 +1373,32 @@ function ManifestScanPage() {
 
   const patchProgress = (patch: Partial<ProgressForm>) => setProgressForm((f) => ({ ...f, ...patch }));
 
-  const handleProgressSave = () => {
+  const handleProgressSave = async () => {
     if (!progressForm.serviceCentre.code.trim() && !progressForm.serviceCentre.name.trim()) {
       return toast.error("Service Centre is required");
     }
+
+    if (authed && progressManifest?.id) {
+      try {
+        const res = await recordManifestProgress({
+          manifestId: progressManifest.id,
+          bagNo: progressForm.bagNo.trim() || null,
+          progressDate: progressForm.progressDate,
+          progressTime: progressForm.progressTime || null,
+          serviceCenterCode: progressForm.serviceCentre.code.trim() || null,
+          exceptionCode: progressForm.exception.code.trim() || null,
+          mode: progressMode,
+        });
+        toast.success(
+          `Progress ${progressMode === "add" ? "recorded" : "deleted"} for manifest ${progressManifest.manifestNo} (${res.affected_shipments} shipment(s) updated)`,
+        );
+        closeAddProgress();
+      } catch (err) {
+        toast.error(toErrorMessage(err));
+      }
+      return;
+    }
+
     const action = progressMode === "add" ? "added" : "deleted";
     toast.success(`Progress ${action} for ${progressManifest?.manifestNo ?? "manifest"}`);
     closeAddProgress();
@@ -994,15 +1408,121 @@ function ManifestScanPage() {
 
   const handleCrnPrint = () => {
     if (!crnForm.date) return toast.error("Date is required");
-    if (!crnForm.flightNo.code.trim() && !crnForm.flightNo.name.trim()) return toast.error("Flight No is required");
     if (!crnForm.origin.trim()) return toast.error("Origin is required");
     if (!crnForm.destination.code.trim() && !crnForm.destination.name.trim()) return toast.error("Destination is required");
-    if (!crnForm.fromName.code.trim() && !crnForm.fromName.name.trim()) return toast.error("From Name is required");
-    if (!crnForm.toName.code.trim() && !crnForm.toName.name.trim()) return toast.error("To Name is required");
     if (!crnForm.masterAwbNo.trim()) return toast.error("Master AWB No is required");
-    if (!crnForm.cdNo.trim()) return toast.error("CD No is required");
-    if (!crnForm.noOfBags.trim()) return toast.error("No Of Bags is required");
-    toast.success("CRN label sent to printer");
+
+    const printWin = window.open("", "_blank", "width=800,height=900");
+    if (!printWin) {
+      return toast.error("Pop-up blocked. Please allow pop-ups to print CRN label.");
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>CRN Bag Label - ${crnForm.masterAwbNo}</title>
+        <style>
+          @page { size: 4in 6in; margin: 0.2in; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 12px; color: #000; }
+          .label-card { border: 2px solid #000; border-radius: 6px; padding: 12px; box-sizing: border-box; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 8px; }
+          .logo { font-size: 18px; font-weight: 900; letter-spacing: 1px; }
+          .badge { background: #000; color: #fff; padding: 4px 8px; font-size: 12px; font-weight: bold; border-radius: 4px; }
+          .route { display: flex; justify-content: space-between; align-items: center; margin: 12px 0; border-bottom: 1.5px dashed #666; padding-bottom: 8px; }
+          .route-code { font-size: 28px; font-weight: 900; }
+          .route-arrow { font-size: 20px; font-weight: bold; color: #555; }
+          .barcode-box { text-align: center; margin: 10px 0; padding: 6px; border: 1px solid #ccc; background: #f9f9f9; }
+          .barcode { font-family: monospace; font-size: 26px; font-weight: bold; letter-spacing: 4px; }
+          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px; margin: 8px 0; }
+          .grid-full { grid-column: span 2; }
+          .box { border: 1px solid #000; padding: 6px; border-radius: 4px; }
+          .box-title { font-size: 9px; font-weight: bold; text-transform: uppercase; color: #555; margin-bottom: 2px; }
+          .box-val { font-size: 11px; font-weight: 600; }
+          .footer { font-size: 10px; text-align: center; margin-top: 10px; border-top: 1px solid #ccc; padding-top: 6px; color: #555; }
+        </style>
+      </head>
+      <body>
+        <div class="label-card">
+          <div class="header">
+            <div class="logo">SWIFTFORGE CRN</div>
+            <div class="badge">BAG DISPATCH LABEL</div>
+          </div>
+
+          <div class="route">
+            <div>
+              <div style="font-size: 9px; color: #555; font-weight: bold;">ORIGIN</div>
+              <div class="route-code">${crnForm.origin}</div>
+            </div>
+            <div class="route-arrow">✈ ➔</div>
+            <div style="text-align: right;">
+              <div style="font-size: 9px; color: #555; font-weight: bold;">DESTINATION</div>
+              <div class="route-code">${crnForm.destination.code || crnForm.destination.name}</div>
+            </div>
+          </div>
+
+          <div class="barcode-box">
+            <div class="barcode">||| | |||| ||| |||| | |||</div>
+            <div style="font-size: 13px; font-weight: bold; margin-top: 2px;">MAWB: ${crnForm.masterAwbNo}</div>
+          </div>
+
+          <div class="grid">
+            <div class="box">
+              <div class="box-title">Flight / Carrier</div>
+              <div class="box-val">${crnForm.flightNo.code || crnForm.flightNo.name || "N/A"}</div>
+            </div>
+            <div class="box">
+              <div class="box-title">Date</div>
+              <div class="box-val">${crnForm.date}</div>
+            </div>
+            <div class="box">
+              <div class="box-title">CD Number</div>
+              <div class="box-val">${crnForm.cdNo || "N/A"}</div>
+            </div>
+            <div class="box">
+              <div class="box-title">Total Bags</div>
+              <div class="box-val">${crnForm.noOfBags || "1"}</div>
+            </div>
+
+            <div class="box grid-full">
+              <div class="box-title">From (Origin Service Center)</div>
+              <div class="box-val">${crnForm.fromName.name || crnForm.fromName.code || crnForm.origin}</div>
+              <div style="font-size: 10px; color: #444;">${[crnForm.fromAddress1, crnForm.fromCity, crnForm.fromState, crnForm.fromPinCode].filter(Boolean).join(", ")}</div>
+              ${crnForm.fromMobile ? `<div style="font-size: 10px;">Tel: ${crnForm.fromMobile}</div>` : ""}
+            </div>
+
+            <div class="box grid-full">
+              <div class="box-title">To (Destination / Vendor)</div>
+              <div class="box-val">${crnForm.toName.name || crnForm.toName.code || crnForm.destination.name}</div>
+              <div style="font-size: 10px; color: #444;">${[crnForm.toAddress1, crnForm.toCity, crnForm.toState, crnForm.toPinCode].filter(Boolean).join(", ")}</div>
+              ${crnForm.toMobile ? `<div style="font-size: 10px;">Tel: ${crnForm.toMobile}</div>` : ""}
+            </div>
+
+            ${crnForm.remarks ? `
+              <div class="box grid-full">
+                <div class="box-title">Remarks</div>
+                <div class="box-val">${crnForm.remarks}</div>
+              </div>
+            ` : ""}
+          </div>
+
+          <div class="footer">
+            Printed on ${new Date().toLocaleString()} • SwiftForge Manifest Dispatch
+          </div>
+        </div>
+        <script>
+          window.onload = function() {
+            window.print();
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWin.document.open();
+    printWin.document.write(html);
+    printWin.document.close();
+    toast.success("CRN label sent to printer window");
     closeCrnDialog();
   };
 
@@ -1215,10 +1735,10 @@ function ManifestScanPage() {
                     <Input value={form.referenceNo} onChange={(e) => setForm((f) => ({ ...f, referenceNo: e.target.value }))} />
                   </FieldWrapper>
                   <FieldWrapper label="Flight 1">
-                    <LookupPairInput lookup="destination" value={form.flight1} onChange={(v) => setForm((f) => ({ ...f, flight1: v }))} />
+                    <LookupPairInput lookup="flight" value={form.flight1} onChange={(v) => setForm((f) => ({ ...f, flight1: v }))} />
                   </FieldWrapper>
                   <FieldWrapper label="Flight 2">
-                    <LookupPairInput lookup="destination" value={form.flight2} onChange={(v) => setForm((f) => ({ ...f, flight2: v }))} />
+                    <LookupPairInput lookup="flight" value={form.flight2} onChange={(v) => setForm((f) => ({ ...f, flight2: v }))} />
                   </FieldWrapper>
                   <FieldWrapper label="Departure">
                     <Input value={form.departure} onChange={(e) => setForm((f) => ({ ...f, departure: e.target.value }))} />
@@ -1230,21 +1750,138 @@ function ManifestScanPage() {
                     <Input value={form.remark} onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value }))} />
                   </FieldWrapper>
                   <FieldWrapper label="Flight">
-                    <LookupPairInput lookup="destination" value={form.flight} onChange={(v) => setForm((f) => ({ ...f, flight: v }))} />
+                    <LookupPairInput lookup="flight" value={form.flight} onChange={(v) => setForm((f) => ({ ...f, flight: v }))} />
                   </FieldWrapper>
                 </div>
-                <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-                  <FieldWrapper label="Bag No"><Input value={lineDraft.bagNo} onChange={(e) => setLineDraft((d) => ({ ...d, bagNo: e.target.value }))} /></FieldWrapper>
-                  <FieldWrapper label="Forwarding No."><Input value={lineDraft.forwardingNo} onChange={(e) => setLineDraft((d) => ({ ...d, forwardingNo: e.target.value }))} /></FieldWrapper>
-                  <FieldWrapper label="AWB No." required className="lg:col-span-2">
+                <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-6 items-end">
+                  <FieldWrapper label="Bag No">
+                    <Input
+                      value={lineDraft.bagNo}
+                      onChange={(e) => setLineDraft((d) => ({ ...d, bagNo: e.target.value }))}
+                      placeholder="e.g. BAG-001"
+                    />
+                  </FieldWrapper>
+                  <FieldWrapper label="Bag Type">
+                    <Select
+                      value={lineDraft.bagType}
+                      onValueChange={(v: "Bags" | "Cartoon") => setLineDraft((d) => ({ ...d, bagType: v }))}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Bags">Bags</SelectItem>
+                        <SelectItem value="Cartoon">Cartoon</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </FieldWrapper>
+                  <FieldWrapper label="CRN MHBS No">
+                    <Input
+                      value={lineDraft.crnMhbsNo}
+                      onChange={(e) => setLineDraft((d) => ({ ...d, crnMhbsNo: e.target.value }))}
+                      placeholder="CRN MHBS"
+                    />
+                  </FieldWrapper>
+                  <div className="flex items-center gap-2 pb-2">
+                    <Checkbox
+                      id="repeatBag"
+                      checked={lineDraft.repeat}
+                      onCheckedChange={(c) => setLineDraft((d) => ({ ...d, repeat: c === true }))}
+                    />
+                    <label htmlFor="repeatBag" className="text-xs font-medium cursor-pointer text-muted-foreground select-none">
+                      Repeat Bag/CRN
+                    </label>
+                  </div>
+                  <FieldWrapper label="Forwarding No.">
+                    <Input
+                      value={lineDraft.forwardingNo}
+                      onChange={(e) => setLineDraft((d) => ({ ...d, forwardingNo: e.target.value }))}
+                      placeholder="FWD No"
+                    />
+                  </FieldWrapper>
+                  <FieldWrapper label="AWB No." required className="lg:col-span-1">
                     <div className="flex gap-1">
-                      <Input value={lineDraft.awbNo} onChange={(e) => setLineDraft((d) => ({ ...d, awbNo: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addManifestLine(); } }} />
-                      <Button className="shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90" onClick={addManifestLine}><Plus className="mr-1 h-4 w-4" />Add</Button>
+                      <Input
+                        value={lineDraft.awbNo}
+                        disabled={scanning || isReadOnly}
+                        onChange={(e) => setLineDraft((d) => ({ ...d, awbNo: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addManifestLine();
+                          }
+                        }}
+                        placeholder="AWB No"
+                      />
+                      <Button
+                        disabled={scanning || isReadOnly}
+                        className="shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                        onClick={addManifestLine}
+                      >
+                        {scanning ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Plus className="mr-1 h-4 w-4" />}
+                        Add
+                      </Button>
                     </div>
                   </FieldWrapper>
                 </div>
               </CollapsibleContent>
             </Collapsible>
+
+            <FormSection title="Signed Manifest Copy & Attachments" className="mt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
+                <p className="text-xs text-muted-foreground">Attach signed physical copy or supporting customs/airline documents</p>
+                {!isReadOnly ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={uploadingAttachment}
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={() => fileUploadInputRef.current?.click()}
+                  >
+                    {uploadingAttachment ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                    Upload Copy
+                  </Button>
+                ) : null}
+                <input
+                  ref={fileUploadInputRef}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.tiff"
+                  className="hidden"
+                  onChange={handleUploadAttachment}
+                />
+              </div>
+
+              {form.attachments.length === 0 ? (
+                <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
+                  No signed manifest documents attached
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
+                  {form.attachments.map((att) => (
+                    <div
+                      key={att.fileId}
+                      className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-xs"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate font-medium" title={att.originalName || att.label}>
+                          {att.originalName || att.label}
+                        </span>
+                      </div>
+                      {!isReadOnly ? (
+                        <button
+                          type="button"
+                          className="text-destructive hover:opacity-80"
+                          onClick={() => removeAttachment(att.fileId)}
+                          title="Remove attachment"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </FormSection>
 
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               {!isReadOnly ? (
@@ -1272,7 +1909,7 @@ function ManifestScanPage() {
                   Excel Import
                 </Button>
               ) : null}
-              <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={() => toast.info("Excel import will be enabled with backend wiring")} />
+              <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleExcelImport} />
             </div>
 
             <p className="mt-4 text-sm font-medium text-primary">Total Count : {form.lines.length}</p>
@@ -1284,11 +1921,12 @@ function ManifestScanPage() {
                     {formLineCols.map((h) => (
                       <TableHead key={h} className="max-w-0 truncate px-2 text-sidebar-foreground">{h}</TableHead>
                     ))}
+                    <TableHead className="w-12 px-1 text-center text-sidebar-foreground">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {form.lines.length === 0 ? (
-                    <TableRow><TableCell colSpan={14} className="h-24 text-center text-muted-foreground">No manifest lines added</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={15} className="h-24 text-center text-muted-foreground">No manifest lines added</TableCell></TableRow>
                   ) : form.lines.map((l) => (
                     <TableRow key={l.id}>
                       <TableCell className="max-w-0 truncate px-2" title={l.awbNo}>{l.awbNo}</TableCell>
@@ -1305,6 +1943,19 @@ function ManifestScanPage() {
                       <TableCell className="max-w-0 truncate px-2" title={l.customer}>{l.customer}</TableCell>
                       <TableCell className="max-w-0 truncate px-2" title={l.consignee}>{l.consignee}</TableCell>
                       <TableCell className="max-w-0 truncate px-2" title={l.instruction}>{l.instruction}</TableCell>
+                      <TableCell className="w-12 px-1 text-center">
+                        {!isReadOnly ? (
+                          <IconButton
+                            label="Remove line"
+                            variant="ghost"
+                            size="row"
+                            className="text-destructive hover:bg-destructive/10"
+                            onClick={() => removeManifestLine(l.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </IconButton>
+                        ) : null}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1711,6 +2362,47 @@ function ManifestScanPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={Boolean(importSummary?.open)} onOpenChange={(o) => !o && setImportSummary(null)}>
+        <DialogContent className="max-w-lg gap-0 p-0 sm:max-w-lg">
+          <div className="bg-sidebar px-4 py-3">
+            <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+              Excel Import Summary
+            </DialogTitle>
+          </div>
+          <div className="p-6">
+            <div className="mb-4 grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-md border bg-emerald-50 p-3 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                <div className="text-xs font-semibold uppercase">Accepted</div>
+                <div className="text-2xl font-bold">{importSummary?.accepted ?? 0}</div>
+              </div>
+              <div className="rounded-md border bg-destructive/10 p-3 text-destructive">
+                <div className="text-xs font-semibold uppercase">Rejected / Skipped</div>
+                <div className="text-2xl font-bold">{importSummary?.skipped.length ?? 0}</div>
+              </div>
+            </div>
+
+            {importSummary?.skipped && importSummary.skipped.length > 0 ? (
+              <div>
+                <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase">
+                  Skipped Shipments & Reasons:
+                </p>
+                <div className="max-h-60 overflow-y-auto rounded-md border divide-y text-xs">
+                  {importSummary.skipped.map((s, idx) => (
+                    <div key={idx} className="flex items-start justify-between gap-2 p-2.5 bg-muted/20">
+                      <span className="font-mono font-bold text-foreground shrink-0">{s.awb}</span>
+                      <span className="text-destructive text-right">{s.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end border-t bg-muted/20 px-6 py-3">
+            <Button onClick={() => setImportSummary(null)}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

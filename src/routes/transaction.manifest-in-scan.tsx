@@ -1,14 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Filter, Search } from "lucide-react";
+import { Filter, Search, CheckCircle2, Clock, AlertTriangle, ArrowRight, RefreshCw, Package } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -22,7 +32,11 @@ import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
 import { useAuth } from "@/lib/auth";
 import { lookup } from "@/lib/masters/core/lookup";
 import { toErrorMessage } from "@/lib/masters/screen";
-import { getManifestInscanBoard, scanManifest } from "@/lib/transactions/resources/manifestInscan";
+import {
+  getManifestInscanBoard,
+  scanManifest,
+  scanManifestBag,
+} from "@/lib/transactions/resources/manifestInscan";
 import {
   countsFromBoard,
   mapInscanScanResult,
@@ -144,7 +158,7 @@ export const Route = createFileRoute("/transaction/manifest-in-scan")({
 });
 
 function ManifestInScanPage() {
-  const { isAuthenticated: authed } = useAuth();
+  const { isAuthenticated: authed, profile } = useAuth();
   const queryClient = useQueryClient();
   const [scanMode, setScanMode] = useState<ScanMode>("bag");
   const [header, setHeader] = useState<InscanHeader>(emptyHeader);
@@ -156,6 +170,34 @@ function ManifestInScanPage() {
   const [filterApplied, setFilterApplied] = useState<InscanFilter | null>(null);
   const [saving, setSaving] = useState(false);
   const [selectedShipmentId, setSelectedShipmentId] = useState<string>("");
+  const [registerTab, setRegisterTab] = useState<"all" | "scanned" | "pending">("all");
+  const [registerSearch, setRegisterSearch] = useState<string>("");
+
+  const userBranchQuery = useQuery({
+    queryKey: ["user-branch", profile?.home_branch_id],
+    queryFn: async () => {
+      if (!profile?.home_branch_id) return null;
+      const { data } = await supabase
+        .from("branches")
+        .select("id, code, name")
+        .eq("id", profile.home_branch_id)
+        .maybeSingle();
+      return data;
+    },
+    enabled: Boolean(profile?.home_branch_id),
+  });
+
+  const defaultBranchCode = userBranchQuery.data?.code || profile?.branchCode || "HYD";
+  const defaultBranchName = userBranchQuery.data?.name || profile?.branchCode || "HYDERABAD";
+
+  useEffect(() => {
+    if (defaultBranchCode && !header.serviceCentre.code) {
+      setHeader((h) => ({
+        ...h,
+        serviceCentre: { code: defaultBranchCode, name: defaultBranchName },
+      }));
+    }
+  }, [defaultBranchCode, defaultBranchName, header.serviceCentre.code]);
 
   const boardQuery = useQuery({
     queryKey: ["manifest-inscan", "board", header.manifestId],
@@ -202,6 +244,19 @@ function ManifestInScanPage() {
     return exact.id;
   };
 
+  const updateAwbDims = (patch: Partial<AwbLineDraft>) => {
+    setAwbLine((prev) => {
+      const next = { ...prev, ...patch };
+      const l = parseFloat(next.length) || 0;
+      const b = parseFloat(next.breadth) || 0;
+      const h = parseFloat(next.height) || 0;
+      if (l > 0 && b > 0 && h > 0) {
+        next.volWeight = ((l * b * h) / 5000).toFixed(3);
+      }
+      return next;
+    });
+  };
+
   const resetLineDraft = () => {
     setBagLine(emptyBagLine(header));
     setAwbLine(emptyAwbLine(header));
@@ -213,133 +268,103 @@ function ManifestInScanPage() {
     toast.success("Line fields reset");
   };
 
-  const currentAwb = () => (scanMode === "bag" ? bagLine.awbNo.trim() : awbLine.awbNo.trim());
-
   const handleSave = async () => {
     if (!header.inscanDate) return toast.error("Manifest Inscan Date is required");
     if (!header.inscanTime.trim()) return toast.error("Manifest Inscan Time is required");
 
-    const awbNo = currentAwb();
-    const bagNo =
-      (scanMode === "bag" ? bagLine.bagNo : awbLine.bagNo).trim() || header.bagNo.trim();
-
-    if (selectedShipmentId && !awbNo && boardQuery.data) {
-      const line = boardQuery.data.lines.find((l) => l.shipment_id === selectedShipmentId);
-      if (line) {
-        if (scanMode === "bag") setBagLine((l) => ({ ...l, awbNo: line.awb_no }));
-        else setAwbLine((l) => ({ ...l, awbNo: line.awb_no }));
-      }
+    let manifestId = header.manifestId;
+    if (authed && !manifestId && header.manifestNo.trim()) {
+      manifestId = (await resolveManifest(header.manifestNo)) ?? "";
     }
 
-    const effectiveAwb =
-      awbNo ||
-      (selectedShipmentId
-        ? (boardQuery.data?.lines.find((l) => l.shipment_id === selectedShipmentId)?.awb_no ?? "")
-        : "");
+    if (scanMode === "bag") {
+      const bagNo = (bagLine.bagNo.trim() || header.bagNo.trim());
+      const awbNo = bagLine.awbNo.trim();
 
-    if (authed) {
-      setSaving(true);
-      try {
-        let manifestId = header.manifestId;
-        if (!manifestId) {
-          manifestId = (await resolveManifest(header.manifestNo)) ?? "";
-        }
-        if (!manifestId) return;
-
-        const board = boardQuery.data ?? (await getManifestInscanBoard(manifestId));
-        const known = new Set(board.lines.map((l) => l.awb_no));
-        const scanned = new Set(
-          board.lines.filter((l) => l.scanned).map((l) => l.awb_no.toUpperCase()),
-        );
-        const statusMap = new Map(board.lines.map((l) => [l.awb_no, l.shipment_status]));
-
-        const decision = validateInscanAttempt(
-          {
-            awbNo: effectiveAwb,
-            shipmentId: selectedShipmentId || undefined,
-            bagNo,
-            mode: scanMode,
-          },
-          {
-            manifestId,
-            knownAwbs: known,
-            scannedAwbs: scanned,
-            shipmentStatusByAwb: statusMap,
-          },
-        );
-        if (decision.kind === "invalid") {
-          toast.error(decision.message);
-          return;
-        }
-        if (decision.kind === "duplicate") {
-          toast.warning(decision.message);
-          return;
-        }
-
-        const result = await scanManifest({
-          manifest_id: manifestId,
-          awb_no: effectiveAwb || null,
-          shipment_id: selectedShipmentId || null,
-          bag_no: bagNo || null,
-          mode: uiModeToRpcMode(scanMode),
-        });
-        const mapped = mapInscanScanResult(result);
-        if (mapped.toast === "warning") toast.warning(mapped.message);
-        else if (mapped.toast === "error") toast.error(mapped.message);
-        else toast.success(mapped.message);
-
-        if (!result.duplicate) {
-          if (scanMode === "bag") {
-            setLines((prev) => [
-              {
-                id: crypto.randomUUID(),
-                mode: "bag",
-                manifestNo: header.manifestNo,
-                bagNo,
-                awbNo: result.awb_no ?? effectiveAwb,
-                pieces: bagLine.pieces.trim(),
-                weight: bagLine.weight.trim(),
-              },
-              ...prev,
-            ]);
-            setBagLine((line) => ({
-              ...emptyBagLine(header),
-              manifestNo: line.manifestNo,
-              bagNo: line.bagNo,
-            }));
-          } else {
-            setLines((prev) => [
-              {
-                id: crypto.randomUUID(),
-                mode: "awb",
-                manifestNo: header.manifestNo,
-                bagNo,
-                awbNo: result.awb_no ?? effectiveAwb,
-                weight: awbLine.weight.trim(),
-                length: awbLine.length.trim(),
-                breadth: awbLine.breadth.trim(),
-                height: awbLine.height.trim(),
-                volWeight: awbLine.volWeight.trim(),
-                remark: awbLine.remark.trim(),
-                bookingWeight: awbLine.bookingWeight,
-              },
-              ...prev,
-            ]);
-            setAwbLine((line) => ({
-              ...emptyAwbLine(header),
-              manifestNo: line.manifestNo,
-              bagNo: line.bagNo,
-            }));
+      // Case A: Whole-bag atomic inscan (Bag No provided, AWB empty)
+      if (bagNo && !awbNo) {
+        if (authed) {
+          if (!manifestId) return toast.error("Manifest No is required");
+          setSaving(true);
+          try {
+            const res = await scanManifestBag({ manifest_id: manifestId, bag_no: bagNo });
+            toast.success(res.message);
+            await queryClient.invalidateQueries({ queryKey: ["manifest-inscan", "board", manifestId] });
+            setBagLine((l) => ({ ...emptyBagLine(header), manifestNo: l.manifestNo }));
+          } catch (err) {
+            toast.error(toErrorMessage(err));
+          } finally {
+            setSaving(false);
           }
-          setSelectedShipmentId("");
+          return;
+        } else {
+          toast.success(`Bag ${bagNo} inscanned (demo mode)`);
+          return;
         }
-        await queryClient.invalidateQueries({ queryKey: ["manifest-inscan", "board", manifestId] });
-      } catch (err) {
-        toast.error(toErrorMessage(err));
-      } finally {
-        setSaving(false);
       }
-      return;
+
+      // Case B: Specific AWB in bag
+      if (!awbNo) return toast.error("AWB No or Bag No is required");
+      if (authed) {
+        if (!manifestId) return toast.error("Manifest No is required");
+        setSaving(true);
+        try {
+          const res = await scanManifest({
+            manifest_id: manifestId,
+            awb_no: awbNo,
+            bag_no: bagNo || null,
+            mode: "BAG",
+            weight: bagLine.weight ? Number(bagLine.weight) : null,
+          });
+          const mapped = mapInscanScanResult(res);
+          if (mapped.toast === "warning") toast.warning(mapped.message);
+          else if (mapped.toast === "error") toast.error(mapped.message);
+          else toast.success(mapped.message);
+          await queryClient.invalidateQueries({ queryKey: ["manifest-inscan", "board", manifestId] });
+          setBagLine((l) => ({ ...emptyBagLine(header), manifestNo: l.manifestNo, bagNo: l.bagNo }));
+        } catch (err) {
+          toast.error(toErrorMessage(err));
+        } finally {
+          setSaving(false);
+        }
+        return;
+      }
+    } else {
+      // Scan Mode: AWB No
+      const awbNo = awbLine.awbNo.trim();
+      const bagNo = awbLine.bagNo.trim() || header.bagNo.trim();
+      if (!awbNo) return toast.error("AWB No is required");
+
+      if (authed) {
+        if (!manifestId) return toast.error("Manifest No is required");
+        setSaving(true);
+        try {
+          const res = await scanManifest({
+            manifest_id: manifestId,
+            awb_no: awbNo,
+            bag_no: bagNo || null,
+            mode: "AWB",
+            weight: awbLine.weight ? Number(awbLine.weight) : null,
+            length: awbLine.length ? Number(awbLine.length) : null,
+            breadth: awbLine.breadth ? Number(awbLine.breadth) : null,
+            height: awbLine.height ? Number(awbLine.height) : null,
+            vol_weight: awbLine.volWeight ? Number(awbLine.volWeight) : null,
+            remark: awbLine.remark || null,
+            is_booking_weight: awbLine.bookingWeight,
+          });
+          const mapped = mapInscanScanResult(res);
+          if (mapped.toast === "warning") toast.warning(mapped.message);
+          else if (mapped.toast === "error") toast.error(mapped.message);
+          else toast.success(mapped.message);
+          await queryClient.invalidateQueries({ queryKey: ["manifest-inscan", "board", manifestId] });
+          setAwbLine((l) => ({ ...emptyAwbLine(header), manifestNo: l.manifestNo, bagNo: l.bagNo }));
+        } catch (err) {
+          toast.error(toErrorMessage(err));
+        } finally {
+          setSaving(false);
+        }
+        return;
+      }
     }
 
     // Demo mode
@@ -664,32 +689,8 @@ function ManifestInScanPage() {
             </FormSection>
 
             <FormSection title={scanMode === "bag" ? "Bag / Manifest Scan" : "AWB Scan"}>
-              {authed && pendingLines.length > 0 ? (
-                <div className="mb-4">
-                  <FieldWrapper label="Manual shipment selection">
-                    <Select
-                      value={selectedShipmentId || "none"}
-                      onValueChange={(v) => onSelectPendingShipment(v === "none" ? "" : v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select pending AWB" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Select pending AWB</SelectItem>
-                        {pendingLines.map((l) => (
-                          <SelectItem key={l.shipment_id} value={l.shipment_id}>
-                            {l.awb_no}
-                            {l.bag_no ? ` · bag ${l.bag_no}` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </FieldWrapper>
-                </div>
-              ) : null}
-
               {scanMode === "bag" ? (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 items-end">
                   <FieldWrapper label="Manifest No.">
                     <Input
                       value={bagLine.manifestNo}
@@ -700,14 +701,15 @@ function ManifestInScanPage() {
                     <Input
                       value={bagLine.bagNo}
                       onChange={(e) => setBagLine((l) => ({ ...l, bagNo: e.target.value }))}
+                      placeholder="e.g. BAG-001"
                     />
                   </FieldWrapper>
-                  <FieldWrapper label="AWB No." required>
+                  <FieldWrapper label="AWB No. (Optional for bulk bag)">
                     <Input
                       value={bagLine.awbNo}
                       onChange={(e) => setBagLine((l) => ({ ...l, awbNo: e.target.value }))}
                       onKeyDown={onLineEnter}
-                      placeholder="Scan or type AWB"
+                      placeholder="Scan AWB or leave empty for full bag"
                       autoComplete="off"
                     />
                   </FieldWrapper>
@@ -750,38 +752,43 @@ function ManifestInScanPage() {
                         autoComplete="off"
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Weight">
+                    <FieldWrapper label="Weight (kg)">
                       <Input
                         value={awbLine.weight}
                         onChange={(e) => setAwbLine((l) => ({ ...l, weight: e.target.value }))}
+                        placeholder="e.g. 5.500"
                         inputMode="decimal"
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Length">
+                    <FieldWrapper label="Length (cm)">
                       <Input
                         value={awbLine.length}
-                        onChange={(e) => setAwbLine((l) => ({ ...l, length: e.target.value }))}
+                        onChange={(e) => updateAwbDims({ length: e.target.value })}
+                        placeholder="L"
                         inputMode="decimal"
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Breadth">
+                    <FieldWrapper label="Breadth (cm)">
                       <Input
                         value={awbLine.breadth}
-                        onChange={(e) => setAwbLine((l) => ({ ...l, breadth: e.target.value }))}
+                        onChange={(e) => updateAwbDims({ breadth: e.target.value })}
+                        placeholder="B"
                         inputMode="decimal"
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Height">
+                    <FieldWrapper label="Height (cm)">
                       <Input
                         value={awbLine.height}
-                        onChange={(e) => setAwbLine((l) => ({ ...l, height: e.target.value }))}
+                        onChange={(e) => updateAwbDims({ height: e.target.value })}
+                        placeholder="H"
                         inputMode="decimal"
                       />
                     </FieldWrapper>
-                    <FieldWrapper label="Vol. Weight">
+                    <FieldWrapper label="Vol. Weight (kg)">
                       <Input
                         value={awbLine.volWeight}
                         onChange={(e) => setAwbLine((l) => ({ ...l, volWeight: e.target.value }))}
+                        placeholder="(L×B×H)/5000"
                         inputMode="decimal"
                       />
                     </FieldWrapper>
@@ -789,6 +796,7 @@ function ManifestInScanPage() {
                       <Input
                         value={awbLine.remark}
                         onChange={(e) => setAwbLine((l) => ({ ...l, remark: e.target.value }))}
+                        placeholder="Condition, seal status, or remarks"
                       />
                     </FieldWrapper>
                     <div className="flex items-end pb-2">
@@ -800,37 +808,194 @@ function ManifestInScanPage() {
                             setAwbLine((l) => ({ ...l, bookingWeight: c === true }))
                           }
                         />
-                        <label htmlFor="bookingWeight" className="text-sm text-foreground">
-                          Booking Weight
+                        <label htmlFor="bookingWeight" className="text-sm font-medium cursor-pointer text-foreground">
+                          Use Booking Weight
                         </label>
                       </div>
                     </div>
                   </div>
-                  <p className="text-sm font-medium text-sky-700 dark:text-sky-400">
-                    Count : {displayCounts.pieces} / {displayCounts.total}
-                  </p>
                 </div>
               )}
 
-              {scanMode === "bag" ? (
-                <p className="mt-4 text-sm font-medium text-sky-700 dark:text-sky-400">
-                  Count : {displayCounts.pieces} / {displayCounts.total}
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-medium text-sky-700 dark:text-sky-400">
+                  Total Received: {displayCounts.scanned} / {displayCounts.total} ({displayCounts.pieces} pcs)
                 </p>
-              ) : null}
-
-              <div className="mt-4 flex justify-end gap-2">
-                <Button
-                  onClick={() => void handleSave()}
-                  disabled={saving}
-                  className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90"
-                >
-                  {saving ? "Saving…" : "Save"}
-                </Button>
-                <Button variant="destructive" onClick={handleReset} className="min-w-24">
-                  Reset
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => void handleSave()}
+                    disabled={saving}
+                    className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90"
+                  >
+                    {saving ? "Saving…" : scanMode === "bag" && !bagLine.awbNo && bagLine.bagNo ? "Inscan Whole Bag" : "Inscan Shipment"}
+                  </Button>
+                  <Button variant="destructive" onClick={handleReset} className="min-w-24">
+                    Reset
+                  </Button>
+                </div>
               </div>
             </FormSection>
+
+            {/* Reconciliation Register Grid */}
+            <div className="mt-6 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+                <div className="flex items-center gap-2">
+                  <Package className="h-5 w-5 text-emerald-600" />
+                  <h3 className="font-semibold text-foreground">Manifest Reconciliation Register</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex rounded-md border p-0.5 text-xs">
+                    <button
+                      type="button"
+                      className={cn(
+                        "rounded px-2.5 py-1 font-medium transition-colors",
+                        registerTab === "all" ? "bg-emerald-600 text-white" : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => setRegisterTab("all")}
+                    >
+                      All ({boardQuery.data?.lines.length ?? 0})
+                    </button>
+                    <button
+                      type="button"
+                      className={cn(
+                        "rounded px-2.5 py-1 font-medium transition-colors",
+                        registerTab === "scanned" ? "bg-emerald-600 text-white" : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => setRegisterTab("scanned")}
+                    >
+                      Scanned ({liveCounts?.scanned ?? 0})
+                    </button>
+                    <button
+                      type="button"
+                      className={cn(
+                        "rounded px-2.5 py-1 font-medium transition-colors",
+                        registerTab === "pending" ? "bg-amber-600 text-white" : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => setRegisterTab("pending")}
+                    >
+                      Short / Pending ({liveCounts?.pending ?? 0})
+                    </button>
+                  </div>
+                  <Input
+                    placeholder="Search AWB or Bag..."
+                    value={registerSearch}
+                    onChange={(e) => setRegisterSearch(e.target.value)}
+                    className="h-8 w-40 text-xs"
+                  />
+                </div>
+              </div>
+
+              {boardQuery.data && boardQuery.data.lines.length > 0 ? (
+                <div className="overflow-x-auto rounded-md border">
+                  <Table className="text-xs">
+                    <TableHeader>
+                      <TableRow className="bg-sidebar hover:bg-sidebar">
+                        <TableHead className="w-10 text-sidebar-foreground">#</TableHead>
+                        <TableHead className="text-sidebar-foreground">AWB No.</TableHead>
+                        <TableHead className="text-sidebar-foreground">Bag No.</TableHead>
+                        <TableHead className="text-sidebar-foreground">Origin / Destination</TableHead>
+                        <TableHead className="text-sidebar-foreground">Consignee</TableHead>
+                        <TableHead className="text-center text-sidebar-foreground">Pcs</TableHead>
+                        <TableHead className="text-right text-sidebar-foreground">Booked Wt</TableHead>
+                        <TableHead className="text-right text-sidebar-foreground">Inscan Wt</TableHead>
+                        <TableHead className="text-center text-sidebar-foreground">Status</TableHead>
+                        <TableHead className="w-20 text-center text-sidebar-foreground">Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {boardQuery.data.lines
+                        .filter((l) => {
+                          if (registerTab === "scanned") return l.scanned;
+                          if (registerTab === "pending") return !l.scanned;
+                          return true;
+                        })
+                        .filter((l) => {
+                          if (!registerSearch.trim()) return true;
+                          const q = registerSearch.toLowerCase();
+                          return (
+                            l.awb_no.toLowerCase().includes(q) ||
+                            (l.bag_no && l.bag_no.toLowerCase().includes(q)) ||
+                            (l.consignee_name && l.consignee_name.toLowerCase().includes(q))
+                          );
+                        })
+                        .map((l, idx) => (
+                          <TableRow
+                            key={l.shipment_id || idx}
+                            className={cn(
+                              "cursor-pointer hover:bg-muted/50",
+                              !l.scanned && "bg-amber-50/20 dark:bg-amber-950/10",
+                            )}
+                            onClick={() => {
+                              if (scanMode === "bag") {
+                                setBagLine((b) => ({ ...b, awbNo: l.awb_no, bagNo: l.bag_no || b.bagNo }));
+                              } else {
+                                setAwbLine((a) => ({ ...a, awbNo: l.awb_no, bagNo: l.bag_no || a.bagNo }));
+                              }
+                            }}
+                          >
+                            <TableCell className="font-mono text-muted-foreground">{l.seq || idx + 1}</TableCell>
+                            <TableCell className="font-mono font-bold text-foreground">{l.awb_no}</TableCell>
+                            <TableCell className="font-mono text-muted-foreground">{l.bag_no || "—"}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {l.origin_name || "HYD"} ➔ {l.destination_name || "DEST"}
+                            </TableCell>
+                            <TableCell className="max-w-[140px] truncate text-foreground" title={l.consignee_name || ""}>
+                              {l.consignee_name || "—"}
+                            </TableCell>
+                            <TableCell className="text-center">{l.pieces}</TableCell>
+                            <TableCell className="text-right font-mono">{l.charge_weight} kg</TableCell>
+                            <TableCell className="text-right font-mono">
+                              {l.inscan_weight ? (
+                                <span className={cn(l.has_weight_discrepancy && "font-bold text-destructive")}>
+                                  {l.inscan_weight} kg
+                                </span>
+                              ) : (
+                                "—"
+                              )}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {l.scanned ? (
+                                <Badge variant="default" className="bg-emerald-600 gap-1 text-[10px]">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Received
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="border-amber-500 text-amber-700 dark:text-amber-400 gap-1 text-[10px]">
+                                  <Clock className="h-3 w-3" />
+                                  Short / Pending
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {!l.scanned ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 px-2 text-[10px]"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (scanMode === "bag") {
+                                      setBagLine((b) => ({ ...b, awbNo: l.awb_no, bagNo: l.bag_no || b.bagNo }));
+                                    } else {
+                                      setAwbLine((a) => ({ ...a, awbNo: l.awb_no, bagNo: l.bag_no || a.bagNo }));
+                                    }
+                                  }}
+                                >
+                                  Inscan
+                                </Button>
+                              ) : null}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+                  Load a CLOSED manifest to view reconciliation status and short/missing shipments
+                </div>
+              )}
+            </div>
           </div>
         ) : null}
       </Card>

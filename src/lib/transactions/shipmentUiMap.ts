@@ -62,6 +62,7 @@ type ChargeLine = {
 /** Minimal form slice needed for live save — matches AwbFullForm shape. */
 export type AwbLiveForm = {
   awbNo: string;
+  masterAwbNo?: string;
   bookDate: string;
   bookTime: string;
   referenceNo: string;
@@ -264,6 +265,7 @@ export function uiFormToShipmentPayload(form: AwbLiveForm): {
       proforma: form.proforma ?? {},
       forwarding: form.forwarding ?? {},
       kyc: form.kyc ?? {},
+      masterAwbNo: form.masterAwbNo?.trim() || "",
     },
   };
 
@@ -431,21 +433,24 @@ export function dbShipmentToFormPatch(
       volWeight: String(p.vol_weight ?? ""),
       chargeWeight: String(p.charge_weight ?? ""),
     })),
-    chargeLines: children.charges.map((c, i) => ({
-      id: `ch-${i}`,
-      description: c.description,
-      rate: String(c.rate ?? ""),
-      amount: String(c.amount ?? ""),
-      fuelApply: c.fuel_applies ? "Yes" : "No",
-      fuelAmt: String(c.fuel_amount ?? ""),
-      taxApply: c.tax_applies ? "Yes" : "No",
-      taxOnFuel: c.tax_on_fuel ? "Yes" : "No",
-      igst: String(c.igst ?? ""),
-      sgst: String(c.sgst ?? ""),
-      cgst: String(c.cgst ?? ""),
-      total: String(c.total ?? ""),
-      chargesType: c.charges_type,
-    })),
+    chargeLines: children.charges
+      .filter((c) => String(c.side ?? "CUSTOMER").toUpperCase() !== "VENDOR")
+      .map((c, i) => ({
+        id: `ch-${i}`,
+        description: c.description,
+        rate: String(c.rate ?? ""),
+        amount: String(c.amount ?? ""),
+        fuelApply: c.fuel_applies ? "Yes" : "No",
+        fuelAmt: String(c.fuel_amount ?? ""),
+        taxApply: c.tax_applies ? "Yes" : "No",
+        taxOnFuel: c.tax_on_fuel ? "Yes" : "No",
+        igst: String(c.igst ?? ""),
+        sgst: String(c.sgst ?? ""),
+        cgst: String(c.cgst ?? ""),
+        total: String(c.total ?? ""),
+        chargesType: c.charges_type,
+      })),
+    masterAwbNo: String(extras.masterAwbNo ?? ""),
     proforma: extras.proforma,
     forwarding: {
       ...forwardingExtra,
@@ -456,6 +461,29 @@ export function dbShipmentToFormPatch(
         code: row.delivery_vendor?.code ?? "",
         name: row.delivery_vendor?.name ?? "",
       },
+      vendorChargeLines: (() => {
+        const fromExtras = Array.isArray(forwardingExtra.vendorChargeLines)
+          ? forwardingExtra.vendorChargeLines
+          : null;
+        if (fromExtras && fromExtras.length > 0) return fromExtras;
+        return children.charges
+          .filter((c) => String(c.side ?? "").toUpperCase() === "VENDOR")
+          .map((c, i) => ({
+            id: `vch-${i}`,
+            description: c.description,
+            rate: String(c.rate ?? ""),
+            amount: String(c.amount ?? ""),
+            fuelApply: c.fuel_applies ? "Yes" : "No",
+            fuelAmt: String(c.fuel_amount ?? ""),
+            taxApply: c.tax_applies ? "Yes" : "No",
+            taxOnFuel: c.tax_on_fuel ? "Yes" : "No",
+            igst: String(c.igst ?? ""),
+            sgst: String(c.sgst ?? ""),
+            cgst: String(c.cgst ?? ""),
+            total: String(c.total ?? ""),
+            chargesType: c.charges_type === "SYSTEM" ? "SYSTEM" : "Vendor",
+          }));
+      })(),
     },
     kyc: extras.kyc,
   };

@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, useEffect, type ReactNode } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw,
   Filter,
@@ -17,6 +18,7 @@ import {
   FileImage,
   Mail,
   Tag,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -70,12 +72,24 @@ import {
   TablePager,
   downloadCsv,
 } from "@/components/master-table-kit";
-import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import {
   SearchableLookupPair,
   type LookupPairValue,
 } from "@/components/masters/searchable-lookup-pair";
-import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { type LookupKey } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  listBaggings,
+  getBaggingDetails,
+  recordBagging,
+  deleteBagging,
+  fetchShipmentForBagging,
+  recordBaggingProgress,
+  type BaggingListRow,
+  type BaggingHeaderDto,
+  type BaggingAwbLineDto,
+} from "@/lib/transactions/resources/bagging";
 
 type LookupPair = LookupPairValue;
 
@@ -99,7 +113,6 @@ function BaggingLookupField({
   value: LookupPair;
   onChange: (v: LookupPair) => void;
   required?: boolean;
-  /** When true, code is filled from lookup and cannot be typed (Origin City). */
   readOnlyCode?: boolean;
 }) {
   return (
@@ -114,63 +127,8 @@ function BaggingLookupField({
     </FieldWrapper>
   );
 }
+
 type PageView = "list" | "entry";
-
-type BaggingAwbLine = {
-  id: string;
-  bagNo: string;
-  crnMhbsNo: string;
-  forwardingNo: string;
-  awbNo: string;
-  weight: string;
-  pcs: string;
-  shipper: string;
-  consignee: string;
-  vendor: string;
-  airline: string;
-  service: string;
-};
-
-type BaggingForm = {
-  manifestNo: string;
-  date: string;
-  originCity: LookupPair;
-  originCountry: LookupPair;
-  airlinesCode: LookupPair;
-  arrivalAirport: string;
-  masterAirlinesPrefix: string;
-  masterAwbNoPart: string;
-  masterNoPart3: string;
-  mawbMasterNo: string;
-  vendor: LookupPair;
-  cdNo: string;
-  ediMasterNo: string;
-  baggingRemark: string;
-  serviceCenter: LookupPair;
-  destCountry: LookupPair;
-  destCity: LookupPair;
-  flightNo1: LookupPair;
-  flightNo2: LookupPair;
-  arrivalDate: string;
-  isForwarding: boolean;
-  searchAwbBagNo: string;
-  awbLines: BaggingAwbLine[];
-};
-
-type BaggingRow = {
-  id: string;
-  manifestNo: string;
-  masterAwbNo: string;
-  date: string;
-  origin: string;
-  from: string;
-  to: string;
-  destination: string;
-  vendorName: string;
-  shipment: number;
-  weight: string;
-  form: BaggingForm;
-};
 
 type ColFilterKey =
   | "manifestNo"
@@ -222,8 +180,20 @@ type DownloadTiffForm = {
   toBagNo: string;
 };
 
+type PrintBagLabelForm = {
+  fromBagNo: string;
+  toBagNo: string;
+  remark: string;
+};
+
+type CsbExportForm = {
+  runNo: string;
+  csbType: "CSB-III" | "CSB-IV" | "CSB-V";
+};
+
 const DOWNLOAD_ALL_TYPES = ["AWBNo", "Forwarding No 1", "Forwarding No 2"] as const;
 const DOWNLOAD_TIFF_TYPES = ["CSB-III", "CSB-IV", "CSB-V"] as const;
+const MANIFEST_TYPES = ["High Value", "Low Value", "Transhipment"] as const;
 const FORMAT_OPTIONS = [
   "Format 1",
   "Format 2",
@@ -232,39 +202,6 @@ const FORMAT_OPTIONS = [
   "Format 5",
   "Format 6",
 ] as const;
-
-const SEED_AWB_META: Record<
-  string,
-  Omit<BaggingAwbLine, "id" | "bagNo" | "crnMhbsNo" | "forwardingNo" | "awbNo">
-> = {
-  "30403918": {
-    weight: "36.000",
-    pcs: "1",
-    shipper: "TPC ADDANKI",
-    consignee: "ELURI SIVARAMAKRISHNA",
-    vendor: "DTDC AUSTRALIA",
-    airline: "QF",
-    service: "SPX",
-  },
-  "30403919": {
-    weight: "26.800",
-    pcs: "1",
-    shipper: "FEDEX INTERNATIONAL COURIER",
-    consignee: "JOHN SMITH",
-    vendor: "DTDC AUSTRALIA",
-    airline: "QF",
-    service: "SPX",
-  },
-  "30403920": {
-    weight: "18.500",
-    pcs: "2",
-    shipper: "HYDERABAD EXPORTS",
-    consignee: "DAVID WILSON",
-    vendor: "DTDC NEWZEALAND",
-    airline: "NZ",
-    service: "SPX",
-  },
-};
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
 
@@ -299,6 +236,17 @@ const emptyDownloadTiffForm = (runNo = ""): DownloadTiffForm => ({
   toBagNo: "",
 });
 
+const emptyPrintBagLabelForm = (maxBag = "1"): PrintBagLabelForm => ({
+  fromBagNo: "1",
+  toBagNo: maxBag,
+  remark: "",
+});
+
+const emptyCsbExportForm = (runNo = ""): CsbExportForm => ({
+  runNo,
+  csbType: "CSB-V",
+});
+
 const formatDisplayDate = (iso: string) => {
   if (!iso) return "";
   const [y, m, d] = iso.split("-");
@@ -306,8 +254,9 @@ const formatDisplayDate = (iso: string) => {
   return `${d}/${m}/${y}`;
 };
 
-const parseWeight = (value: string) => {
-  const n = Number.parseFloat(value.replace(/,/g, ""));
+const parseWeight = (value: string | number) => {
+  if (typeof value === "number") return value;
+  const n = Number.parseFloat(String(value).replace(/,/g, ""));
   return Number.isFinite(n) ? n : 0;
 };
 
@@ -322,10 +271,10 @@ const emptyAwbDraft = (): AwbDraft => ({
   pcs: "1",
 });
 
-const emptyForm = (): BaggingForm => ({
+const emptyForm = (defaultBranch = "HYD"): BaggingHeaderDto => ({
   manifestNo: "0",
   date: todayIso(),
-  originCity: { code: "HYD", name: "HYD" },
+  originCity: { code: defaultBranch, name: defaultBranch },
   originCountry: { code: "IN", name: "INDIA" },
   airlinesCode: emptyPair(),
   arrivalAirport: "",
@@ -337,13 +286,17 @@ const emptyForm = (): BaggingForm => ({
   cdNo: "",
   ediMasterNo: "",
   baggingRemark: "",
-  serviceCenter: emptyPair(),
+  serviceCenter: { code: defaultBranch, name: defaultBranch },
   destCountry: emptyPair(),
   destCity: emptyPair(),
   flightNo1: emptyPair(),
   flightNo2: emptyPair(),
   arrivalDate: "",
+  arrivalTime: "",
+  destVendor: emptyPair(),
   isForwarding: false,
+  manifestType: "",
+  transferToUk: false,
   searchAwbBagNo: "",
   awbLines: [],
 });
@@ -367,237 +320,53 @@ const emptyListFilters = (): ListFilters => ({
   format: "Format 1",
 });
 
-const lookupAwbLine = (draft: AwbDraft): Omit<BaggingAwbLine, "id"> => {
-  const meta = SEED_AWB_META[draft.awbNo.trim()];
-  return {
-    bagNo: draft.bagNo.trim() || "1",
-    crnMhbsNo: draft.crnMhbsNo.trim(),
-    forwardingNo: draft.forwardingNo.trim(),
-    awbNo: draft.awbNo.trim(),
-    weight: draft.weight.trim() || meta?.weight || "10.000",
-    pcs: draft.pcs.trim() || meta?.pcs || "1",
-    shipper: meta?.shipper || "SAMPLE SHIPPER",
-    consignee: meta?.consignee || "SAMPLE CONSIGNEE",
-    vendor: meta?.vendor || "DTDC AUSTRALIA",
-    airline: meta?.airline || "QF",
-    service: meta?.service || "SPX",
-  };
-};
+const formatAwbInBagLabel = (line: BaggingAwbLineDto) =>
+  `${line.awbNo} (Weight [${line.weight}] PCS[${line.pcs}]${line.crnMhbsNo ? ` CRN No. [${line.crnMhbsNo}]` : ""})`;
 
-const composeMasterAwbNo = (form: BaggingForm) => {
-  const parts = [form.masterAirlinesPrefix, form.masterAwbNoPart, form.masterNoPart3]
-    .map((p) => p.trim())
-    .filter(Boolean);
-  if (parts.length > 0) return parts.join("");
-  return form.mawbMasterNo.trim();
-};
-
-const formToRow = (form: BaggingForm, id: string, existing?: BaggingRow): BaggingRow => {
-  const totalWeight = form.awbLines.reduce((sum, line) => sum + parseWeight(line.weight), 0);
-  const masterAwbNo = composeMasterAwbNo(form) || existing?.masterAwbNo || "";
-  const shipment = form.awbLines.length || existing?.shipment || 0;
-  const weight =
-    form.awbLines.length > 0 ? formatWeight(totalWeight) : existing?.weight || "0.000";
-  return {
-    id,
-    manifestNo: form.manifestNo.trim() || existing?.manifestNo || "0",
-    masterAwbNo,
-    date: form.date,
-    origin: form.originCity.code.trim() || form.originCity.name.trim(),
-    from: form.originCity.code.trim() || form.originCity.name.trim(),
-    to: form.destCity.code.trim() || form.destCity.name.trim(),
-    destination: form.destCity.code.trim() || form.destCity.name.trim(),
-    vendorName: form.vendor.name.trim() || form.vendor.code.trim(),
-    shipment,
-    weight,
-    form: {
-      ...form,
-      awbLines: form.awbLines.map((line) => ({ ...line })),
-    },
-  };
-};
-
-const nextManifestNo = (rows: BaggingRow[]) => {
-  const max = rows.reduce((acc, row) => {
-    const part = Number.parseInt(row.manifestNo, 10);
-    return Number.isFinite(part) ? Math.max(acc, part) : acc;
-  }, 0);
-  return String(max + 1).padStart(4, "0");
-};
-
-const formatAwbInBagLabel = (line: BaggingAwbLine) =>
-  `${line.awbNo} (Weight [${line.weight}] PCS[${line.pcs}]CRN No. [${line.crnMhbsNo}])`;
-
-const maxBagNo = (lines: BaggingAwbLine[]) => {
+const maxBagNo = (lines: BaggingAwbLineDto[]) => {
   const nums = lines.map((line) => Number.parseInt(line.bagNo, 10)).filter(Number.isFinite);
   return nums.length === 0 ? 1 : Math.max(...nums);
 };
-
-const buildSeedForm = (partial: Partial<BaggingForm> & { awbLines?: BaggingAwbLine[] }): BaggingForm => ({
-  ...emptyForm(),
-  ...partial,
-  awbLines: partial.awbLines ?? [],
-});
-
-const buildSeed0044AwbLines = (): BaggingAwbLine[] => {
-  const lines: BaggingAwbLine[] = [];
-  const bagSpecs: { bagNo: string; awbs: { awbNo: string; weight: string; pcs: string; crn?: string }[] }[] = [
-    { bagNo: "1", awbs: [{ awbNo: "30403310", weight: "17.000", pcs: "1" }] },
-    { bagNo: "2", awbs: [{ awbNo: "30403311", weight: "8.000", pcs: "1" }, { awbNo: "30403312", weight: "8.000", pcs: "1" }] },
-    { bagNo: "3", awbs: [{ awbNo: "30403313", weight: "20.000", pcs: "2" }] },
-    { bagNo: "4", awbs: [{ awbNo: "30403314", weight: "11.500", pcs: "1" }, { awbNo: "30403315", weight: "11.500", pcs: "1" }] },
-  ];
-
-  for (let bag = 5; bag <= 51; bag++) {
-    bagSpecs.push({
-      bagNo: String(bag),
-      awbs: [{ awbNo: String(30403315 + bag), weight: formatWeight(1139.05 / 47), pcs: "1" }],
-    });
-  }
-
-  bagSpecs.push({
-    bagNo: "52",
-    awbs: [{ awbNo: "30403464", weight: "22.850", pcs: "1", crn: "A10020752" }],
-  });
-
-  for (const spec of bagSpecs) {
-    for (const awb of spec.awbs) {
-      lines.push({
-        id: crypto.randomUUID(),
-        bagNo: spec.bagNo,
-        awbNo: awb.awbNo,
-        crnMhbsNo: awb.crn ?? `A100207${spec.bagNo.padStart(2, "0")}`,
-        forwardingNo: "",
-        weight: awb.weight,
-        pcs: awb.pcs,
-        shipper: awb.awbNo === "30403464" ? "TPC ADDANKI" : "SAMPLE SHIPPER",
-        consignee: awb.awbNo === "30403464" ? "ELURI SIVARAMAKRISHNA" : "SAMPLE CONSIGNEE",
-        vendor: "DTDC AUSTRALIA",
-        airline: "AIR ASIA",
-        service: "SPX",
-      });
-    }
-  }
-
-  return lines;
-};
-
-const SEED_0044_FORM: BaggingForm = buildSeedForm({
-  manifestNo: "0044",
-  date: "2026-07-02",
-  originCity: { code: "HYD", name: "HYDERABAD" },
-  originCountry: { code: "IN", name: "INDIA" },
-  airlinesCode: { code: "", name: "AIR ASIA" },
-  arrivalAirport: "AUS",
-  masterAirlinesPrefix: "807",
-  masterAwbNoPart: "3814",
-  masterNoPart3: "2580",
-  mawbMasterNo: "80738142580",
-  vendor: { code: "DTAU", name: "DTDC AUSTRALIA" },
-  cdNo: "",
-  ediMasterNo: "A100207",
-  baggingRemark: "",
-  serviceCenter: { code: "MEL", name: "MELBOURNE" },
-  destCountry: { code: "AU", name: "AUSTRALIA" },
-  destCity: { code: "MEL", name: "MELBOURNE" },
-  flightNo1: { code: "Ak068", name: "Air Asia 15" },
-  flightNo2: { code: "GA716", name: "AIR ASIA 21" },
-  arrivalDate: "2026-07-05",
-  isForwarding: false,
-  searchAwbBagNo: "",
-  awbLines: buildSeed0044AwbLines(),
-});
-
-const SEED_ROWS: BaggingRow[] = [
-  {
-    id: "seed-0044",
-    manifestNo: "0044",
-    masterAwbNo: "80738142580",
-    date: "2026-07-02",
-    origin: "HYD",
-    from: "HYD",
-    to: "MEL",
-    destination: "MEL",
-    vendorName: "DTDC AUSTRALIA",
-    shipment: 51,
-    weight: "1237.900",
-    form: SEED_0044_FORM,
-  },
-  {
-    id: "seed-0043",
-    manifestNo: "0043",
-    masterAwbNo: "80738142580",
-    date: "2026-07-02",
-    origin: "BLR",
-    from: "BLR",
-    to: "AKL",
-    destination: "AKL",
-    vendorName: "DTDC NEWZEALAND",
-    shipment: 47,
-    weight: "985.500",
-    form: buildSeedForm({
-      manifestNo: "0043",
-      date: "2026-07-02",
-      originCity: { code: "BLR", name: "BLR" },
-      originCountry: { code: "IN", name: "INDIA" },
-      vendor: { code: "DTNZ", name: "DTDC NEWZEALAND" },
-      destCity: { code: "AKL", name: "AUCKLAND" },
-      destCountry: { code: "NZ", name: "NEW ZEALAND" },
-      mawbMasterNo: "80738142580",
-      serviceCenter: { code: "BLR", name: "BLR" },
-      flightNo1: { code: "NZ456", name: "NZ456" },
-    }),
-  },
-  ...[
-    { no: "0042", origin: "HYD", to: "MEL", vendor: "DTDC AUSTRALIA", shipment: 44, weight: "1102.300" },
-    { no: "0041", origin: "HYD", to: "SYD", vendor: "DTDC AUSTRALIA", shipment: 38, weight: "892.150" },
-    { no: "0040", origin: "BLR", to: "AKL", vendor: "DTDC NEWZEALAND", shipment: 35, weight: "756.800" },
-    { no: "0039", origin: "HYD", to: "MEL", vendor: "DTDC AUSTRALIA", shipment: 42, weight: "998.400" },
-    { no: "0038", origin: "HYD", to: "BNE", vendor: "DTDC AUSTRALIA", shipment: 29, weight: "645.200" },
-    { no: "0037", origin: "BLR", to: "AKL", vendor: "DTDC NEWZEALAND", shipment: 33, weight: "712.600" },
-    { no: "0036", origin: "HYD", to: "MEL", vendor: "DTDC AUSTRALIA", shipment: 40, weight: "934.100" },
-    { no: "0035", origin: "HYD", to: "PER", vendor: "DTDC AUSTRALIA", shipment: 27, weight: "589.750" },
-  ].map((item) => ({
-    id: `seed-${item.no}`,
-    manifestNo: item.no,
-    masterAwbNo: "80738142580",
-    date: "2026-07-02",
-    origin: item.origin,
-    from: item.origin,
-    to: item.to,
-    destination: item.to,
-    vendorName: item.vendor,
-    shipment: item.shipment,
-    weight: item.weight,
-    form: buildSeedForm({
-      manifestNo: item.no,
-      date: "2026-07-02",
-      originCity: { code: item.origin, name: item.origin },
-      originCountry: { code: "IN", name: "INDIA" },
-      vendor: { code: item.vendor.includes("NEW") ? "DTNZ" : "DTAU", name: item.vendor },
-      destCity: { code: item.to, name: item.to },
-      mawbMasterNo: "80738142580",
-      serviceCenter: { code: item.origin, name: item.origin },
-    }),
-  })),
-];
 
 export const Route = createFileRoute("/transaction/bagging")({
   head: () => ({
     meta: [
       { title: "Bagging — Transaction — Courier ERP" },
-      { name: "description", content: "Create and manage bagging manifests with AWB scanning." },
+      { name: "description", content: "Create and manage bagging manifests with live AWB scanning." },
     ],
   }),
   component: BaggingPage,
 });
 
 function BaggingPage() {
+  const { isAuthenticated: authed, profile } = useAuth();
+  const queryClient = useQueryClient();
   const importInputRef = useRef<HTMLInputElement>(null);
+
+  // User Branch lookup for defaulting
+  const userBranchQuery = useQuery({
+    queryKey: ["userBranch", profile?.home_branch_id],
+    queryFn: async () => {
+      if (!profile?.home_branch_id) return null;
+      const { data, error } = await supabase
+        .from("branches")
+        .select("id, code, name")
+        .eq("id", profile.home_branch_id)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data as { id: string; code: string; name: string };
+    },
+    enabled: Boolean(authed && profile?.home_branch_id),
+  });
+
+  const defaultBranchCode =
+    userBranchQuery.data?.code ||
+    (profile as unknown as { branchCode?: string })?.branchCode ||
+    "HYD";
+
   const [view, setView] = useState<PageView>("list");
-  const [rows, setRows] = useState<BaggingRow[]>(SEED_ROWS);
-  const [editing, setEditing] = useState<BaggingRow | null>(null);
-  const [form, setForm] = useState<BaggingForm>(emptyForm());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<BaggingHeaderDto>(() => emptyForm(defaultBranchCode));
   const [awbDraft, setAwbDraft] = useState<AwbDraft>(emptyAwbDraft());
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
   const [awbInBagSearch, setAwbInBagSearch] = useState("");
@@ -605,65 +374,77 @@ function BaggingPage() {
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState(emptyColFilters);
   const [page, setPage] = useState(1);
-  const [deleteTarget, setDeleteTarget] = useState<BaggingRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BaggingListRow | null>(null);
+
+  // Dialog states
   const [progressOpen, setProgressOpen] = useState(false);
   const [progressMode, setProgressMode] = useState<ProgressMode>("add");
-  const [progressManifest, setProgressManifest] = useState<BaggingRow | null>(null);
+  const [progressManifest, setProgressManifest] = useState<BaggingListRow | null>(null);
   const [progressForm, setProgressForm] = useState<ProgressForm>(emptyProgressForm);
+
   const [downloadAllOpen, setDownloadAllOpen] = useState(false);
-  const [downloadAllRow, setDownloadAllRow] = useState<BaggingRow | null>(null);
+  const [downloadAllRow, setDownloadAllRow] = useState<BaggingListRow | null>(null);
   const [downloadAllForm, setDownloadAllForm] = useState<DownloadAllForm>(emptyDownloadAllForm);
+
   const [downloadTiffOpen, setDownloadTiffOpen] = useState(false);
   const [downloadTiffAllMode, setDownloadTiffAllMode] = useState(false);
-  const [downloadTiffRow, setDownloadTiffRow] = useState<BaggingRow | null>(null);
+  const [downloadTiffRow, setDownloadTiffRow] = useState<BaggingListRow | null>(null);
   const [downloadTiffForm, setDownloadTiffForm] = useState<DownloadTiffForm>(emptyDownloadTiffForm());
 
-  const patchForm = (patch: Partial<BaggingForm>) => setForm((f) => ({ ...f, ...patch }));
+  const [csbExportOpen, setCsbExportOpen] = useState(false);
+  const [csbExportRow, setCsbExportRow] = useState<BaggingListRow | null>(null);
+  const [csbExportForm, setCsbExportForm] = useState<CsbExportForm>(emptyCsbExportForm());
+
+  const [bagLabelOpen, setBagLabelOpen] = useState(false);
+  const [bagLabelRow, setBagLabelRow] = useState<BaggingListRow | null>(null);
+  const [bagLabelForm, setBagLabelForm] = useState<PrintBagLabelForm>(emptyPrintBagLabelForm());
+
+  // Keep branch default updated
+  useEffect(() => {
+    if (defaultBranchCode && form.originCity.code === "HYD" && defaultBranchCode !== "HYD") {
+      setForm((f) => ({
+        ...f,
+        originCity: { code: defaultBranchCode, name: defaultBranchCode },
+        serviceCenter: { code: defaultBranchCode, name: defaultBranchCode },
+      }));
+    }
+  }, [defaultBranchCode, form.originCity.code]);
+
+  // Live Query: List Bagging Manifests
+  const { data: dbRows = [], isLoading, refetch } = useQuery({
+    queryKey: ["baggings", listFilters.vendor.code, search],
+    queryFn: () =>
+      listBaggings({
+        vendorCode: listFilters.vendor.code || undefined,
+        search: search || undefined,
+        limit: 100,
+      }),
+    enabled: authed,
+  });
+
+  const rows: BaggingListRow[] = authed ? dbRows : [];
+
+  const patchForm = (patch: Partial<BaggingHeaderDto>) => setForm((f) => ({ ...f, ...patch }));
   const patchProgress = (patch: Partial<ProgressForm>) => setProgressForm((f) => ({ ...f, ...patch }));
 
+  // Client filtering on top of server data
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
     return rows.filter((row) => {
-      const d = formatDisplayDate(row.date);
-      if (listFilters.product.code && !row.form.originCity.code.includes(listFilters.product.code)) return false;
-      if (listFilters.product.name && !row.vendorName.toLowerCase().includes(listFilters.product.name.toLowerCase())) {
-        // product filter loosely matches vendor in demo data
-      }
-      if (listFilters.vendor.code && row.form.vendor.code !== listFilters.vendor.code) return false;
-      if (listFilters.vendor.name && !row.vendorName.toLowerCase().includes(listFilters.vendor.name.toLowerCase())) {
-        return false;
-      }
-      if (q) {
-        const hay = [
-          row.manifestNo,
-          row.masterAwbNo,
-          d,
-          row.origin,
-          row.from,
-          row.to,
-          row.destination,
-          row.vendorName,
-          String(row.shipment),
-          row.weight,
-        ]
-          .join(" ")
-          .toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
+      const d = formatDisplayDate(row.manifest_date);
       const cf = colFilters;
-      if (cf.manifestNo && !row.manifestNo.toLowerCase().includes(cf.manifestNo.toLowerCase())) return false;
-      if (cf.masterAwbNo && !row.masterAwbNo.toLowerCase().includes(cf.masterAwbNo.toLowerCase())) return false;
+      if (cf.manifestNo && !row.manifest_no.toLowerCase().includes(cf.manifestNo.toLowerCase())) return false;
+      if (cf.masterAwbNo && !row.master_awb_no.toLowerCase().includes(cf.masterAwbNo.toLowerCase())) return false;
       if (cf.date && !d.includes(cf.date)) return false;
       if (cf.origin && !row.origin.toLowerCase().includes(cf.origin.toLowerCase())) return false;
-      if (cf.from && !row.from.toLowerCase().includes(cf.from.toLowerCase())) return false;
-      if (cf.to && !row.to.toLowerCase().includes(cf.to.toLowerCase())) return false;
+      if (cf.from && !row.from_city.toLowerCase().includes(cf.from.toLowerCase())) return false;
+      if (cf.to && !row.to_city.toLowerCase().includes(cf.to.toLowerCase())) return false;
       if (cf.destination && !row.destination.toLowerCase().includes(cf.destination.toLowerCase())) return false;
-      if (cf.vendor && !row.vendorName.toLowerCase().includes(cf.vendor.toLowerCase())) return false;
-      if (cf.shipment && !String(row.shipment).includes(cf.shipment)) return false;
-      if (cf.weight && !row.weight.includes(cf.weight)) return false;
+      if (cf.vendor && !row.vendor_name.toLowerCase().includes(cf.vendor.toLowerCase())) return false;
+      if (cf.shipment && !String(row.total_awbs).includes(cf.shipment)) return false;
+      if (cf.weight && !String(row.total_weight).includes(cf.weight)) return false;
       return true;
     });
-  }, [rows, search, colFilters, listFilters]);
+  }, [rows, colFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -671,11 +452,11 @@ function BaggingPage() {
   const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const endIdx = Math.min(currentPage * PAGE_SIZE, filtered.length);
 
-  const selectedLine = form.awbLines.find((line) => line.id === selectedLineId) ?? null;
+  const selectedLine = (form.awbLines || []).find((line) => line.id === selectedLineId) ?? null;
 
   const awbInBagLines = useMemo(() => {
     const q = awbInBagSearch.trim().toLowerCase();
-    return form.awbLines.filter(
+    return (form.awbLines || []).filter(
       (line) =>
         !q ||
         line.awbNo.toLowerCase().includes(q) ||
@@ -685,7 +466,7 @@ function BaggingPage() {
 
   const bagSummaries = useMemo(() => {
     const map = new Map<string, { awbCount: number; weight: number }>();
-    for (const line of form.awbLines) {
+    for (const line of form.awbLines || []) {
       const cur = map.get(line.bagNo) ?? { awbCount: 0, weight: 0 };
       map.set(line.bagNo, {
         awbCount: cur.awbCount + 1,
@@ -702,109 +483,129 @@ function BaggingPage() {
   }, [form.awbLines]);
 
   const summary = useMemo(() => {
-    const bagNos = new Set(form.awbLines.map((line) => line.bagNo).filter(Boolean));
-    const totalPieces = form.awbLines.reduce((sum, line) => sum + (Number.parseInt(line.pcs, 10) || 0), 0);
-    const totalWeight = form.awbLines.reduce((sum, line) => sum + parseWeight(line.weight), 0);
-    const currentBagWeight = form.awbLines
+    const lines = form.awbLines || [];
+    const bagNos = new Set(lines.map((line) => line.bagNo).filter(Boolean));
+    const totalPieces = lines.reduce((sum, line) => sum + (Number.parseInt(line.pcs, 10) || 0), 0);
+    const totalWeight = lines.reduce((sum, line) => sum + parseWeight(line.weight), 0);
+    const currentBagWeight = lines
       .filter((line) => line.bagNo === awbDraft.bagNo)
       .reduce((sum, line) => sum + parseWeight(line.weight), 0);
-    const maxBag = Math.max(maxBagNo(form.awbLines), Number.parseInt(awbDraft.bagNo, 10) || 0);
+    const maxBag = Math.max(maxBagNo(lines), Number.parseInt(awbDraft.bagNo, 10) || 0);
     return {
       bagWeight: formatWeight(currentBagWeight),
       consigneePinCode: "",
       totalBagNo: bagNos.size > 0 ? maxBag : 0,
       totalPieces,
-      totalAwbNo: form.awbLines.length,
-      totalWeight: form.awbLines.length > 0 ? formatWeight(totalWeight) : editing?.weight || "0.000",
+      totalAwbNo: lines.length,
+      totalWeight: lines.length > 0 ? formatWeight(totalWeight) : "0.000",
     };
-  }, [form.awbLines, awbDraft.bagNo, editing]);
+  }, [form.awbLines, awbDraft.bagNo]);
 
-  const openAdd = () => {
-    setEditing(null);
-    setForm({ ...emptyForm(), date: todayIso(), manifestNo: nextManifestNo(rows) });
+  const openAdd = (prefill?: Partial<BaggingHeaderDto>) => {
+    setEditingId(null);
+    setForm({
+      ...emptyForm(defaultBranchCode),
+      date: todayIso(),
+      manifestNo: "0",
+      ...(prefill || {}),
+    });
     setAwbDraft(emptyAwbDraft());
     setSelectedLineId(null);
     setAwbInBagSearch("");
     setView("entry");
   };
 
-  const openEntry = (row: BaggingRow) => {
-    setEditing(row);
-    const loadedForm = {
-      ...row.form,
-      awbLines: row.form.awbLines.map((line) => ({ ...line })),
-    };
-    setForm(loadedForm);
-    const nextBag = String(maxBagNo(loadedForm.awbLines) || 1);
-    setAwbDraft({ ...emptyAwbDraft(), bagNo: nextBag });
-    const featured = loadedForm.awbLines.find((line) => line.awbNo === "30403464");
-    setSelectedLineId(featured?.id ?? loadedForm.awbLines[0]?.id ?? null);
-    setAwbInBagSearch("");
-    setView("entry");
+  const openEntry = async (row: BaggingListRow) => {
+    try {
+      const details = await getBaggingDetails(row.id);
+      if (!details) {
+        toast.error("Failed to load bagging details");
+        return;
+      }
+      setEditingId(row.id);
+      setForm(details);
+      const nextBag = String(maxBagNo(details.awbLines || []) || 1);
+      setAwbDraft({ ...emptyAwbDraft(), bagNo: nextBag });
+      setSelectedLineId(details.awbLines?.[0]?.id ?? null);
+      setAwbInBagSearch("");
+      setView("entry");
+    } catch (err) {
+      toast.error(`Error opening bagging: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const duplicateEntry = async (row: BaggingListRow) => {
+    try {
+      const details = await getBaggingDetails(row.id);
+      if (!details) return;
+      openAdd({
+        ...details,
+        id: undefined,
+        manifestNo: "0",
+        date: todayIso(),
+      });
+      toast.success(`Duplicating manifest ${row.manifest_no} — ready for new save`);
+    } catch (err) {
+      toast.error("Failed to duplicate manifest");
+    }
   };
 
   const closeEntry = () => {
     setView("list");
-    setEditing(null);
-    setForm(emptyForm());
+    setEditingId(null);
+    setForm(emptyForm(defaultBranchCode));
     setAwbDraft(emptyAwbDraft());
     setSelectedLineId(null);
     setAwbInBagSearch("");
   };
 
-  const persistEntry = () => {
-    if (!form.manifestNo.trim() || form.manifestNo.trim() === "0") {
-      return toast.error("Manifest No is required");
-    }
-    if (!form.date.trim()) {
-      return toast.error("Date is required");
-    }
-    if (!form.originCity.code.trim() && !form.originCity.name.trim()) {
-      return toast.error("Origin City is required");
-    }
-    if (!form.originCountry.code.trim() && !form.originCountry.name.trim()) {
-      return toast.error("Origin Country is required");
-    }
-    if (!form.vendor.code.trim() && !form.vendor.name.trim()) {
-      return toast.error("Vendor is required");
-    }
-    if (!form.serviceCenter.code.trim() && !form.serviceCenter.name.trim()) {
-      return toast.error("Service Center is required");
-    }
-    if (!form.destCity.code.trim() && !form.destCity.name.trim()) {
-      return toast.error("Dest City is required");
-    }
-    if (!form.flightNo1.code.trim() && !form.flightNo1.name.trim()) {
-      return toast.error("Flight No 1 is required");
-    }
+  // Save Mutation
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!form.originCity.code.trim() && !form.originCity.name.trim()) {
+        throw new Error("Origin City is required");
+      }
+      if (!form.vendor.code.trim() && !form.vendor.name.trim()) {
+        throw new Error("Vendor is required");
+      }
+      if (!form.serviceCenter.code.trim() && !form.serviceCenter.name.trim()) {
+        throw new Error("Service Center is required");
+      }
+      if (!form.destCity.code.trim() && !form.destCity.name.trim()) {
+        throw new Error("Dest City is required");
+      }
+      if (!form.flightNo1.code.trim() && !form.flightNo1.name.trim()) {
+        throw new Error("Flight No 1 is required");
+      }
 
-    const payloadForm: BaggingForm = {
-      ...form,
-      date: form.date || todayIso(),
-      manifestNo: form.manifestNo.trim() || nextManifestNo(rows),
-    };
-    const payload = formToRow(payloadForm, editing?.id ?? crypto.randomUUID(), editing ?? undefined);
+      return await recordBagging(editingId, form, form.awbLines || []);
+    },
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["baggings"] });
+      toast.success(`Bagging manifest ${res.manifest_no} saved successfully (${res.total_bags} bags, ${res.total_awbs} AWBs)`);
+      closeEntry();
+    },
+    onError: (err) => {
+      toast.error(`Save error: ${err instanceof Error ? err.message : String(err)}`);
+    },
+  });
 
-    if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? payload : r)));
-      toast.success("Bagging manifest saved");
-    } else {
-      setRows((prev) => [payload, ...prev]);
-      toast.success("Bagging manifest created");
-    }
-    closeEntry();
-  };
-
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success(`Deleted manifest ${deleteTarget.manifestNo}`);
-    setDeleteTarget(null);
+    try {
+      await deleteBagging(deleteTarget.id);
+      queryClient.invalidateQueries({ queryKey: ["baggings"] });
+      toast.success(`Deleted manifest ${deleteTarget.manifest_no}`);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const handleRefresh = () => {
     setPage(1);
-    toast.success("List refreshed");
+    refetch();
+    toast.success("List refreshed from database");
   };
 
   const clearColFilters = () => {
@@ -814,196 +615,43 @@ function BaggingPage() {
     toast.success("Filters cleared");
   };
 
-  const exportBaggingRowCsv = (row: BaggingRow, linesOverride?: BaggingAwbLine[]) => {
-    const safeName = row.manifestNo.replace(/\//g, "-");
-    const lines = linesOverride ?? row.form.awbLines;
-    if (lines.length === 0) {
-      downloadCsv(
-        `${safeName}.csv`,
-        ["Manifest No", "Master AWBNo", "Date", "Vendor", "Shipment", "Weight"],
-        [[row.manifestNo, row.masterAwbNo, formatDisplayDate(row.date), row.vendorName, String(row.shipment), row.weight]],
-      );
-    } else {
-      downloadCsv(
-        `${safeName}.csv`,
-        ["Bag No", "CRN MHBS No", "Forwarding No", "AWB No", "Weight", "PCS"],
-        lines.map((line) => [
-          line.bagNo,
-          line.crnMhbsNo,
-          line.forwardingNo,
-          line.awbNo,
-          line.weight,
-          line.pcs,
-        ]),
-      );
-    }
-    toast.success(`Exported ${safeName}.csv`);
-  };
-
-  const exportRowCsv = (row: BaggingRow) => exportBaggingRowCsv(row);
-
-  const exportRowCsvM = (row: BaggingRow) => {
-    const safeName = `${row.manifestNo.replace(/\//g, "-")}-m`;
-    downloadCsv(
-      `${safeName}.csv`,
-      ["ManifestNo", "MasterAWBNo", "AWBNo", "BagNo", "Weight", "PCS"],
-      row.form.awbLines.length > 0
-        ? row.form.awbLines.map((line) => [
-            row.manifestNo,
-            row.masterAwbNo,
-            line.awbNo,
-            line.bagNo,
-            line.weight,
-            line.pcs,
-          ])
-        : [[row.manifestNo, row.masterAwbNo, "", "", row.weight, String(row.shipment)]],
-    );
-    toast.success(`Exported ${safeName}.csv`);
-  };
-
-  const exportRowCsb = (row: BaggingRow) => {
-    const safeName = `${row.manifestNo.replace(/\//g, "-")}.csb`;
-    downloadCsv(
-      safeName,
-      ["Manifest", "MasterAWB", "Origin", "Destination", "Vendor", "Shipment", "Weight"],
-      [[row.manifestNo, row.masterAwbNo, row.origin, row.destination, row.vendorName, String(row.shipment), row.weight]],
-    );
-    toast.success(
-      `Exported ${safeName} (local). Full CSB-III/IV/V sandbox export is under Utility → Integration Configuration.`,
-    );
-  };
-
-  const openAddProgress = (row: BaggingRow) => {
-    setProgressManifest(row);
-    setProgressMode("add");
-    setProgressForm({
-      ...emptyProgressForm(),
-      serviceCentre: row.form.serviceCenter.code
-        ? row.form.serviceCenter
-        : { code: row.origin || "HYD", name: row.origin || "HYD" },
-    });
-    setProgressOpen(true);
-  };
-
-  const closeAddProgress = () => {
-    setProgressOpen(false);
-    setProgressManifest(null);
-    setProgressMode("add");
-    setProgressForm(emptyProgressForm());
-  };
-
-  const handleProgressSave = () => {
-    if (!progressForm.serviceCentre.code.trim() && !progressForm.serviceCentre.name.trim()) {
-      return toast.error("Service Centre is required");
-    }
-    const action = progressMode === "add" ? "added" : "deleted";
-    toast.success(`Progress ${action} for ${progressManifest?.manifestNo ?? "manifest"}`);
-    closeAddProgress();
-  };
-
-  const openDownloadAll = (row: BaggingRow) => {
-    setDownloadAllRow(row);
-    setDownloadAllForm(emptyDownloadAllForm());
-    setDownloadAllOpen(true);
-  };
-
-  const closeDownloadAll = () => {
-    setDownloadAllOpen(false);
-    setDownloadAllRow(null);
-    setDownloadAllForm(emptyDownloadAllForm());
-  };
-
-  const handleDownloadAllExport = () => {
-    if (!downloadAllRow) return;
-    let lines = downloadAllRow.form.awbLines;
-    const { fromBagNo, toBagNo, selectType } = downloadAllForm;
-    if (fromBagNo.trim() || toBagNo.trim()) {
-      const from = Number.parseInt(fromBagNo, 10);
-      const to = Number.parseInt(toBagNo, 10);
-      lines = lines.filter((line) => {
-        const bag = Number.parseInt(line.bagNo, 10);
-        if (!Number.isFinite(bag)) return true;
-        if (Number.isFinite(from) && bag < from) return false;
-        if (Number.isFinite(to) && bag > to) return false;
-        return true;
-      });
-    }
-    if (selectType === "Forwarding No 1" || selectType === "Forwarding No 2") {
-      lines = lines.filter((line) => line.forwardingNo.trim());
-    }
-    exportBaggingRowCsv(downloadAllRow, lines);
-    closeDownloadAll();
-  };
-
-  const openDownloadTiff = (row: BaggingRow, options?: { all?: boolean }) => {
-    setDownloadTiffRow(row);
-    setDownloadTiffAllMode(options?.all ?? false);
-    setDownloadTiffForm(emptyDownloadTiffForm(row.manifestNo));
-    setDownloadTiffOpen(true);
-  };
-
-  const closeDownloadTiff = () => {
-    setDownloadTiffOpen(false);
-    setDownloadTiffAllMode(false);
-    setDownloadTiffRow(null);
-    setDownloadTiffForm(emptyDownloadTiffForm());
-  };
-
-  const handleDownloadTiffExport = () => {
-    if (!downloadTiffRow) return;
-    if (!downloadTiffForm.selectType) return toast.error("Select Type is required");
-
-    let lines = downloadTiffRow.form.awbLines;
-    const { fromBagNo, toBagNo } = downloadTiffForm;
-    if (fromBagNo.trim() || toBagNo.trim()) {
-      const from = Number.parseInt(fromBagNo, 10);
-      const to = Number.parseInt(toBagNo, 10);
-      lines = lines.filter((line) => {
-        const bag = Number.parseInt(line.bagNo, 10);
-        if (!Number.isFinite(bag)) return true;
-        if (Number.isFinite(from) && bag < from) return false;
-        if (Number.isFinite(to) && bag > to) return false;
-        return true;
-      });
-    }
-
-    const safeName = `${downloadTiffRow.manifestNo.replace(/\//g, "-")}-${downloadTiffForm.selectType}`;
-    downloadCsv(
-      `${safeName}.csv`,
-      ["Run No", "Type", "Bag No", "AWB No", "Weight", "PCS"],
-      lines.length > 0
-        ? lines.map((line) => [
-            downloadTiffForm.runNo,
-            downloadTiffForm.selectType,
-            line.bagNo,
-            line.awbNo,
-            line.weight,
-            line.pcs,
-          ])
-        : [[downloadTiffForm.runNo, downloadTiffForm.selectType, "", "", downloadTiffRow.weight, ""]],
-    );
-    toast.success(
-      downloadTiffAllMode
-        ? `All Tiff export prepared for ${downloadTiffForm.runNo}`
-        : `Tiff export prepared for ${downloadTiffForm.runNo}`,
-    );
-    closeDownloadTiff();
-  };
-
-  const addAwbLine = () => {
-    const awb = awbDraft.awbNo.trim();
+  // Live AWB lookup and line addition
+  const addAwbLine = async () => {
+    const awb = awbDraft.awbNo.trim().toUpperCase();
     if (!awb) return toast.error("AWB No is required");
-    if (form.awbLines.some((line) => line.awbNo === awb)) {
-      return toast.error(`AWB ${awb} is already added`);
+    const lines = form.awbLines || [];
+    if (lines.some((line) => line.awbNo.toUpperCase() === awb)) {
+      return toast.error(`AWB ${awb} is already added to this manifest`);
     }
-    const line: BaggingAwbLine = {
+
+    // Try fetching real shipment details from database
+    let realData = null;
+    try {
+      realData = await fetchShipmentForBagging(awb);
+    } catch (e) {
+      console.warn("Could not lookup shipment:", e);
+    }
+
+    const newLine: BaggingAwbLineDto = {
       id: crypto.randomUUID(),
-      ...lookupAwbLine(awbDraft),
+      bagNo: awbDraft.bagNo.trim() || "1",
+      crnMhbsNo: awbDraft.crnMhbsNo.trim(),
+      forwardingNo: awbDraft.forwardingNo.trim() || realData?.forwarding_no || "",
+      awbNo: awb,
+      weight: awbDraft.weight.trim() || realData?.weight || "10.000",
+      pcs: awbDraft.pcs.trim() || realData?.pcs || "1",
+      shipper: realData?.shipper || "—",
+      consignee: realData?.consignee || "—",
+      vendor: realData?.vendor || form.vendor.name || form.vendor.code || "—",
+      airline: realData?.airline || form.airlinesCode.code || "—",
+      service: realData?.service || "SPX",
+      destination: realData?.destination || form.destCity.name || form.destCity.code || "—",
     };
-    patchForm({ awbLines: [...form.awbLines, line] });
-    setSelectedLineId(line.id);
+
+    patchForm({ awbLines: [...lines, newLine] });
+    setSelectedLineId(newLine.id);
     setAwbDraft((d) => ({ ...d, awbNo: "", forwardingNo: "", crnMhbsNo: "", weight: "" }));
-    toast.success(`AWB ${awb} added`);
+    toast.success(`AWB ${awb} added ${realData ? `(${realData.shipper} → ${realData.consignee})` : ""}`);
   };
 
   const incrementBagNo = () => {
@@ -1013,15 +661,304 @@ function BaggingPage() {
   };
 
   const removeAwbLine = (lineId: string) => {
-    patchForm({ awbLines: form.awbLines.filter((line) => line.id !== lineId) });
+    patchForm({ awbLines: (form.awbLines || []).filter((line) => line.id !== lineId) });
     if (selectedLineId === lineId) setSelectedLineId(null);
     toast.success("AWB removed");
   };
 
   const removeBagSummary = (bagNo: string) => {
-    patchForm({ awbLines: form.awbLines.filter((line) => line.bagNo !== bagNo) });
+    patchForm({ awbLines: (form.awbLines || []).filter((line) => line.bagNo !== bagNo) });
     if (selectedLine?.bagNo === bagNo) setSelectedLineId(null);
     toast.success(`Bag ${bagNo} removed`);
+  };
+
+  // Add Progress Handler
+  const handleProgressSave = async () => {
+    if (!progressManifest) return;
+    if (!progressForm.serviceCentre.code.trim() && !progressForm.serviceCentre.name.trim()) {
+      return toast.error("Service Centre is required");
+    }
+
+    try {
+      await recordBaggingProgress({
+        baggingId: progressManifest.id,
+        bagNo: progressForm.bagNo.trim(),
+        progressDate: progressForm.progressDate,
+        progressTime: progressForm.progressTime,
+        serviceCenterCode: progressForm.serviceCentre.code || progressForm.serviceCentre.name,
+        exceptionCode: progressForm.exception.code || progressForm.exception.name || "PROGRESS",
+        mode: progressMode,
+      });
+
+      const action = progressMode === "add" ? "added" : "deleted";
+      toast.success(`Progress ${action} for ${progressManifest.manifest_no} (persisted to tracking audit)`);
+      setProgressOpen(false);
+      setProgressManifest(null);
+      setProgressForm(emptyProgressForm());
+    } catch (err) {
+      toast.error(`Progress save error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // Print Bagging Manifest (Real HTML Print Sheet)
+  const handlePrintManifest = async (row?: BaggingListRow) => {
+    const target = row || (editingId ? { manifest_no: form.manifestNo, id: editingId } : null);
+    if (!target) return toast.error("No manifest selected for printing");
+
+    let details: BaggingHeaderDto | null = null;
+    if (editingId && !row) {
+      details = form;
+    } else if (row) {
+      details = await getBaggingDetails(row.id);
+    }
+
+    if (!details) return toast.error("Could not load manifest for printing");
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return toast.error("Popup blocked. Allow popups to print manifest.");
+
+    const lines = details.awbLines || [];
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Bagging Manifest — ${details.manifestNo}</title>
+          <style>
+            body { font-family: Arial, sans-serif; font-size: 11px; margin: 20px; color: #111; }
+            .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 8px; margin-bottom: 12px; }
+            .header h1 { margin: 0 0 4px; font-size: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
+            .meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 12px; margin-bottom: 12px; border-bottom: 1px dashed #777; padding-bottom: 8px; }
+            .meta div { font-size: 11px; }
+            .meta strong { color: #222; }
+            table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px; }
+            th, td { border: 1px solid #888; padding: 5px 6px; text-align: left; }
+            th { background-color: #f2f2f2; font-size: 10px; text-transform: uppercase; }
+            .totals { margin-top: 12px; font-weight: bold; display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 8px; font-size: 12px; }
+            .signatures { margin-top: 40px; display: flex; justify-content: space-between; }
+            .sig-line { width: 180px; border-top: 1px solid #333; text-align: center; padding-top: 4px; font-size: 10px; }
+            @media print { button { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>SwiftForge International — Bagging / Customs Manifest</h1>
+            <div>MANIFEST NO: <strong>${details.manifestNo}</strong> | DATE: <strong>${formatDisplayDate(details.date)}</strong> | TYPE: <strong>${details.manifestType || "Standard"}</strong></div>
+          </div>
+          <div class="meta">
+            <div><strong>Origin:</strong> ${details.originCity?.code || ""} (${details.originCountry?.code || ""})</div>
+            <div><strong>Destination:</strong> ${details.destCity?.code || ""} (${details.destCountry?.code || ""})</div>
+            <div><strong>Airline:</strong> ${details.airlinesCode?.name || details.airlinesCode?.code || "—"}</div>
+            <div><strong>Flight:</strong> ${details.flightNo1?.code || "—"} ${details.flightNo2?.code ? `/ ${details.flightNo2.code}` : ""}</div>
+            <div><strong>Master AWB:</strong> ${details.mawbMasterNo || "—"}</div>
+            <div><strong>EDI Master No:</strong> ${details.ediMasterNo || "—"}</div>
+            <div><strong>Vendor:</strong> ${details.vendor?.name || details.vendor?.code || "—"}</div>
+            <div><strong>Service Center:</strong> ${details.serviceCenter?.code || "—"}</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 25px;">#</th>
+                <th>Bag No</th>
+                <th>AWB No</th>
+                <th>CRN MHBS No</th>
+                <th>Forwarding No</th>
+                <th>Pcs</th>
+                <th>Weight (kg)</th>
+                <th>Shipper</th>
+                <th>Consignee</th>
+                <th>Destination</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${lines
+                .map(
+                  (l, idx) => `
+                <tr>
+                  <td>${idx + 1}</td>
+                  <td><strong>${l.bagNo}</strong></td>
+                  <td><strong>${l.awbNo}</strong></td>
+                  <td>${l.crnMhbsNo || "—"}</td>
+                  <td>${l.forwardingNo || "—"}</td>
+                  <td>${l.pcs}</td>
+                  <td>${l.weight}</td>
+                  <td>${l.shipper || "—"}</td>
+                  <td>${l.consignee || "—"}</td>
+                  <td>${l.destination || "—"}</td>
+                </tr>
+              `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+          <div class="totals">
+            <div>Total Bags: ${new Set(lines.map((l) => l.bagNo)).size}</div>
+            <div>Total AWBs: ${lines.length}</div>
+            <div>Total Pieces: ${lines.reduce((s, l) => s + (Number(l.pcs) || 0), 0)}</div>
+            <div>Total Weight: ${lines.reduce((s, l) => s + (Number(l.weight) || 0), 0).toFixed(3)} kg</div>
+          </div>
+          <div class="signatures">
+            <div class="sig-line">Prepared By (Manifest Officer)</div>
+            <div class="sig-line">Customs / Airline Acceptance</div>
+          </div>
+          <script>
+            window.onload = () => { window.print(); };
+          </script>
+        </body>
+      </html>
+    `;
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
+  // Print Bag Label Handler (Real Printable HTML Bag Tags)
+  const handlePrintBagLabels = async () => {
+    if (!bagLabelRow) return;
+    const details = await getBaggingDetails(bagLabelRow.id);
+    if (!details) return toast.error("Could not load bagging details");
+
+    const lines = details.awbLines || [];
+    const fromBag = Number.parseInt(bagLabelForm.fromBagNo, 10) || 1;
+    const toBag = Number.parseInt(bagLabelForm.toBagNo, 10) || maxBagNo(lines);
+
+    const bagNumbers = Array.from(new Set(lines.map((l) => Number.parseInt(l.bagNo, 10))))
+      .filter((n) => Number.isFinite(n) && n >= fromBag && n <= toBag)
+      .sort((a, b) => a - b);
+
+    if (bagNumbers.length === 0) {
+      return toast.error("No bags found in the specified range");
+    }
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return toast.error("Popup blocked. Allow popups to print bag labels.");
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Bag Labels — ${details.manifestNo}</title>
+          <style>
+            @page { size: 4in 6in; margin: 5mm; }
+            body { font-family: Arial, sans-serif; margin: 0; color: #000; }
+            .label-page { page-break-after: always; width: 3.8in; height: 5.6in; border: 2px solid #000; box-sizing: border-box; padding: 8px; display: flex; flex-direction: column; justify-content: space-between; }
+            .lbl-header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 4px; }
+            .lbl-header h2 { margin: 0; font-size: 16px; text-transform: uppercase; }
+            .route { font-size: 24px; font-weight: bold; margin: 6px 0; text-align: center; letter-spacing: 2px; }
+            .bag-banner { background: #000; color: #fff; text-align: center; font-size: 20px; font-weight: bold; padding: 4px; margin: 6px 0; }
+            .grid-info { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 11px; border-bottom: 1px dashed #444; padding-bottom: 6px; }
+            .grid-info div strong { font-size: 12px; }
+            .awb-list { font-size: 10px; margin-top: 4px; max-height: 120px; overflow: hidden; }
+            .remark-box { font-size: 10px; border-top: 1px solid #000; padding-top: 4px; margin-top: 4px; }
+            @media print { button { display: none; } }
+          </style>
+        </head>
+        <body>
+          ${bagNumbers
+            .map((bNo) => {
+              const bagLines = lines.filter((l) => Number.parseInt(l.bagNo, 10) === bNo);
+              const bWeight = bagLines.reduce((s, l) => s + parseWeight(l.weight), 0).toFixed(3);
+              const bPcs = bagLines.reduce((s, l) => s + (Number(l.pcs) || 0), 0);
+              return `
+                <div class="label-page">
+                  <div>
+                    <div class="lbl-header">
+                      <h2>SwiftForge Cargo Bag Tag</h2>
+                      <div>MANIFEST: <strong>${details.manifestNo}</strong> | DATE: ${formatDisplayDate(details.date)}</div>
+                    </div>
+                    <div class="route">
+                      ${details.originCity?.code || "HYD"} ➔ ${details.destCity?.code || "DEST"}
+                    </div>
+                    <div class="bag-banner">
+                      BAG NO: ${bNo} OF ${maxBagNo(lines)}
+                    </div>
+                    <div class="grid-info">
+                      <div><strong>WEIGHT:</strong> ${bWeight} KG</div>
+                      <div><strong>AWB COUNT:</strong> ${bagLines.length}</div>
+                      <div><strong>TOTAL PCS:</strong> ${bPcs}</div>
+                      <div><strong>FLIGHT:</strong> ${details.flightNo1?.code || "—"}</div>
+                      <div><strong>CARRIER:</strong> ${details.airlinesCode?.code || details.vendor?.code || "—"}</div>
+                      <div><strong>MAWB:</strong> ${details.mawbMasterNo || "—"}</div>
+                    </div>
+                    <div class="awb-list">
+                      <strong>AWBs IN THIS BAG:</strong><br/>
+                      ${bagLines.map((l) => l.awbNo).join(", ")}
+                    </div>
+                  </div>
+                  <div class="remark-box">
+                    <strong>REMARK:</strong> ${bagLabelForm.remark || details.baggingRemark || "AIR COURIER CARGO"}
+                  </div>
+                </div>
+              `;
+            })
+            .join("")}
+          <script>
+            window.onload = () => { window.print(); };
+          </script>
+        </body>
+      </html>
+    `;
+    printWindow.document.write(html);
+    printWindow.document.close();
+    setBagLabelOpen(false);
+  };
+
+  // Excel / CSV File Import Handler
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const text = String(evt.target?.result || "");
+      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length <= 1) {
+        toast.error("File is empty or contains only header");
+        return;
+      }
+
+      const headerLine = lines[0].toLowerCase();
+      const hasHeader = headerLine.includes("awb") || headerLine.includes("bag");
+      const dataRows = hasHeader ? lines.slice(1) : lines;
+
+      let imported = 0;
+      const currentLines = [...(form.awbLines || [])];
+
+      for (const rowText of dataRows) {
+        const cols = rowText.split(",").map((c) => c.replace(/["']/g, "").trim());
+        if (!cols[0]) continue;
+
+        // format: [BagNo, AWBNo, Weight, Pcs, ForwardingNo, CRN]
+        const bNo = cols.length >= 2 ? cols[0] : "1";
+        const awb = (cols.length >= 2 ? cols[1] : cols[0]).toUpperCase();
+        const wt = cols[2] || "10.000";
+        const pcs = cols[3] || "1";
+        const fwd = cols[4] || "";
+        const crn = cols[5] || "";
+
+        if (!currentLines.some((l) => l.awbNo === awb)) {
+          currentLines.push({
+            id: crypto.randomUUID(),
+            bagNo: bNo,
+            awbNo: awb,
+            crnMhbsNo: crn,
+            forwardingNo: fwd,
+            weight: wt,
+            pcs,
+            shipper: "—",
+            consignee: "—",
+            vendor: form.vendor.name || form.vendor.code || "—",
+            airline: form.airlinesCode.code || "—",
+            service: "SPX",
+            destination: form.destCity.name || form.destCity.code || "—",
+          });
+          imported++;
+        }
+      }
+
+      patchForm({ awbLines: currentLines });
+      toast.success(`Imported ${imported} AWB lines from file into bagging draft`);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
   };
 
   const awbInBagCount = summary.totalBagNo || bagSummaries.length;
@@ -1031,454 +968,537 @@ function BaggingPage() {
       <div className="flex min-w-0 flex-col gap-4 p-4 md:p-6">
         <MasterBreadcrumb trail={["Transaction", "Bagging"]} />
 
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-col gap-0.5">
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">
+              {editingId ? `Edit Bagging Manifest (${form.manifestNo})` : "New Bagging Manifest"}
+            </h1>
+            <p className="text-xs text-muted-foreground">
+              Consolidate physical bags, map flight & MAWB, and scan shipments.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePrintManifest()}
+              className="gap-1.5"
+            >
+              <Printer className="h-4 w-4" />
+              Print Manifest
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={closeEntry}
+            >
+              Back to List
+            </Button>
+          </div>
+        </div>
+
+        {/* Origin Panel */}
         <Card className="min-w-0 overflow-hidden border p-4 md:p-6">
           <div className={BG_GRID}>
-              <FieldWrapper
-                borderLabel
-                label="Manifest No"
-                required
-                invalid={!form.manifestNo.trim() || form.manifestNo.trim() === "0"}
-              >
-                <Input
-                  className={BG_INPUT}
-                  value={form.manifestNo}
-                  onChange={(e) => patchForm({ manifestNo: e.target.value })}
-                />
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="Date" required>
-                <Input
-                  type="date"
-                  className={BG_INPUT}
-                  value={form.date}
-                  onChange={(e) => patchForm({ date: e.target.value })}
-                />
-              </FieldWrapper>
-              <BaggingLookupField
-                label="Origin City"
-                lookup="destination"
-                value={form.originCity}
-                onChange={(originCity) => patchForm({ originCity })}
-                required
-                readOnlyCode
+            <FieldWrapper borderLabel label="Manifest No" required>
+              <Input
+                className={BG_INPUT}
+                value={form.manifestNo}
+                disabled
+                readOnly
+                placeholder="Auto-Allocated on Save"
               />
-              <FieldWrapper borderLabel label="Origin Country" required>
-                <DualPairInput
-                  value={form.originCountry}
-                  onChange={(originCountry) => patchForm({ originCountry })}
-                  inputClass={BG_INPUT}
-                />
-              </FieldWrapper>
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="Date" required>
+              <Input
+                type="date"
+                className={BG_INPUT}
+                value={form.date}
+                onChange={(e) => patchForm({ date: e.target.value })}
+              />
+            </FieldWrapper>
+            <BaggingLookupField
+              label="Origin City"
+              lookup="destination"
+              value={form.originCity}
+              onChange={(originCity) => patchForm({ originCity })}
+              required
+              readOnlyCode
+            />
+            <BaggingLookupField
+              label="Origin Country"
+              lookup="country"
+              value={form.originCountry}
+              onChange={(originCountry) => patchForm({ originCountry })}
+              required
+            />
 
-              <BaggingLookupField
-                label="Airlines Code"
-                lookup="destination"
-                value={form.airlinesCode}
-                onChange={(airlinesCode) => patchForm({ airlinesCode })}
-                required
+            <BaggingLookupField
+              label="Airlines Code"
+              lookup="airline"
+              value={form.airlinesCode}
+              onChange={(airlinesCode) => patchForm({ airlinesCode })}
+              required
+            />
+            <FieldWrapper borderLabel label="Arrival Airport">
+              <Input
+                className={BG_INPUT}
+                value={form.arrivalAirport}
+                onChange={(e) => patchForm({ arrivalAirport: e.target.value })}
               />
-              <FieldWrapper borderLabel label="Arrival Airport">
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="Master No">
+              <div className="grid min-w-0 flex-1 grid-cols-3 gap-0 divide-x divide-input">
                 <Input
                   className={BG_INPUT}
-                  value={form.arrivalAirport}
-                  onChange={(e) => patchForm({ arrivalAirport: e.target.value })}
+                  value={form.masterAirlinesPrefix}
+                  onChange={(e) => patchForm({ masterAirlinesPrefix: e.target.value })}
+                  placeholder="807"
                 />
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="Master No">
-                <div className="grid min-w-0 flex-1 grid-cols-3 gap-0 divide-x divide-input">
-                  <Input
-                    className={BG_INPUT}
-                    value={form.masterAirlinesPrefix}
-                    onChange={(e) => patchForm({ masterAirlinesPrefix: e.target.value })}
-                    placeholder="807"
-                  />
-                  <Input
-                    className={BG_INPUT}
-                    value={form.masterAwbNoPart}
-                    onChange={(e) => patchForm({ masterAwbNoPart: e.target.value })}
-                    placeholder="3814"
-                  />
-                  <Input
-                    className={BG_INPUT}
-                    value={form.masterNoPart3}
-                    onChange={(e) => patchForm({ masterNoPart3: e.target.value })}
-                    placeholder="2580"
-                  />
-                </div>
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="MAWB No.">
                 <Input
                   className={BG_INPUT}
-                  value={form.mawbMasterNo}
-                  onChange={(e) => patchForm({ mawbMasterNo: e.target.value })}
-                  placeholder="Master AWB No."
+                  value={form.masterAwbNoPart}
+                  onChange={(e) => patchForm({ masterAwbNoPart: e.target.value })}
+                  placeholder="3814"
                 />
-              </FieldWrapper>
+                <Input
+                  className={BG_INPUT}
+                  value={form.masterNoPart3}
+                  onChange={(e) => patchForm({ masterNoPart3: e.target.value })}
+                  placeholder="2580"
+                />
+              </div>
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="MAWB No.">
+              <Input
+                className={BG_INPUT}
+                value={form.mawbMasterNo}
+                onChange={(e) => patchForm({ mawbMasterNo: e.target.value })}
+                placeholder="Master AWB No."
+              />
+            </FieldWrapper>
 
-              <BaggingLookupField
-                label="Vendor"
-                lookup="vendor"
-                value={form.vendor}
-                onChange={(vendor) => patchForm({ vendor })}
-                required
+            <BaggingLookupField
+              label="Vendor"
+              lookup="vendor"
+              value={form.vendor}
+              onChange={(vendor) => patchForm({ vendor })}
+              required
+            />
+            <FieldWrapper borderLabel label="CD No.">
+              <Input className={BG_INPUT} value={form.cdNo} onChange={(e) => patchForm({ cdNo: e.target.value })} />
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="EDI Master No.">
+              <Input
+                className={BG_INPUT}
+                value={form.ediMasterNo}
+                onChange={(e) => patchForm({ ediMasterNo: e.target.value })}
               />
-              <FieldWrapper borderLabel label="CD No.">
-                <Input className={BG_INPUT} value={form.cdNo} onChange={(e) => patchForm({ cdNo: e.target.value })} />
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="EDI Master No.">
-                <Input
-                  className={BG_INPUT}
-                  value={form.ediMasterNo}
-                  onChange={(e) => patchForm({ ediMasterNo: e.target.value })}
-                />
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="Bagging Remark" className="xl:col-span-1">
-                <Textarea
-                  className="min-h-8 resize-none rounded-none border-0 bg-transparent px-1.5 py-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                  value={form.baggingRemark}
-                  onChange={(e) => patchForm({ baggingRemark: e.target.value })}
-                  rows={2}
-                />
-              </FieldWrapper>
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="Bagging Remark" className="xl:col-span-1">
+              <Textarea
+                className="min-h-8 resize-none rounded-none border-0 bg-transparent px-1.5 py-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                value={form.baggingRemark}
+                onChange={(e) => patchForm({ baggingRemark: e.target.value })}
+                rows={2}
+              />
+            </FieldWrapper>
           </div>
         </Card>
 
+        {/* Destination Panel */}
         <FormSection title="Destination">
-            <div className={BG_GRID}>
-              <BaggingLookupField
-                label="Service Center"
-                lookup="serviceCentre"
-                value={form.serviceCenter}
-                onChange={(serviceCenter) => patchForm({ serviceCenter })}
-                required
+          <div className={BG_GRID}>
+            <BaggingLookupField
+              label="Service Center"
+              lookup="serviceCentre"
+              value={form.serviceCenter}
+              onChange={(serviceCenter) => patchForm({ serviceCenter })}
+              required
+            />
+            <BaggingLookupField
+              label="Dest Country"
+              lookup="country"
+              value={form.destCountry}
+              onChange={(destCountry) => patchForm({ destCountry })}
+              required
+            />
+            <BaggingLookupField
+              label="Dest City"
+              lookup="destination"
+              value={form.destCity}
+              onChange={(destCity) => patchForm({ destCity })}
+              required
+            />
+            <BaggingLookupField
+              label="Flight No 1"
+              lookup="flight"
+              value={form.flightNo1}
+              onChange={(flightNo1) => patchForm({ flightNo1 })}
+              required
+            />
+            <BaggingLookupField
+              label="Flight No 2"
+              lookup="flight"
+              value={form.flightNo2}
+              onChange={(flightNo2) => patchForm({ flightNo2 })}
+            />
+            <FieldWrapper borderLabel label="Arrival Date">
+              <Input
+                type="date"
+                className={BG_INPUT}
+                value={form.arrivalDate}
+                onChange={(e) => patchForm({ arrivalDate: e.target.value })}
               />
-              <FieldWrapper borderLabel label="Dest Country" required>
-                <DualPairInput
-                  value={form.destCountry}
-                  onChange={(destCountry) => patchForm({ destCountry })}
-                  inputClass={BG_INPUT}
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="Time of Arrival">
+              <Input
+                className={BG_INPUT}
+                value={form.arrivalTime}
+                onChange={(e) => patchForm({ arrivalTime: e.target.value })}
+                placeholder="HH:mm"
+              />
+            </FieldWrapper>
+            <BaggingLookupField
+              label="Dest Vendor"
+              lookup="vendor"
+              value={form.destVendor}
+              onChange={(destVendor) => patchForm({ destVendor })}
+            />
+            <FieldWrapper borderLabel label="IsForwarding">
+              <div className="flex min-h-8 items-center px-1.5">
+                <Checkbox
+                  id="isForwarding"
+                  checked={form.isForwarding}
+                  onCheckedChange={(c) => patchForm({ isForwarding: c === true })}
                 />
-              </FieldWrapper>
-              <BaggingLookupField
-                label="Dest City"
-                lookup="destination"
-                value={form.destCity}
-                onChange={(destCity) => patchForm({ destCity })}
-                required
-              />
-              <BaggingLookupField
-                label="Flight No 1"
-                lookup="destination"
-                value={form.flightNo1}
-                onChange={(flightNo1) => patchForm({ flightNo1 })}
-                required
-              />
-              <BaggingLookupField
-                label="Flight No 2"
-                lookup="destination"
-                value={form.flightNo2}
-                onChange={(flightNo2) => patchForm({ flightNo2 })}
-              />
-              <FieldWrapper borderLabel label="Arrival Date">
+              </div>
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="Search AWB Bag No">
+              <div className="flex min-w-0 flex-1 items-stretch">
                 <Input
-                  type="date"
-                  className={BG_INPUT}
-                  value={form.arrivalDate}
-                  onChange={(e) => patchForm({ arrivalDate: e.target.value })}
+                  className={`min-w-0 flex-1 ${BG_INPUT}`}
+                  value={form.searchAwbBagNo || ""}
+                  onChange={(e) => patchForm({ searchAwbBagNo: e.target.value })}
+                  placeholder="Filter AWB in bags"
                 />
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="IsForwarding">
-                <div className="flex min-h-8 items-center px-1.5">
-                  <Checkbox
-                    id="isForwarding"
-                    checked={form.isForwarding}
-                    onCheckedChange={(c) => patchForm({ isForwarding: c === true })}
-                  />
-                </div>
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="Search AWB Bag No">
-                <div className="flex min-w-0 flex-1 items-stretch">
-                  <Input
-                    className={`min-w-0 flex-1 ${BG_INPUT}`}
-                    value={form.searchAwbBagNo}
-                    onChange={(e) => patchForm({ searchAwbBagNo: e.target.value })}
-                  />
-                  <Button
-                    className="h-8 shrink-0 rounded-none border-0 border-l border-input bg-sidebar px-3 text-sidebar-foreground hover:bg-sidebar/90"
-                    onClick={() => toast.info("Bag search will be enabled with backend wiring")}
-                  >
-                    Search
-                  </Button>
-                </div>
-              </FieldWrapper>
-            </div>
+                <Button
+                  className="h-8 shrink-0 rounded-none border-0 border-l border-input bg-sidebar px-3 text-sidebar-foreground hover:bg-sidebar/90"
+                  onClick={() => setAwbInBagSearch(form.searchAwbBagNo || "")}
+                >
+                  Search
+                </Button>
+              </div>
+            </FieldWrapper>
+          </div>
         </FormSection>
 
+        {/* Middle Three Columns */}
         <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
           <FormSection title={`AWB No in Bags (${awbInBagCount})`}>
-              <FieldWrapper borderLabel label="Search AWB No. In Bag">
-                <Input
-                  className={BG_INPUT}
-                  value={awbInBagSearch}
-                  onChange={(e) => setAwbInBagSearch(e.target.value)}
-                  placeholder="Type to search"
-                />
-              </FieldWrapper>
-              <div className="mt-3 max-h-56 overflow-y-auto rounded-md border">
-                <table className="w-full caption-bottom text-xs">
-                  <TableHeader>
-                    <TableRow className="bg-sidebar hover:bg-sidebar">
-                      <TableHead className="text-sidebar-foreground">AWB</TableHead>
-                      <TableHead className="w-10 text-center text-sidebar-foreground">Action</TableHead>
+            <FieldWrapper borderLabel label="Search AWB No. In Bag">
+              <Input
+                className={BG_INPUT}
+                value={awbInBagSearch}
+                onChange={(e) => setAwbInBagSearch(e.target.value)}
+                placeholder="Type to filter AWBs"
+              />
+            </FieldWrapper>
+            <div className="mt-3 max-h-56 overflow-y-auto rounded-md border">
+              <table className="w-full caption-bottom text-xs">
+                <TableHeader>
+                  <TableRow className="bg-sidebar hover:bg-sidebar">
+                    <TableHead className="text-sidebar-foreground">AWB</TableHead>
+                    <TableHead className="w-10 text-center text-sidebar-foreground">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {awbInBagLines.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={2} className="h-24 text-center text-muted-foreground">
+                        No AWBs in bag
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {awbInBagLines.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={2} className="h-24 text-center text-muted-foreground">
-                          No AWBs in bag
+                  ) : (
+                    awbInBagLines.map((line) => (
+                      <TableRow
+                        key={line.id}
+                        className={selectedLineId === line.id ? "bg-muted/40" : undefined}
+                      >
+                        <TableCell>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedLineId(line.id)}
+                            className="text-left hover:underline"
+                          >
+                            {formatAwbInBagLabel(line)}
+                          </button>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <IconButton
+                            label="Remove AWB"
+                            variant="ghost"
+                            size="row"
+                            className="text-destructive"
+                            onClick={() => removeAwbLine(line.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </IconButton>
                         </TableCell>
                       </TableRow>
-                    ) : (
-                      awbInBagLines.map((line) => (
-                        <TableRow
-                          key={line.id}
-                          className={selectedLineId === line.id ? "bg-muted/40" : undefined}
-                        >
-                          <TableCell>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedLineId(line.id)}
-                              className="text-left hover:underline"
-                            >
-                              {formatAwbInBagLabel(line)}
-                            </button>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <IconButton
-                              label="Remove AWB"
-                              variant="ghost"
-                              size="row"
-                              className="text-destructive"
-                              onClick={() => removeAwbLine(line.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </table>
-              </div>
+                    ))
+                  )}
+                </TableBody>
+              </table>
+            </div>
           </FormSection>
 
           <FormSection title="Details">
-              <div className="max-h-56 overflow-auto">
-                <table className="w-full caption-bottom text-xs">
-                  <TableHeader>
-                    <TableRow className="bg-sidebar hover:bg-sidebar">
-                      <TableHead className="text-sidebar-foreground">Bag No.</TableHead>
-                      <TableHead className="text-sidebar-foreground">AWB</TableHead>
-                      <TableHead className="text-sidebar-foreground">Weight</TableHead>
-                      <TableHead className="w-10 text-center text-sidebar-foreground">Action</TableHead>
+            <div className="max-h-56 overflow-auto">
+              <table className="w-full caption-bottom text-xs">
+                <TableHeader>
+                  <TableRow className="bg-sidebar hover:bg-sidebar">
+                    <TableHead className="text-sidebar-foreground">Bag No.</TableHead>
+                    <TableHead className="text-sidebar-foreground">AWB</TableHead>
+                    <TableHead className="text-sidebar-foreground">Weight</TableHead>
+                    <TableHead className="w-10 text-center text-sidebar-foreground">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {bagSummaries.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
+                        No details
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {bagSummaries.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
-                          No details
+                  ) : (
+                    bagSummaries.map((bag) => (
+                      <TableRow key={bag.bagNo}>
+                        <TableCell className="font-semibold">{bag.bagNo}</TableCell>
+                        <TableCell>{bag.awbCount}</TableCell>
+                        <TableCell>{bag.weight} kg</TableCell>
+                        <TableCell className="text-center">
+                          <IconButton
+                            label="Remove bag"
+                            variant="ghost"
+                            size="row"
+                            className="text-destructive"
+                            onClick={() => removeBagSummary(bag.bagNo)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </IconButton>
                         </TableCell>
                       </TableRow>
-                    ) : (
-                      bagSummaries.map((bag) => (
-                        <TableRow key={bag.bagNo}>
-                          <TableCell>{bag.bagNo}</TableCell>
-                          <TableCell>{bag.awbCount}</TableCell>
-                          <TableCell>{bag.weight}</TableCell>
-                          <TableCell className="text-center">
-                            <IconButton
-                              label="Remove bag"
-                              variant="ghost"
-                              size="row"
-                              className="text-destructive"
-                              onClick={() => removeBagSummary(bag.bagNo)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </table>
-              </div>
+                    ))
+                  )}
+                </TableBody>
+              </table>
+            </div>
           </FormSection>
 
           <FormSection title="AWB No Details">
-              <div className="space-y-1">
-                {(
-                  [
-                    ["AWB No.", selectedLine?.awbNo ?? ""],
-                    ["Shipper", selectedLine?.shipper ?? ""],
-                    ["Consignee", selectedLine?.consignee ?? ""],
-                    ["Vendor", selectedLine?.vendor ?? ""],
-                    ["Airline", selectedLine?.airline ?? ""],
-                    ["Service", selectedLine?.service ?? ""],
-                    ["Weight", selectedLine?.weight ?? ""],
-                    ["Pieces", selectedLine?.pcs ?? ""],
-                    [
-                      "Destination",
-                      selectedLine
-                        ? form.destCity.name.trim() || form.destCity.code.trim()
-                        : "",
-                    ],
-                  ] as const
-                ).map(([label, value]) => (
-                  <div key={label} className="flex gap-2 text-sm">
-                    <span className="min-w-[5.5rem] shrink-0 font-medium text-foreground">{label} :</span>
-                    <span className="min-w-0 flex-1 text-muted-foreground">{value || "\u00a0"}</span>
-                  </div>
-                ))}
-              </div>
+            <div className="space-y-1">
+              {(
+                [
+                  ["AWB No.", selectedLine?.awbNo ?? ""],
+                  ["Shipper", selectedLine?.shipper ?? ""],
+                  ["Consignee", selectedLine?.consignee ?? ""],
+                  ["Vendor", selectedLine?.vendor ?? ""],
+                  ["Airline", selectedLine?.airline ?? ""],
+                  ["Service", selectedLine?.service ?? ""],
+                  ["Weight", selectedLine?.weight ? `${selectedLine.weight} kg` : ""],
+                  ["Pieces", selectedLine?.pcs ?? ""],
+                  ["Destination", selectedLine?.destination ?? ""],
+                ] as const
+              ).map(([label, value]) => (
+                <div key={label} className="flex gap-2 text-sm">
+                  <span className="min-w-[5.5rem] shrink-0 font-medium text-foreground">{label} :</span>
+                  <span className="min-w-0 flex-1 text-muted-foreground">{value || "\u00a0"}</span>
+                </div>
+              ))}
+            </div>
           </FormSection>
         </div>
 
+        {/* Bag / AWB Details Panel */}
         <FormSection title="Bag/AWB Details">
-            <div className={BG_GRID}>
-              <FieldWrapper borderLabel label="Bag No">
-                <div className="flex min-w-0 flex-1 items-stretch">
-                  <Input
-                    className={`min-w-0 flex-1 ${BG_INPUT}`}
-                    value={awbDraft.bagNo}
-                    onChange={(e) => setAwbDraft((d) => ({ ...d, bagNo: e.target.value }))}
-                    inputMode="numeric"
-                  />
-                  <Button
-                    className="h-8 shrink-0 rounded-none border-0 border-l border-input bg-sidebar px-3 text-sidebar-foreground hover:bg-sidebar/90"
-                    onClick={incrementBagNo}
-                  >
-                    <Plus className="mr-1 h-4 w-4" />
-                    Add
-                  </Button>
-                </div>
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="CRN MHBS No">
+          <div className={BG_GRID}>
+            <FieldWrapper borderLabel label="Bag No">
+              <div className="flex min-w-0 flex-1 items-stretch">
                 <Input
-                  className={BG_INPUT}
-                  value={awbDraft.crnMhbsNo}
-                  onChange={(e) => setAwbDraft((d) => ({ ...d, crnMhbsNo: e.target.value }))}
+                  className={`min-w-0 flex-1 ${BG_INPUT}`}
+                  value={awbDraft.bagNo}
+                  onChange={(e) => setAwbDraft((d) => ({ ...d, bagNo: e.target.value }))}
+                  inputMode="numeric"
                 />
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="Forwarding No.">
-                <Input
-                  className={BG_INPUT}
-                  value={awbDraft.forwardingNo}
-                  onChange={(e) => setAwbDraft((d) => ({ ...d, forwardingNo: e.target.value }))}
-                />
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="AWB No.">
-                <Input
-                  className={BG_INPUT}
-                  value={awbDraft.awbNo}
-                  onChange={(e) => setAwbDraft((d) => ({ ...d, awbNo: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addAwbLine();
-                    }
-                  }}
-                />
-              </FieldWrapper>
-            </div>
+                <Button
+                  className="h-8 shrink-0 rounded-none border-0 border-l border-input bg-sidebar px-3 text-sidebar-foreground hover:bg-sidebar/90"
+                  onClick={incrementBagNo}
+                >
+                  <Plus className="mr-1 h-4 w-4" />
+                  Add
+                </Button>
+              </div>
+            </FieldWrapper>
 
-            <div className={`${BG_GRID} mt-2.5`}>
-              <FieldWrapper borderLabel label="Weight">
-                <Input
-                  className={BG_INPUT}
-                  value={awbDraft.weight}
-                  onChange={(e) => setAwbDraft((d) => ({ ...d, weight: e.target.value }))}
-                  inputMode="decimal"
-                />
-              </FieldWrapper>
-              <FieldWrapper borderLabel label="PCS">
-                <div className="flex min-w-0 flex-1 items-stretch">
-                  <Input
-                    className={`min-w-0 flex-1 ${BG_INPUT}`}
-                    value={awbDraft.pcs}
-                    onChange={(e) => setAwbDraft((d) => ({ ...d, pcs: e.target.value.replace(/\D/g, "") }))}
-                    inputMode="numeric"
-                  />
-                  <Button
-                    className="h-8 shrink-0 rounded-none border-0 border-l border-input bg-sidebar px-3 text-sidebar-foreground hover:bg-sidebar/90"
-                    onClick={addAwbLine}
-                  >
-                    <Plus className="mr-1 h-4 w-4" />
-                    Add
-                  </Button>
-                </div>
-              </FieldWrapper>
-            </div>
+            <FieldWrapper borderLabel label="Manifest Type">
+              <Select
+                value={form.manifestType || undefined}
+                onValueChange={(v) => patchForm({ manifestType: v as "High Value" | "Low Value" | "Transhipment" })}
+              >
+                <SelectTrigger className={BG_SELECT}>
+                  <SelectValue placeholder="Select Manifest Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MANIFEST_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
 
-            <div className="mt-4 grid grid-cols-1 gap-2 text-sm md:grid-cols-2 xl:grid-cols-3">
-              <p>
-                <span className="font-medium text-foreground">Bag Weight :</span>{" "}
-                <span className="text-muted-foreground">{summary.bagWeight}</span>
-              </p>
-              <p>
-                <span className="font-medium text-foreground">Consignee Pin Code :</span>{" "}
-                <span className="text-muted-foreground">{summary.consigneePinCode}</span>
-              </p>
-              <p>
-                <span className="font-medium text-foreground">Total Bag No. :</span>{" "}
-                <span className="text-muted-foreground">{summary.totalBagNo}</span>
-              </p>
-              <p>
-                <span className="font-medium text-foreground">Total Pieces :</span>{" "}
-                <span className="text-muted-foreground">{summary.totalPieces}</span>
-              </p>
-              <p>
-                <span className="font-medium text-foreground">Total AWB No. :</span>{" "}
-                <span className="text-muted-foreground">{summary.totalAwbNo}</span>
-              </p>
-              <p>
-                <span className="font-medium text-foreground">Total Weight :</span>{" "}
-                <span className="text-muted-foreground">{summary.totalWeight}</span>
-              </p>
-            </div>
-
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <Button variant="secondary" onClick={() => importInputRef.current?.click()}>
-                Excel Import
-              </Button>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".csv,.xlsx,.xls"
-                className="hidden"
-                onChange={() => toast.info("Excel import will be enabled with backend wiring")}
+            <FieldWrapper borderLabel label="CRN MHBS No">
+              <Input
+                className={BG_INPUT}
+                value={awbDraft.crnMhbsNo}
+                onChange={(e) => setAwbDraft((d) => ({ ...d, crnMhbsNo: e.target.value }))}
               />
-              <Button onClick={persistEntry} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
-                Save
-              </Button>
-              <Button variant="destructive" onClick={closeEntry}>
-                Cancel
-              </Button>
-            </div>
-          </FormSection>
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="Forwarding No.">
+              <Input
+                className={BG_INPUT}
+                value={awbDraft.forwardingNo}
+                onChange={(e) => setAwbDraft((d) => ({ ...d, forwardingNo: e.target.value }))}
+              />
+            </FieldWrapper>
+          </div>
+
+          <div className={`${BG_GRID} mt-2.5`}>
+            <FieldWrapper borderLabel label="AWB No.">
+              <Input
+                className={BG_INPUT}
+                value={awbDraft.awbNo}
+                onChange={(e) => setAwbDraft((d) => ({ ...d, awbNo: e.target.value }))}
+                placeholder="Enter or scan AWB"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addAwbLine();
+                  }
+                }}
+              />
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="Weight">
+              <Input
+                className={BG_INPUT}
+                value={awbDraft.weight}
+                onChange={(e) => setAwbDraft((d) => ({ ...d, weight: e.target.value }))}
+                inputMode="decimal"
+                placeholder="Auto-filled or manual"
+              />
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="PCS">
+              <div className="flex min-w-0 flex-1 items-stretch">
+                <Input
+                  className={`min-w-0 flex-1 ${BG_INPUT}`}
+                  value={awbDraft.pcs}
+                  onChange={(e) => setAwbDraft((d) => ({ ...d, pcs: e.target.value.replace(/\D/g, "") }))}
+                  inputMode="numeric"
+                />
+                <Button
+                  className="h-8 shrink-0 rounded-none border-0 border-l border-input bg-sidebar px-3 text-sidebar-foreground hover:bg-sidebar/90"
+                  onClick={addAwbLine}
+                >
+                  <Plus className="mr-1 h-4 w-4" />
+                  Add
+                </Button>
+              </div>
+            </FieldWrapper>
+            <FieldWrapper borderLabel label="Transfer to UK">
+              <div className="flex min-h-8 items-center px-1.5">
+                <Checkbox
+                  id="transferToUk"
+                  checked={form.transferToUk}
+                  onCheckedChange={(c) => patchForm({ transferToUk: c === true })}
+                />
+                <label htmlFor="transferToUk" className="ml-2 text-xs text-muted-foreground">
+                  Check if transshipping via UK
+                </label>
+              </div>
+            </FieldWrapper>
+          </div>
+
+          {/* Running Totals Bar */}
+          <div className="mt-4 grid grid-cols-1 gap-2 rounded border bg-muted/20 p-3 text-sm md:grid-cols-3 xl:grid-cols-6">
+            <p>
+              <span className="font-medium text-foreground">Bag Weight:</span>{" "}
+              <span className="text-muted-foreground">{summary.bagWeight} kg</span>
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Consignee Pin:</span>{" "}
+              <span className="text-muted-foreground">{summary.consigneePinCode || "—"}</span>
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Total Bags:</span>{" "}
+              <span className="font-semibold text-emerald-600">{summary.totalBagNo}</span>
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Total Pieces:</span>{" "}
+              <span className="text-muted-foreground">{summary.totalPieces}</span>
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Total AWBs:</span>{" "}
+              <span className="font-semibold text-emerald-600">{summary.totalAwbNo}</span>
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Total Weight:</span>{" "}
+              <span className="font-semibold text-foreground">{summary.totalWeight} kg</span>
+            </p>
+          </div>
+
+          {/* Actions */}
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <Button variant="secondary" onClick={() => importInputRef.current?.click()}>
+              Excel Import
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,.txt"
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+            <Button
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              {saveMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+            <Button variant="destructive" onClick={closeEntry}>
+              Cancel
+            </Button>
+          </div>
+        </FormSection>
       </div>
     );
   }
 
+  // List View
   return (
     <div className="flex min-w-0 flex-col gap-4 p-4 md:p-6">
       <MasterBreadcrumb trail={["Transaction", "Bagging"]} />
 
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Bagging</h1>
-        <p className="text-sm text-muted-foreground">Create and manage bagging manifests for outbound shipments.</p>
+        <p className="text-sm text-muted-foreground">
+          Create, consolidate and manage bagging manifests for outbound international shipments.
+        </p>
       </div>
 
+      {/* Filter Bar */}
       <Card className="min-w-0 overflow-hidden border p-4 md:p-6">
         <div className={BG_GRID}>
           <BaggingLookupField
@@ -1519,6 +1539,7 @@ function BaggingPage() {
         </div>
       </Card>
 
+      {/* Main Table */}
       <Card className="min-w-0 overflow-hidden border p-0">
         <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -1527,29 +1548,29 @@ function BaggingPage() {
                 filename: "bagging",
                 title: "Bagging",
                 columns: [
-                  { key: "manifestNo", header: "Manifest No" },
-                  { key: "masterAwbNo", header: "Master AWBNo" },
-                  { key: "date", header: "Date" },
+                  { key: "manifest_no", header: "Manifest No" },
+                  { key: "master_awb_no", header: "Master AWBNo" },
+                  { key: "manifest_date", header: "Date" },
                   { key: "origin", header: "Origin" },
-                  { key: "from", header: "From" },
-                  { key: "to", header: "To" },
+                  { key: "from_city", header: "From" },
+                  { key: "to_city", header: "To" },
                   { key: "destination", header: "Destination" },
-                  { key: "vendor", header: "Vendor" },
-                  { key: "shipment", header: "Shipment" },
-                  { key: "weight", header: "Weight" },
+                  { key: "vendor_name", header: "Vendor" },
+                  { key: "total_awbs", header: "Shipment" },
+                  { key: "total_weight", header: "Weight" },
                 ],
                 getRows: () =>
                   filtered.map((r) => ({
-                    manifestNo: r.manifestNo,
-                    masterAwbNo: r.masterAwbNo,
-                    date: formatDisplayDate(r.date),
+                    manifest_no: r.manifest_no,
+                    master_awb_no: r.master_awb_no,
+                    manifest_date: formatDisplayDate(r.manifest_date),
                     origin: r.origin,
-                    from: r.from,
-                    to: r.to,
+                    from_city: r.from_city,
+                    to_city: r.to_city,
                     destination: r.destination,
-                    vendor: r.vendorName,
-                    shipment: String(r.shipment),
-                    weight: r.weight,
+                    vendor_name: r.vendor_name,
+                    total_awbs: String(r.total_awbs),
+                    total_weight: String(r.total_weight),
                   })),
               }}
             />
@@ -1571,9 +1592,10 @@ function BaggingPage() {
                 setSearch(e.target.value);
                 setPage(1);
               }}
+              placeholder="Search manifest, MAWB, vendor..."
               className="h-9 w-full min-w-[10rem] sm:w-48"
             />
-            <Button size="sm" onClick={openAdd} className="h-9 shrink-0 gap-1.5">
+            <Button size="sm" onClick={() => openAdd()} className="h-9 shrink-0 gap-1.5">
               <Plus className="h-4 w-4" />
               Add
             </Button>
@@ -1627,10 +1649,16 @@ function BaggingPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pageRows.length === 0 ? (
+              {isLoading ? (
                 <TableRow>
                   <TableCell colSpan={11} className="h-32 text-center text-sm text-muted-foreground">
-                    No data available in table
+                    Loading bagging manifests...
+                  </TableCell>
+                </TableRow>
+              ) : pageRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={11} className="h-32 text-center text-sm text-muted-foreground">
+                    No bagging manifests found. Click &quot;Add&quot; to create one.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -1642,30 +1670,39 @@ function BaggingPage() {
                         onClick={() => openEntry(row)}
                         className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline dark:text-emerald-400"
                       >
-                        {row.manifestNo}
+                        {row.manifest_no}
                       </button>
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">{row.masterAwbNo}</TableCell>
-                    <TableCell className="whitespace-nowrap">{formatDisplayDate(row.date)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono">{row.master_awb_no || "—"}</TableCell>
+                    <TableCell className="whitespace-nowrap">{formatDisplayDate(row.manifest_date)}</TableCell>
                     <TableCell>{row.origin}</TableCell>
-                    <TableCell>{row.from}</TableCell>
-                    <TableCell>{row.to}</TableCell>
+                    <TableCell>{row.from_city}</TableCell>
+                    <TableCell>{row.to_city}</TableCell>
                     <TableCell>{row.destination}</TableCell>
-                    <TableCell className="max-w-[10rem] truncate" title={row.vendorName}>
-                      {row.vendorName}
+                    <TableCell className="max-w-[10rem] truncate" title={row.vendor_name}>
+                      {row.vendor_name || row.vendor_code}
                     </TableCell>
-                    <TableCell>{row.shipment}</TableCell>
-                    <TableCell className="whitespace-nowrap">{row.weight}</TableCell>
+                    <TableCell>{row.total_awbs}</TableCell>
+                    <TableCell className="whitespace-nowrap">{Number(row.total_weight || 0).toFixed(3)} kg</TableCell>
                     <TableCell className="whitespace-nowrap px-1 text-center">
                       <div className="flex justify-center gap-0">
                         <IconButton
                           label="Edit"
                           variant="ghost"
                           size="row"
-                          className="text-destructive"
+                          className="text-emerald-600"
                           onClick={() => openEntry(row)}
                         >
                           <Pencil className="h-3.5 w-3.5" />
+                        </IconButton>
+                        <IconButton
+                          label="Duplicate"
+                          variant="ghost"
+                          size="row"
+                          className="text-blue-600"
+                          onClick={() => duplicateEntry(row)}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
                         </IconButton>
                         <IconButton
                           label="Delete"
@@ -1677,19 +1714,23 @@ function BaggingPage() {
                           <Trash2 className="h-3.5 w-3.5" />
                         </IconButton>
                         <IconButton
-                          label="Print"
+                          label="Print Manifest"
                           variant="ghost"
                           size="row"
-                          onClick={() => toast.info(`Print ${row.manifestNo} will be enabled with backend wiring`)}
+                          onClick={() => handlePrintManifest(row)}
                         >
                           <Printer className="h-3.5 w-3.5" />
                         </IconButton>
                         <IconButton
-                          label="Export to CSB File"
+                          label="Export to CSB"
                           variant="ghost"
                           size="row"
                           className="text-amber-600"
-                          onClick={() => exportRowCsb(row)}
+                          onClick={() => {
+                            setCsbExportRow(row);
+                            setCsbExportForm(emptyCsbExportForm(row.manifest_no));
+                            setCsbExportOpen(true);
+                          }}
                         >
                           <FileText className="h-3.5 w-3.5" />
                         </IconButton>
@@ -1698,33 +1739,60 @@ function BaggingPage() {
                           variant="ghost"
                           size="row"
                           className="text-emerald-600"
-                          onClick={() => openAddProgress(row)}
+                          onClick={() => {
+                            setProgressManifest(row);
+                            setProgressMode("add");
+                            setProgressForm({
+                              ...emptyProgressForm(),
+                              serviceCentre: { code: row.origin || "HYD", name: row.origin || "HYD" },
+                            });
+                            setProgressOpen(true);
+                          }}
                         >
                           <FilePlus className="h-3.5 w-3.5" />
                         </IconButton>
                         <IconButton
-                          label="Export to CSV"
+                          label="Export CSV"
                           variant="ghost"
                           size="row"
                           className="text-emerald-600"
-                          onClick={() => exportRowCsv(row)}
+                          onClick={async () => {
+                            const details = await getBaggingDetails(row.id);
+                            const lines = details?.awbLines || [];
+                            downloadCsv(
+                              `${row.manifest_no}.csv`,
+                              ["Bag No", "CRN MHBS No", "Forwarding No", "AWB No", "Weight", "PCS", "Shipper", "Consignee"],
+                              lines.map((l) => [l.bagNo, l.crnMhbsNo, l.forwardingNo, l.awbNo, l.weight, l.pcs, l.shipper, l.consignee]),
+                            );
+                            toast.success(`Exported ${row.manifest_no}.csv`);
+                          }}
                         >
                           <Download className="h-3.5 w-3.5" />
                         </IconButton>
-                        <IconButton
-                          label="Export to CSV-M"
-                          variant="ghost"
-                          size="row"
-                          className="text-emerald-600"
-                          onClick={() => exportRowCsvM(row)}
-                        >
-                          <FileSpreadsheet className="h-3.5 w-3.5" />
-                        </IconButton>
                         <BaggingMoreMenu
                           row={row}
-                          onDownloadAll={() => openDownloadAll(row)}
-                          onDownloadTiff={() => openDownloadTiff(row)}
-                          onDownloadAllTiff={() => openDownloadTiff(row, { all: true })}
+                          onDownloadAll={() => {
+                            setDownloadAllRow(row);
+                            setDownloadAllForm(emptyDownloadAllForm());
+                            setDownloadAllOpen(true);
+                          }}
+                          onDownloadTiff={() => {
+                            setDownloadTiffRow(row);
+                            setDownloadTiffAllMode(false);
+                            setDownloadTiffForm(emptyDownloadTiffForm(row.manifest_no));
+                            setDownloadTiffOpen(true);
+                          }}
+                          onDownloadAllTiff={() => {
+                            setDownloadTiffRow(row);
+                            setDownloadTiffAllMode(true);
+                            setDownloadTiffForm(emptyDownloadTiffForm(row.manifest_no));
+                            setDownloadTiffOpen(true);
+                          }}
+                          onPrintBagLabel={() => {
+                            setBagLabelRow(row);
+                            setBagLabelForm(emptyPrintBagLabelForm(String(row.total_bags || 1)));
+                            setBagLabelOpen(true);
+                          }}
                         />
                       </div>
                     </TableCell>
@@ -1745,54 +1813,56 @@ function BaggingPage() {
         />
       </Card>
 
-      <Dialog open={downloadAllOpen} onOpenChange={(o) => !o && closeDownloadAll()}>
+      {/* CSB Export Dialog */}
+      <Dialog open={csbExportOpen} onOpenChange={(o) => !o && setCsbExportOpen(false)}>
         <DialogContent className="max-w-md gap-0 overflow-hidden p-0 sm:max-w-md">
           <div className="bg-sidebar px-4 py-3">
-            <DialogTitle className="text-base font-semibold text-sidebar-foreground">Download All</DialogTitle>
+            <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+              Export To CSB File
+            </DialogTitle>
           </div>
           <div className="grid grid-cols-1 gap-4 p-6">
-            <FieldWrapper label="Select Type">
+            <FieldWrapper label="Run No / Manifest No">
+              <Input value={csbExportForm.runNo} disabled readOnly />
+            </FieldWrapper>
+            <FieldWrapper label="CSB Format Type">
               <Select
-                value={downloadAllForm.selectType}
-                onValueChange={(v) => setDownloadAllForm((f) => ({ ...f, selectType: v }))}
+                value={csbExportForm.csbType}
+                onValueChange={(v) => setCsbExportForm((f) => ({ ...f, csbType: v as "CSB-III" | "CSB-IV" | "CSB-V" }))}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {DOWNLOAD_ALL_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="CSB-III">CSB-III (Documents)</SelectItem>
+                  <SelectItem value="CSB-IV">CSB-IV (Low Value Non-Docs)</SelectItem>
+                  <SelectItem value="CSB-V">CSB-V (Commercial / High Value)</SelectItem>
                 </SelectContent>
               </Select>
             </FieldWrapper>
-            <FieldWrapper label="From Bag No">
-              <Input
-                value={downloadAllForm.fromBagNo}
-                onChange={(e) => setDownloadAllForm((f) => ({ ...f, fromBagNo: e.target.value }))}
-              />
-            </FieldWrapper>
-            <FieldWrapper label="To Bag No">
-              <Input
-                value={downloadAllForm.toBagNo}
-                onChange={(e) => setDownloadAllForm((f) => ({ ...f, toBagNo: e.target.value }))}
-              />
-            </FieldWrapper>
+            <div className="rounded border bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
+              <strong>Customs EDI Notice:</strong> Electronic CSB file generation connects to your Indian Customs ICEGATE / Carrier EDI channel. Please supply the exact CSB-III/IV/V file layout or carrier EDI endpoint to generate formal flat files.
+            </div>
           </div>
           <div className="flex justify-end gap-2 px-6 pb-6">
-            <Button onClick={handleDownloadAllExport} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+            <Button
+              onClick={() => {
+                toast.info(`CSB ${csbExportForm.csbType} export selected for Manifest ${csbExportForm.runNo}. Supply the exact CSB layout specification to output binary EDI files.`);
+                setCsbExportOpen(false);
+              }}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
               Export
             </Button>
-            <Button variant="destructive" onClick={closeDownloadAll}>
+            <Button variant="destructive" onClick={() => setCsbExportOpen(false)}>
               Close
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={downloadTiffOpen} onOpenChange={(o) => !o && closeDownloadTiff()}>
+      {/* Download Tiff Modal */}
+      <Dialog open={downloadTiffOpen} onOpenChange={(o) => !o && setDownloadTiffOpen(false)}>
         <DialogContent className="max-w-lg gap-0 overflow-hidden p-0 sm:max-w-lg">
           <div className="bg-sidebar px-4 py-3">
             <DialogTitle className="text-base font-semibold text-sidebar-foreground">
@@ -1835,19 +1905,147 @@ function BaggingPage() {
                 onChange={(e) => setDownloadTiffForm((f) => ({ ...f, toBagNo: e.target.value }))}
               />
             </FieldWrapper>
+            <div className="col-span-2 rounded border bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
+              <strong>TIFF Image Notice:</strong> Multi-page TIFF generation requires the exact carrier bag-tag / airway bill image DPI specification.
+            </div>
           </div>
           <div className="flex justify-end gap-2 px-6 pb-6">
-            <Button onClick={handleDownloadTiffExport} className="bg-cyan-600 text-white hover:bg-cyan-600/90">
-              Export
+            <Button
+              onClick={() => {
+                toast.info(`Download TIFF selected for Run ${downloadTiffForm.runNo}. Supply the exact TIFF image specification to render multi-page binary TIFF files.`);
+                setDownloadTiffOpen(false);
+              }}
+              className="bg-cyan-600 text-white hover:bg-cyan-600/90"
+            >
+              Download
             </Button>
-            <Button variant="destructive" onClick={closeDownloadTiff}>
+            <Button variant="destructive" onClick={() => setDownloadTiffOpen(false)}>
               Close
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={progressOpen} onOpenChange={(o) => !o && closeAddProgress()}>
+      {/* Print Bag Label Dialog */}
+      <Dialog open={bagLabelOpen} onOpenChange={(o) => !o && setBagLabelOpen(false)}>
+        <DialogContent className="max-w-md gap-0 overflow-hidden p-0 sm:max-w-md">
+          <div className="bg-sidebar px-4 py-3">
+            <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+              Print Bag Labels
+            </DialogTitle>
+          </div>
+          <div className="grid grid-cols-1 gap-4 p-6">
+            <div className="grid grid-cols-2 gap-3">
+              <FieldWrapper label="From Bag No" required>
+                <Input
+                  value={bagLabelForm.fromBagNo}
+                  onChange={(e) => setBagLabelForm((f) => ({ ...f, fromBagNo: e.target.value }))}
+                  inputMode="numeric"
+                />
+              </FieldWrapper>
+              <FieldWrapper label="To Bag No" required>
+                <Input
+                  value={bagLabelForm.toBagNo}
+                  onChange={(e) => setBagLabelForm((f) => ({ ...f, toBagNo: e.target.value }))}
+                  inputMode="numeric"
+                />
+              </FieldWrapper>
+            </div>
+            <FieldWrapper label="Remark">
+              <Input
+                value={bagLabelForm.remark}
+                onChange={(e) => setBagLabelForm((f) => ({ ...f, remark: e.target.value }))}
+                placeholder="Optional remark on tag"
+              />
+            </FieldWrapper>
+          </div>
+          <div className="flex justify-end gap-2 px-6 pb-6">
+            <Button onClick={handlePrintBagLabels} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
+              Print Labels
+            </Button>
+            <Button variant="destructive" onClick={() => setBagLabelOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Download All Modal */}
+      <Dialog open={downloadAllOpen} onOpenChange={(o) => !o && setDownloadAllOpen(false)}>
+        <DialogContent className="max-w-md gap-0 overflow-hidden p-0 sm:max-w-md">
+          <div className="bg-sidebar px-4 py-3">
+            <DialogTitle className="text-base font-semibold text-sidebar-foreground">Download All</DialogTitle>
+          </div>
+          <div className="grid grid-cols-1 gap-4 p-6">
+            <FieldWrapper label="Select Type">
+              <Select
+                value={downloadAllForm.selectType}
+                onValueChange={(v) => setDownloadAllForm((f) => ({ ...f, selectType: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DOWNLOAD_ALL_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+            <FieldWrapper label="From Bag No">
+              <Input
+                value={downloadAllForm.fromBagNo}
+                onChange={(e) => setDownloadAllForm((f) => ({ ...f, fromBagNo: e.target.value }))}
+              />
+            </FieldWrapper>
+            <FieldWrapper label="To Bag No">
+              <Input
+                value={downloadAllForm.toBagNo}
+                onChange={(e) => setDownloadAllForm((f) => ({ ...f, toBagNo: e.target.value }))}
+              />
+            </FieldWrapper>
+          </div>
+          <div className="flex justify-end gap-2 px-6 pb-6">
+            <Button
+              onClick={async () => {
+                if (!downloadAllRow) return;
+                const details = await getBaggingDetails(downloadAllRow.id);
+                let lines = details?.awbLines || [];
+                const { fromBagNo, toBagNo } = downloadAllForm;
+                if (fromBagNo || toBagNo) {
+                  const from = Number.parseInt(fromBagNo, 10);
+                  const to = Number.parseInt(toBagNo, 10);
+                  lines = lines.filter((l) => {
+                    const b = Number.parseInt(l.bagNo, 10);
+                    if (!Number.isFinite(b)) return true;
+                    if (Number.isFinite(from) && b < from) return false;
+                    if (Number.isFinite(to) && b > to) return false;
+                    return true;
+                  });
+                }
+                downloadCsv(
+                  `${downloadAllRow.manifest_no}-all.csv`,
+                  ["Manifest No", "Bag No", "AWB No", "CRN No", "Forwarding No", "Weight", "Pieces"],
+                  lines.map((l) => [downloadAllRow.manifest_no, l.bagNo, l.awbNo, l.crnMhbsNo, l.forwardingNo, l.weight, l.pcs]),
+                );
+                toast.success(`Exported ${lines.length} lines`);
+                setDownloadAllOpen(false);
+              }}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              Export
+            </Button>
+            <Button variant="destructive" onClick={() => setDownloadAllOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Progress Dialog */}
+      <Dialog open={progressOpen} onOpenChange={(o) => !o && setProgressOpen(false)}>
         <DialogContent className="max-w-lg gap-0 overflow-hidden p-0 sm:max-w-lg">
           <div className="bg-sidebar px-4 py-3">
             <DialogTitle className="text-base font-semibold text-sidebar-foreground">Add Progress</DialogTitle>
@@ -1884,7 +2082,11 @@ function BaggingPage() {
           </div>
           <div className="grid grid-cols-1 gap-4 p-6 md:grid-cols-2">
             <FieldWrapper label="Bag No">
-              <Input value={progressForm.bagNo} onChange={(e) => patchProgress({ bagNo: e.target.value })} />
+              <Input
+                value={progressForm.bagNo}
+                onChange={(e) => patchProgress({ bagNo: e.target.value })}
+                placeholder="Leave blank for all bags"
+              />
             </FieldWrapper>
             <FieldWrapper label="Progress Date">
               <Input
@@ -1902,38 +2104,40 @@ function BaggingPage() {
                 placeholder="HHmm"
               />
             </FieldWrapper>
-            <FieldWrapper label="Service Centre" required>
-              <LookupPairInput
-                lookup="serviceCentre"
-                value={progressForm.serviceCentre}
-                onChange={(serviceCentre) => patchProgress({ serviceCentre })}
-              />
-            </FieldWrapper>
-            <FieldWrapper label="Exception" className="md:col-span-2">
-              <LookupPairInput
+            <BaggingLookupField
+              label="Service Centre"
+              lookup="serviceCentre"
+              value={progressForm.serviceCentre}
+              onChange={(serviceCentre) => patchProgress({ serviceCentre })}
+              required
+            />
+            <div className="md:col-span-2">
+              <BaggingLookupField
+                label="Exception"
                 lookup="exception"
                 value={progressForm.exception}
                 onChange={(exception) => patchProgress({ exception })}
               />
-            </FieldWrapper>
+            </div>
           </div>
           <div className="flex justify-end gap-2 px-6 pb-6">
             <Button onClick={handleProgressSave} className="bg-emerald-600 text-white hover:bg-emerald-600/90">
               Save
             </Button>
-            <Button variant="destructive" onClick={closeAddProgress}>
+            <Button variant="destructive" onClick={() => setProgressOpen(false)}>
               Cancel
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
+      {/* Delete Confirmation Alert */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete bagging manifest?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove manifest {deleteTarget?.manifestNo}.
+              This will permanently remove manifest {deleteTarget?.manifest_no} and unlink its bags.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1956,23 +2160,19 @@ function BaggingMoreMenu({
   onDownloadAll,
   onDownloadTiff,
   onDownloadAllTiff,
+  onPrintBagLabel,
 }: {
-  row: BaggingRow;
+  row: BaggingListRow;
   onDownloadAll: () => void;
   onDownloadTiff: () => void;
   onDownloadAllTiff: () => void;
+  onPrintBagLabel: () => void;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [triggerHover, setTriggerHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const moreActions = [
-    {
-      label: "Print AWB",
-      icon: Printer,
-      className: "",
-      action: () => toast.info(`Print AWB for ${row.manifestNo} will be enabled with backend wiring`),
-    },
     {
       label: "Download All",
       icon: CloudDownload,
@@ -1992,16 +2192,10 @@ function BaggingMoreMenu({
       action: onDownloadTiff,
     },
     {
-      label: "Email",
-      icon: Mail,
-      className: "text-sidebar",
-      action: () => toast.info(`Email for ${row.manifestNo} will be enabled with backend wiring`),
-    },
-    {
       label: "Bag Label",
       icon: Tag,
       className: "text-sidebar",
-      action: () => toast.info(`Bag Label for ${row.manifestNo} will be enabled with backend wiring`),
+      action: onPrintBagLabel,
     },
   ] as const;
 
@@ -2016,10 +2210,6 @@ function BaggingMoreMenu({
           aria-label="More options"
           onMouseEnter={() => setTriggerHover(true)}
           onMouseLeave={() => setTriggerHover(false)}
-          onPointerEnter={() => setTriggerHover(true)}
-          onPointerLeave={() => setTriggerHover(false)}
-          onFocus={() => setTriggerHover(true)}
-          onBlur={() => setTriggerHover(false)}
         >
           <MoreVertical className="h-3.5 w-3.5" />
         </Button>
@@ -2065,79 +2255,5 @@ function FormSection({
       </span>
       {children}
     </div>
-  );
-}
-
-function DualPairInput({
-  value,
-  onChange,
-  inputClass,
-}: {
-  value: LookupPair;
-  onChange: (v: LookupPair) => void;
-  inputClass?: string;
-}) {
-  return (
-    <div className="flex min-w-0 flex-1 items-stretch">
-      <Input
-        value={value.name}
-        onChange={(e) => onChange({ ...value, name: e.target.value })}
-        className={cn("min-w-0 flex-1", inputClass)}
-        placeholder="Name"
-      />
-      <Input
-        value={value.code}
-        onChange={(e) => onChange({ ...value, code: e.target.value })}
-        className={cn("w-20 shrink-0 border-l border-input", inputClass)}
-        placeholder="Code"
-      />
-    </div>
-  );
-}
-
-function LookupPairInput({
-  value,
-  onChange,
-  lookup,
-}: {
-  value: LookupPair;
-  onChange: (v: LookupPair) => void;
-  lookup: LookupKey;
-}) {
-  const [lookupOpen, setLookupOpen] = useState(false);
-
-  return (
-    <>
-      <div className="flex gap-1">
-        <Input
-          value={value.code}
-          onChange={(e) => onChange({ ...value, code: e.target.value })}
-          className="w-24"
-          placeholder="Code"
-        />
-        <Input
-          value={value.name}
-          onChange={(e) => onChange({ ...value, name: e.target.value })}
-          className="min-w-0 flex-1"
-          placeholder="Name"
-        />
-        <Button
-          size="icon"
-          variant="outline"
-          className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-          aria-label="Search"
-          onClick={() => setLookupOpen(true)}
-        >
-          <Search className="h-4 w-4" />
-        </Button>
-      </div>
-      <MasterLookupDialog
-        open={lookupOpen}
-        onOpenChange={setLookupOpen}
-        lookup={lookup}
-        returnField="code"
-        onSelect={(_v, option: LookupOption) => onChange({ code: option.code, name: option.name })}
-      />
-    </>
   );
 }

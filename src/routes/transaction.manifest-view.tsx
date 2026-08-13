@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Plus, Printer, Search } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +38,9 @@ import {
 import { DataIoToolbar } from "@/components/data-io-toolbar";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { useAuth } from "@/lib/auth";
+import { recordManifestProgress } from "@/lib/transactions/resources/manifests";
+import { toErrorMessage } from "@/lib/masters/screen";
 
 type LookupPair = { code: string; name: string };
 
@@ -137,279 +142,182 @@ const defaultFilter = (): ManifestViewFilter => ({
   searchValue: "",
 });
 
-const SEED_ROWS: Omit<ManifestViewRow, "id">[] = [
-  {
-    manifestType: "outgoing",
-    manifestNo: "HYD/HYD/2026/1002",
-    masterAwbNo: "MAWB-784512",
-    cdNo: "CD-24002",
-    awbNo: "CW100002",
-    manifestDate: "2026-07-04",
-    flightNo: "AI-840",
-    origin: "HYD",
-    destination: "HYD",
-    vendorCode: "DHL1",
-    location: "HYD",
-    shipment: "1",
-    weight: 233,
-    manifestTo: "Third Party",
-  },
-  {
-    manifestType: "outgoing",
-    manifestNo: "HYD/HYD/2026/1008",
-    masterAwbNo: "MAWB-784518",
-    cdNo: "CD-24008",
-    awbNo: "CW100008",
-    manifestDate: "2026-07-04",
-    flightNo: "6E-451",
-    origin: "HYD",
-    destination: "BOM",
-    vendorCode: "WFT",
-    location: "HYD",
-    shipment: "2",
-    weight: 321.1,
-    manifestTo: "Third Party",
-  },
-  {
-    manifestType: "outgoing",
-    manifestNo: "HYD/HYD/2026/1011",
-    masterAwbNo: "MAWB-784521",
-    cdNo: "CD-24011",
-    awbNo: "CW100011",
-    manifestDate: "2026-07-04",
-    flightNo: "UK-876",
-    origin: "HYD",
-    destination: "DEL",
-    vendorCode: "AIC",
-    location: "HYD",
-    shipment: "1",
-    weight: 400,
-    manifestTo: "Third Party",
-  },
-  {
-    manifestType: "incoming",
-    manifestNo: "HYD/USA/2026/1003",
-    masterAwbNo: "MAWB-1003",
-    cdNo: "CD-24003",
-    awbNo: "CW100003",
-    manifestDate: "2026-07-04",
-    flightNo: "AA-102",
-    origin: "HYD",
-    destination: "USA",
-    vendorCode: "DHL1",
-    location: "HYD",
-    shipment: "1",
-    weight: 156.5,
-    manifestTo: "Service Centre",
-  },
-  {
-    manifestType: "outgoing",
-    manifestNo: "HYD/UK/2026/1004",
-    masterAwbNo: "MAWB-1004",
-    cdNo: "CD-24004",
-    awbNo: "CW100004",
-    manifestDate: "2026-07-03",
-    flightNo: "BA-139",
-    origin: "HYD",
-    destination: "UK",
-    vendorCode: "DHE",
-    location: "HYD",
-    shipment: "3",
-    weight: 512.25,
-    manifestTo: "Third Party",
-  },
-];
-
-const seedRows = (): ManifestViewRow[] =>
-  SEED_ROWS.map((row) => ({ id: crypto.randomUUID(), ...row }));
-
-const AWB_TEMPLATES: Record<
-  string,
-  { count: number; samples: Omit<ManifestAwbLine, "id">[] }
-> = {
-  "HYD/HYD/2026/1002": {
-    count: 37,
-    samples: [
-      {
-        awbNo: "30404019",
-        date: "04/07/2026",
-        origin: "HYD",
-        destination: "US",
-        customer: "RASHMIKA ENT",
-        consignee: "MIDHUN NARNE",
-        pcs: 1,
-        weight: 20,
-        value: 7185,
-        status: "SHIPMENT SENT TO DESTINATION",
-        statusDate: "04/07/2026 17:32",
-        content: "DOCUMENTS",
-      },
-      {
-        awbNo: "30404020",
-        date: "04/07/2026",
-        origin: "HYD",
-        destination: "US",
-        customer: "TECH SOLUTIONS",
-        consignee: "JOHN SMITH",
-        pcs: 2,
-        weight: 15.5,
-        value: 5420,
-        status: "SHIPMENT SENT TO DESTINATION",
-        statusDate: "04/07/2026 17:28",
-        content: "ELECTRONICS",
-      },
-      {
-        awbNo: "30404021",
-        date: "04/07/2026",
-        origin: "HYD",
-        destination: "UK",
-        customer: "GLOBAL EXPORTS",
-        consignee: "SARAH WILSON",
-        pcs: 1,
-        weight: 8.25,
-        value: 3200,
-        status: "IN TRANSIT",
-        statusDate: "04/07/2026 16:45",
-        content: "SAMPLES",
-      },
-    ],
-  },
-  "HYD/HYD/2026/1008": {
-    count: 12,
-    samples: [
-      {
-        awbNo: "30404101",
-        date: "04/07/2026",
-        origin: "HYD",
-        destination: "BOM",
-        customer: "COURIERWALA",
-        consignee: "MUMBAI TRADERS",
-        pcs: 3,
-        weight: 45,
-        value: 12500,
-        status: "MANIFESTED",
-        statusDate: "04/07/2026 15:10",
-        content: "GENERAL",
-      },
-    ],
-  },
-  "HYD/HYD/2026/1011": {
-    count: 8,
-    samples: [
-      {
-        awbNo: "30404201",
-        date: "04/07/2026",
-        origin: "HYD",
-        destination: "DEL",
-        customer: "AIC CARGO",
-        consignee: "DELHI LOGISTICS",
-        pcs: 1,
-        weight: 32,
-        value: 8900,
-        status: "MANIFESTED",
-        statusDate: "04/07/2026 14:55",
-        content: "MEDICAL",
-      },
-    ],
-  },
-};
-
-const CUSTOMERS = ["RASHMIKA ENT", "TECH SOLUTIONS", "GLOBAL EXPORTS", "COURIERWALA", "AIC CARGO"];
-const CONSIGNEES = ["MIDHUN NARNE", "JOHN SMITH", "SARAH WILSON", "MUMBAI TRADERS", "DELHI LOGISTICS"];
-const STATUSES = ["SHIPMENT SENT TO DESTINATION", "IN TRANSIT", "MANIFESTED", "DELIVERED"];
-const CONTENTS = ["DOCUMENTS", "ELECTRONICS", "SAMPLES", "GENERAL", "MEDICAL"];
-
-function buildAwbLines(manifest: ManifestViewRow): ManifestAwbLine[] {
-  const template = AWB_TEMPLATES[manifest.manifestNo];
-  const count = template?.count ?? 5;
-  const samples = template?.samples ?? [];
-
-  return Array.from({ length: count }, (_, i) => {
-    const sample = samples[i % samples.length];
-    if (sample && i < samples.length) {
-      return { id: crypto.randomUUID(), ...sample };
-    }
-    const base = samples[0];
-    const awbBase = base ? Number.parseInt(base.awbNo, 10) : 30404000;
-    return {
-      id: crypto.randomUUID(),
-      awbNo: String(awbBase + i),
-      date: formatDisplayDate(manifest.manifestDate),
-      origin: manifest.origin,
-      destination: manifest.destination,
-      customer: CUSTOMERS[i % CUSTOMERS.length],
-      consignee: CONSIGNEES[i % CONSIGNEES.length],
-      pcs: (i % 3) + 1,
-      weight: Number((5 + (i % 7) * 2.5).toFixed(3)),
-      value: 1000 + i * 250,
-      status: STATUSES[i % STATUSES.length],
-      statusDate: `${formatDisplayDate(manifest.manifestDate)} ${String(10 + (i % 8)).padStart(2, "0")}:${String((i * 7) % 60).padStart(2, "0")}`,
-      content: CONTENTS[i % CONTENTS.length],
-    };
-  });
-}
-
-const manifestAwbCache = new Map<string, ManifestAwbLine[]>();
-
-function getManifestAwbLines(manifest: ManifestViewRow): ManifestAwbLine[] {
-  const cached = manifestAwbCache.get(manifest.id);
-  if (cached) return cached;
-  const lines = buildAwbLines(manifest);
-  manifestAwbCache.set(manifest.id, lines);
-  return lines;
-}
-
 function formatDisplayDate(iso: string) {
+  if (!iso) return "";
   const [y, m, d] = iso.split("-");
   if (!y || !m || !d) return iso;
   return `${d}/${m}/${y}`;
 }
 
 function formatWeight(value: number) {
-  return value.toFixed(3);
+  return (value || 0).toFixed(3);
 }
 
-function filterRows(rows: ManifestViewRow[], filter: ManifestViewFilter) {
-  return rows.filter((row) => {
-    if (row.manifestType !== filter.manifestType) return false;
-    if (row.manifestDate < filter.fromDate || row.manifestDate > filter.toDate) return false;
+async function fetchManifestsView(filter: ManifestViewFilter): Promise<ManifestViewRow[]> {
+  let query = supabase
+    .from("manifests")
+    .select(`
+      id,
+      manifest_no,
+      manifest_kind,
+      manifest_date,
+      to_type,
+      to_service_center_id,
+      vendor_id,
+      origin_branch_id,
+      location_code,
+      connect_station,
+      master_awb_no,
+      cd_no,
+      total_bags,
+      vendor_weight,
+      flight,
+      flight1,
+      created_at,
+      origin_branch:origin_branch_id ( id, code, name ),
+      to_service_center:to_service_center_id ( id, code, name ),
+      vendor:vendor_id ( id, code, name ),
+      manifest_lines ( id, awb_no )
+    `)
+    .is("deleted_at", null)
+    .order("manifest_date", { ascending: false })
+    .order("created_at", { ascending: false });
 
-    if (filter.origin.code.trim() || filter.origin.name.trim()) {
-      const originHay = `${row.origin} ${row.location}`.toLowerCase();
-      const code = filter.origin.code.trim().toLowerCase();
-      const name = filter.origin.name.trim().toLowerCase();
-      if (code && !originHay.includes(code) && row.origin.toLowerCase() !== code) return false;
-      if (name && !originHay.includes(name)) return false;
-    }
+  if (filter.fromDate) {
+    query = query.gte("manifest_date", filter.fromDate);
+  }
+  if (filter.toDate) {
+    query = query.lte("manifest_date", filter.toDate);
+  }
 
-    if (filter.destination.code.trim() || filter.destination.name.trim()) {
-      const destHay = `${row.destination}`.toLowerCase();
-      const code = filter.destination.code.trim().toLowerCase();
-      const name = filter.destination.name.trim().toLowerCase();
-      if (code && !destHay.includes(code)) return false;
-      if (name && !destHay.includes(name)) return false;
-    }
+  const { data, error } = await query;
+  if (error) throw error;
+  if (!data) return [];
 
-    if (filter.vendor.code.trim() || filter.vendor.name.trim()) {
-      const vendorHay = row.vendorCode.toLowerCase();
-      const code = filter.vendor.code.trim().toLowerCase();
-      const name = filter.vendor.name.trim().toLowerCase();
-      if (code && !vendorHay.includes(code)) return false;
-      if (name && !vendorHay.includes(name)) return false;
-    }
+  return data
+    .map((m: any) => {
+      const originCode = m.origin_branch?.code || m.location_code || "HYD";
+      const destCode = m.to_service_center?.code || m.connect_station || "";
+      const vendorCode = m.vendor?.code || "";
+      const isOutgoing = m.manifest_kind === "OUTBOUND" || m.to_type === "THIRD_PARTY";
+      const manifestType: ManifestType = isOutgoing ? "outgoing" : "incoming";
+      const flightNo = m.flight || m.flight1 || "";
+      const lineCount = m.manifest_lines?.length || m.total_bags || 0;
+      const manifestTo = m.to_type === "THIRD_PARTY" ? "Third Party" : "Service Centre";
 
-    if (filter.searchValue.trim()) {
-      const needle = filter.searchValue.trim().toLowerCase();
-      const field =
-        filter.searchBy === "cdNo"
-          ? row.cdNo
-          : filter.searchBy === "masterAwbNo"
-            ? row.masterAwbNo
-            : row.awbNo;
-      if (!field.toLowerCase().includes(needle)) return false;
-    }
+      return {
+        id: m.id,
+        manifestType,
+        manifestNo: m.manifest_no,
+        masterAwbNo: m.master_awb_no || "",
+        cdNo: m.cd_no || "",
+        awbNo: m.manifest_lines?.[0]?.awb_no || "",
+        manifestLinesAwbs: (m.manifest_lines || []).map((l: any) => l.awb_no),
+        manifestDate: m.manifest_date,
+        flightNo,
+        origin: originCode,
+        destination: destCode,
+        vendorCode,
+        location: m.location_code || originCode,
+        shipment: String(lineCount),
+        weight: Number(m.vendor_weight || 0),
+        manifestTo,
+      };
+    })
+    .filter((row: any) => {
+      if (filter.manifestType && row.manifestType !== filter.manifestType) return false;
 
-    return true;
+      if (filter.origin.code.trim() || filter.origin.name.trim()) {
+        const originCode = filter.origin.code.trim().toLowerCase();
+        const originName = filter.origin.name.trim().toLowerCase();
+        const hay = `${row.origin} ${row.location}`.toLowerCase();
+        if (originCode && !hay.includes(originCode)) return false;
+        if (originName && !hay.includes(originName)) return false;
+      }
+
+      if (filter.destination.code.trim() || filter.destination.name.trim()) {
+        const destCode = filter.destination.code.trim().toLowerCase();
+        const destName = filter.destination.name.trim().toLowerCase();
+        const hay = `${row.destination}`.toLowerCase();
+        if (destCode && !hay.includes(destCode)) return false;
+        if (destName && !hay.includes(destName)) return false;
+      }
+
+      if (filter.vendor.code.trim() || filter.vendor.name.trim()) {
+        const vCode = filter.vendor.code.trim().toLowerCase();
+        const vName = filter.vendor.name.trim().toLowerCase();
+        const hay = `${row.vendorCode}`.toLowerCase();
+        if (vCode && !hay.includes(vCode)) return false;
+        if (vName && !hay.includes(vName)) return false;
+      }
+
+      if (filter.searchValue.trim()) {
+        const needle = filter.searchValue.trim().toLowerCase();
+        if (filter.searchBy === "cdNo") {
+          return row.cdNo.toLowerCase().includes(needle);
+        } else if (filter.searchBy === "masterAwbNo") {
+          return row.masterAwbNo.toLowerCase().includes(needle);
+        } else if (filter.searchBy === "awbNo") {
+          return (row.manifestLinesAwbs || []).some((a: string) => a.toLowerCase().includes(needle));
+        }
+      }
+
+      return true;
+    });
+}
+
+async function fetchManifestShipments(manifestId: string): Promise<ManifestAwbLine[]> {
+  const { data, error } = await supabase
+    .from("manifest_lines")
+    .select(`
+      id,
+      seq,
+      awb_no,
+      created_at,
+      origin_name,
+      destination_name,
+      customer_name,
+      consignee_name,
+      pieces,
+      charge_weight,
+      shipment_id,
+      shipments:shipment_id (
+        id,
+        declared_value,
+        current_status,
+        status_at,
+        goods_description
+      )
+    `)
+    .eq("manifest_id", manifestId)
+    .is("deleted_at", null)
+    .order("seq", { ascending: true });
+
+  if (error) throw error;
+  if (!data) return [];
+
+  return data.map((l: any) => {
+    const s = Array.isArray(l.shipments) ? l.shipments[0] : l.shipments;
+    const dateStr = l.created_at ? formatDisplayDate(l.created_at.slice(0, 10)) : "";
+    const statusDateStr = s?.status_at
+      ? `${formatDisplayDate(s.status_at.slice(0, 10))} ${s.status_at.slice(11, 16)}`
+      : dateStr;
+
+    return {
+      id: l.id,
+      awbNo: l.awb_no,
+      date: dateStr,
+      origin: l.origin_name || "—",
+      destination: l.destination_name || "—",
+      customer: l.customer_name || "—",
+      consignee: l.consignee_name || "—",
+      pcs: Number(l.pieces || 1),
+      weight: Number(l.charge_weight || 0),
+      value: Number(s?.declared_value || 0),
+      status: s?.current_status || "MANIFESTED",
+      statusDate: statusDateStr,
+      content: s?.goods_description || "GENERAL",
+    };
   });
 }
 
@@ -427,7 +335,8 @@ export const Route = createFileRoute("/transaction/manifest-view")({
 });
 
 function ManifestViewPage() {
-  const [allRows] = useState(seedRows);
+  const { isAuthenticated: authed } = useAuth();
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<ManifestViewFilter>(defaultFilter);
   const [appliedFilter, setAppliedFilter] = useState<ManifestViewFilter | null>(null);
   const [tableSearch, setTableSearch] = useState("");
@@ -437,19 +346,29 @@ function ManifestViewPage() {
   const [progressManifest, setProgressManifest] = useState<ManifestViewRow | null>(null);
   const [progressMode, setProgressMode] = useState<ProgressMode>("add");
   const [progressForm, setProgressForm] = useState<ProgressForm>(emptyProgressForm);
+  const [savingProgress, setSavingProgress] = useState(false);
+
+  const manifestsQuery = useQuery({
+    queryKey: ["manifests-view", appliedFilter],
+    queryFn: () => (appliedFilter ? fetchManifestsView(appliedFilter) : Promise.resolve([])),
+    enabled: authed && Boolean(appliedFilter),
+  });
+
+  const shipmentsQuery = useQuery({
+    queryKey: ["manifest-shipments", selectedManifestId],
+    queryFn: () => (selectedManifestId ? fetchManifestShipments(selectedManifestId) : Promise.resolve([])),
+    enabled: authed && Boolean(selectedManifestId),
+  });
 
   const searchByLabel =
     SEARCH_BY_OPTIONS.find((opt) => opt.value === filter.searchBy)?.label ?? "CD No.";
 
-  const results = useMemo(() => {
-    if (!appliedFilter) return [];
-    return filterRows(allRows, appliedFilter);
-  }, [allRows, appliedFilter]);
+  const allRows = manifestsQuery.data ?? [];
 
   const filtered = useMemo(() => {
     const q = tableSearch.trim().toLowerCase();
-    if (!q) return results;
-    return results.filter((row) =>
+    if (!q) return allRows;
+    return allRows.filter((row) =>
       [
         row.manifestNo,
         row.masterAwbNo,
@@ -463,17 +382,14 @@ function ManifestViewPage() {
         row.awbNo,
       ].some((v) => v.toLowerCase().includes(q)),
     );
-  }, [results, tableSearch]);
+  }, [allRows, tableSearch]);
 
   const selectedManifest = useMemo(
     () => allRows.find((row) => row.id === selectedManifestId) ?? null,
     [allRows, selectedManifestId],
   );
 
-  const detailLines = useMemo(
-    () => (selectedManifest ? getManifestAwbLines(selectedManifest) : []),
-    [selectedManifest],
-  );
+  const detailLines = shipmentsQuery.data ?? [];
 
   const totalWeight = useMemo(
     () => filtered.reduce((sum, row) => sum + row.weight, 0),
@@ -514,13 +430,35 @@ function ManifestViewPage() {
   const patchProgress = (patch: Partial<ProgressForm>) =>
     setProgressForm((f) => ({ ...f, ...patch }));
 
-  const handleProgressSave = () => {
+  const handleProgressSave = async () => {
+    if (!progressManifest) return;
     if (!progressForm.serviceCentre.code.trim() && !progressForm.serviceCentre.name.trim()) {
       return toast.error("Service Centre is required");
     }
-    const action = progressMode === "add" ? "added" : "deleted";
-    toast.success(`Progress ${action} for ${progressManifest?.manifestNo ?? "manifest"}`);
-    closeAddProgress();
+
+    setSavingProgress(true);
+    try {
+      if (authed) {
+        await recordManifestProgress({
+          manifestId: progressManifest.id,
+          bagNo: progressForm.bagNo || undefined,
+          progressDate: progressForm.progressDate,
+          progressTime: progressForm.progressTime,
+          serviceCenterCode: progressForm.serviceCentre.code || undefined,
+          exceptionCode: progressForm.exception.code || undefined,
+          mode: progressMode,
+        });
+        toast.success(`Progress ${progressMode === "add" ? "recorded" : "deleted"} for manifest ${progressManifest.manifestNo}`);
+        await queryClient.invalidateQueries({ queryKey: ["manifests-view"] });
+      } else {
+        toast.success(`Progress ${progressMode === "add" ? "recorded" : "deleted"} (demo mode)`);
+      }
+      closeAddProgress();
+    } catch (err) {
+      toast.error(toErrorMessage(err));
+    } finally {
+      setSavingProgress(false);
+    }
   };
 
   const handleView = () => {
@@ -593,7 +531,7 @@ function ManifestViewPage() {
 
             <FieldWrapper label="Origin">
               <DualLookupInput
-                lookup="destination"
+                lookup="serviceCentre"
                 value={filter.origin}
                 onChange={(origin) => setFilter((f) => ({ ...f, origin }))}
               />
@@ -727,7 +665,16 @@ function ManifestViewPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pageRows.length === 0 ? (
+                {manifestsQuery.isLoading ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={12}
+                      className="h-32 text-center text-sm text-muted-foreground"
+                    >
+                      Loading manifests...
+                    </TableCell>
+                  </TableRow>
+                ) : pageRows.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={12}
@@ -754,12 +701,12 @@ function ManifestViewPage() {
                       <TableCell className="whitespace-nowrap">
                         {formatDisplayDate(row.manifestDate)}
                       </TableCell>
-                      <TableCell className="max-w-[8rem] truncate">{row.masterAwbNo}</TableCell>
-                      <TableCell>{row.flightNo}</TableCell>
-                      <TableCell>{row.origin}</TableCell>
-                      <TableCell>{row.destination}</TableCell>
-                      <TableCell>{row.vendorCode}</TableCell>
-                      <TableCell>{row.location}</TableCell>
+                      <TableCell className="max-w-[8rem] truncate">{row.masterAwbNo || "—"}</TableCell>
+                      <TableCell>{row.flightNo || "—"}</TableCell>
+                      <TableCell>{row.origin || "—"}</TableCell>
+                      <TableCell>{row.destination || "—"}</TableCell>
+                      <TableCell>{row.vendorCode || "—"}</TableCell>
+                      <TableCell>{row.location || "—"}</TableCell>
                       <TableCell>{row.shipment}</TableCell>
                       <TableCell className="whitespace-nowrap">{formatWeight(row.weight)}</TableCell>
                       <TableCell className="max-w-[8rem] truncate">{row.manifestTo}</TableCell>
@@ -779,7 +726,7 @@ function ManifestViewPage() {
                             variant="ghost"
                             size="row"
                             onClick={() =>
-                              toast.info(`Print manifest ${row.manifestNo} will be enabled with backend wiring`)
+                              toast.info(`Print manifest ${row.manifestNo}`)
                             }
                           >
                             <Printer className="h-3.5 w-3.5" />
@@ -838,30 +785,50 @@ function ManifestViewPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {detailLines.map((line) => (
-                    <TableRow key={line.id}>
-                      <TableCell className="whitespace-nowrap">{line.awbNo}</TableCell>
-                      <TableCell className="whitespace-nowrap">{line.date}</TableCell>
-                      <TableCell>{line.origin}</TableCell>
-                      <TableCell>{line.destination}</TableCell>
-                      <TableCell className="max-w-[10rem] truncate" title={line.customer}>
-                        {line.customer}
-                      </TableCell>
-                      <TableCell className="max-w-[10rem] truncate" title={line.consignee}>
-                        {line.consignee}
-                      </TableCell>
-                      <TableCell>{line.pcs}</TableCell>
-                      <TableCell className="whitespace-nowrap">{formatWeight(line.weight)}</TableCell>
-                      <TableCell className="whitespace-nowrap">{line.value.toFixed(2)}</TableCell>
-                      <TableCell className="max-w-[12rem] truncate" title={line.status}>
-                        {line.status}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">{line.statusDate}</TableCell>
-                      <TableCell className="max-w-[8rem] truncate" title={line.content}>
-                        {line.content}
+                  {shipmentsQuery.isLoading ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={12}
+                        className="h-24 text-center text-sm text-muted-foreground"
+                      >
+                        Loading shipments for manifest {selectedManifest.manifestNo}...
                       </TableCell>
                     </TableRow>
-                  ))}
+                  ) : detailLines.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={12}
+                        className="h-24 text-center text-sm text-muted-foreground"
+                      >
+                        No shipments found for manifest {selectedManifest.manifestNo}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    detailLines.map((line) => (
+                      <TableRow key={line.id}>
+                        <TableCell className="whitespace-nowrap font-mono font-medium">{line.awbNo}</TableCell>
+                        <TableCell className="whitespace-nowrap">{line.date}</TableCell>
+                        <TableCell>{line.origin}</TableCell>
+                        <TableCell>{line.destination}</TableCell>
+                        <TableCell className="max-w-[10rem] truncate" title={line.customer}>
+                          {line.customer}
+                        </TableCell>
+                        <TableCell className="max-w-[10rem] truncate" title={line.consignee}>
+                          {line.consignee}
+                        </TableCell>
+                        <TableCell>{line.pcs}</TableCell>
+                        <TableCell className="whitespace-nowrap">{formatWeight(line.weight)}</TableCell>
+                        <TableCell className="whitespace-nowrap">{line.value.toFixed(2)}</TableCell>
+                        <TableCell className="max-w-[12rem] truncate" title={line.status}>
+                          {line.status}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">{line.statusDate}</TableCell>
+                        <TableCell className="max-w-[8rem] truncate" title={line.content}>
+                          {line.content}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
                 </TableBody>
               </table>
             </div>
@@ -958,9 +925,10 @@ function ManifestViewPage() {
           <div className="flex justify-end gap-2 px-6 pb-6">
             <Button
               onClick={handleProgressSave}
+              disabled={savingProgress}
               className="bg-emerald-600 text-white hover:bg-emerald-600/90"
             >
-              Save
+              {savingProgress ? "Saving..." : "Save"}
             </Button>
             <Button variant="destructive" onClick={closeAddProgress}>
               Cancel

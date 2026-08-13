@@ -25,17 +25,45 @@ export type UiDrsAwbLine = {
   attemptCount?: number;
 };
 
+export type DrsCostEntry = {
+  hrCost: number;
+  otherCost: number;
+  vehicleCost: number;
+  totalCost: number;
+  voucherNo: string;
+  voucherAmount: number;
+};
+
+export type DrsAttachment = {
+  id: string;
+  fileName: string;
+  fileUrl?: string;
+  fileSize?: number;
+  uploadedAt: string;
+};
+
 export type UiDrsForm = {
   drsNo: string;
   drsDate: string;
   drsTime: string;
+  serviceCentre: LookupPair;
   area: LookupPair;
   areaSeq: string;
   fieldExecutive: LookupPair;
   vehicleNo: string;
+  vehicleType: string;
+  fromKm: string;
+  toKm: string;
+  vehicleOwner: LookupPair;
+  vehicleOwnerContact: string;
+  driver: LookupPair;
+  driverContact: string;
+  runNo: string;
   remark: string;
   awbLines: UiDrsAwbLine[];
   status?: string;
+  costEntry?: DrsCostEntry;
+  attachments?: DrsAttachment[];
 };
 
 function emptyPair(): LookupPair {
@@ -75,7 +103,7 @@ export function dbLineToUi(line: DrsLineRow): UiDrsAwbLine {
     consignee: line.consignee_name ?? "",
     pcs: String(line.pieces ?? ""),
     weight: String(line.charge_weight ?? ""),
-    ewayBillNo: line.eway_bill_no ?? "",
+    ewayBillNo: line.ewayBillNo ?? "",
     shipmentValue: line.shipment_value != null ? String(line.shipment_value) : "",
     remarks: line.remarks ?? "",
     outcome: line.outcome ?? null,
@@ -86,10 +114,16 @@ export function dbLineToUi(line: DrsLineRow): UiDrsAwbLine {
 
 export function dbDrsToForm(row: DrsRow, lines?: DrsLineRow[]): UiDrsForm {
   const fe = row.field_executives;
+  const extras = (row.wizard_extras ?? {}) as Record<string, any>;
   return {
     drsNo: row.drs_no,
     drsDate: row.drs_date,
     drsTime: hhmmFromTime(row.drs_time),
+    serviceCentre: (extras.service_center as LookupPair) || {
+      id: row.branch_id ?? undefined,
+      code: row.branches?.code || "HYD",
+      name: row.branches?.name || "HYDERABAD",
+    },
     area: {
       id: row.destination_id ?? undefined,
       code: row.area_code || row.destinations?.code || "",
@@ -99,10 +133,20 @@ export function dbDrsToForm(row: DrsRow, lines?: DrsLineRow[]): UiDrsForm {
     fieldExecutive: fe
       ? { id: row.delivery_executive_id ?? undefined, code: fe.code, name: fe.name }
       : emptyPair(),
-    vehicleNo: row.vehicle_no ?? "",
+    vehicleNo: row.vehicle_no ?? (extras.vehicle_no || ""),
+    vehicleType: extras.vehicle_type || "",
+    fromKm: extras.from_km || "",
+    toKm: extras.to_km || "",
+    vehicleOwner: (extras.vehicle_owner as LookupPair) || emptyPair(),
+    vehicleOwnerContact: extras.vehicle_owner_contact || "",
+    driver: (extras.driver as LookupPair) || emptyPair(),
+    driverContact: extras.driver_contact || "",
+    runNo: extras.run_no || "",
     remark: row.remarks ?? "",
     awbLines: (lines ?? []).map(dbLineToUi),
     status: row.status,
+    costEntry: extras.cost_entry,
+    attachments: extras.attachments,
   };
 }
 
@@ -118,7 +162,7 @@ export function dbDrsToListRow(row: DrsRow): UiDrsForm & {
     id: row.id,
     rowVersion: row.row_version,
     status: row.status,
-    serviceCenter: row.branches?.code ?? "",
+    serviceCenter: row.branches?.code ?? form.serviceCentre.code ?? "",
   };
 }
 
@@ -129,8 +173,8 @@ export function uiFormToDrsPayload(form: UiDrsForm): {
   const fields: DrsFields = {
     drs_date: form.drsDate,
     drs_time: timeFromHhmm(form.drsTime),
-    branch_id: null,
-    branch_code: null,
+    branch_id: form.serviceCentre?.id || null,
+    branch_code: form.serviceCentre?.code?.trim() || null,
     destination_id: form.area.id || null,
     destination_code: form.area.code.trim() || null,
     delivery_executive_id: form.fieldExecutive.id || null,
@@ -140,7 +184,19 @@ export function uiFormToDrsPayload(form: UiDrsForm): {
     area_code: form.area.code.trim() || null,
     area_name: form.area.name.trim() || null,
     area_seq: form.areaSeq.trim() || null,
-    wizard_extras: {},
+    wizard_extras: {
+      service_center: form.serviceCentre,
+      vehicle_type: form.vehicleType,
+      from_km: form.fromKm,
+      to_km: form.toKm,
+      vehicle_owner: form.vehicleOwner,
+      vehicle_owner_contact: form.vehicleOwnerContact,
+      driver: form.driver,
+      driver_contact: form.driverContact,
+      run_no: form.runNo,
+      cost_entry: form.costEntry,
+      attachments: form.attachments,
+    },
   };
 
   const lines: DrsLineInput[] = form.awbLines.map((l) => ({

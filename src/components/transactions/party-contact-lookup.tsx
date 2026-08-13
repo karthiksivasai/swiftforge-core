@@ -5,8 +5,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Loader2, Search } from "lucide-react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -234,8 +232,8 @@ export function PartyContactLookup({
   navOrder,
   onCommit,
   manualSearch = false,
-  emptySearchMessage,
-  noResultsMessage = AWB_LOOKUP_NO_RESULTS,
+  emptySearchMessage: _emptySearchMessage,
+  noResultsMessage: _noResultsMessage = AWB_LOOKUP_NO_RESULTS,
 }: {
   role: PartyContactRole;
   value: CompanyValue;
@@ -252,6 +250,8 @@ export function PartyContactLookup({
   emptySearchMessage?: string;
   noResultsMessage?: string;
 }) {
+  void _emptySearchMessage;
+  void _noResultsMessage;
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -409,75 +409,19 @@ export function PartyContactLookup({
     onCommit?.();
   }, [clearManualDropdown, onCommit]);
 
-  const applyManualHits = useCallback(
-    async (hits: PartyContactHit[], opts?: { autoSelectSingle?: boolean }) => {
-      const autoSelectSingle = opts?.autoSelectSingle ?? false;
-      if (hits.length === 0) {
-        clearManualDropdown();
-        return false;
-      }
-      if (autoSelectSingle && hits.length === 1) {
-        await pick(hits[0]);
-        return true;
-      }
-      setManualDropdownHits(hits);
-      setManualDropdownOpen(true);
-      setHighlight(0);
-      return true;
-    },
-    [clearManualDropdown, pick],
-  );
-
-  const openBrowsePopup = useCallback(() => {
+  const openBrowsePopup = useCallback((initialQuery = "") => {
     setInlineOpen(false);
     setManualDropdownOpen(false);
     setManualDropdownHits([]);
-    setPopupQuery("");
+    setPopupQuery(initialQuery);
     setManualPopupHits(null);
     setPopupOpen(true);
   }, []);
 
-  const runManualSearch = useCallback(
-    async (opts?: { autoSelectSingle?: boolean; showEmptyToast?: boolean }) => {
-      const autoSelectSingle = opts?.autoSelectSingle ?? true;
-      const q = searchQuery();
-      if (!q) {
-        openBrowsePopup();
-        return;
-      }
-      const seq = ++explicitSearchSeqRef.current;
-      setManualSearching(true);
-      try {
-        const hits = live
-          ? rankPartyContactHits(await searchPartyContacts(role, q, 100), q, 100)
-          : filterDemoHits(role, q);
-        if (seq !== explicitSearchSeqRef.current) return;
-        if (hits.length === 0) {
-          clearManualDropdown();
-          toast.error(noResultsMessage);
-          return;
-        }
-        await applyManualHits(hits, { autoSelectSingle });
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Search failed");
-      } finally {
-        if (seq === explicitSearchSeqRef.current) setManualSearching(false);
-      }
-    },
-    [
-      applyManualHits,
-      clearManualDropdown,
-      live,
-      noResultsMessage,
-      openBrowsePopup,
-      role,
-      searchQuery,
-    ],
-  );
-
+  /** Search icon / F2 always opens the select-list dialog (not the inline typeahead). */
   const triggerExplicitSearch = useCallback(() => {
-    void runManualSearch({ autoSelectSingle: false, showEmptyToast: true });
-  }, [runManualSearch]);
+    openBrowsePopup(searchQuery());
+  }, [openBrowsePopup, searchQuery]);
 
   const startInline = (text: string) => {
     if (manualSearch) return;

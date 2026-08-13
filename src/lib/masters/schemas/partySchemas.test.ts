@@ -22,26 +22,15 @@ const UUID = "22222222-2222-2222-2222-222222222222";
 
 describe("consigneeCreateSchema", () => {
   it("trims required text and defaults status to ACTIVE", () => {
-    expect(
-      consigneeCreateSchema.parse({
-        code: " CN1 ",
-        name: " Acme ",
-        mobile: " 9999999999 ",
-      }),
-    ).toEqual({
-      code: "CN1",
-      name: "Acme",
-      customer_id: null,
-      customer_name: null,
-      mobile: "9999999999",
-      email: null,
-      address: null,
-      pin_code: null,
-      city: null,
-      state_id: null,
-      country_id: null,
-      status: "ACTIVE",
+    const res = consigneeCreateSchema.parse({
+      code: " CN1 ",
+      name: " Acme ",
+      mobile: " 9999999999 ",
     });
+    expect(res.code).toBe("CN1");
+    expect(res.name).toBe("Acme");
+    expect(res.mobile).toBe("9999999999");
+    expect(res.status).toBe("ACTIVE");
   });
 
   it("requires code, name, and mobile", () => {

@@ -175,35 +175,119 @@ export async function getDrsCompletionBoard(drsId: string): Promise<DrsCompletio
   };
 }
 
-export async function lookupShipmentForDrs(awbNo: string): Promise<{
+export async function lookupShipmentForDrs(
+  queryKey: string,
+  searchBy: "awb" | "ref" = "awb",
+): Promise<{
   shipment_id: string;
   awb_no: string;
   current_status: string;
   book_date: string | null;
+  origin_name: string | null;
+  destination_name: string | null;
+  customer_name: string | null;
+  consignee_name: string | null;
   pieces: number;
   charge_weight: number;
-  consignee_name: string | null;
+  shipment_value: number | null;
+  eway_bill_no: string | null;
 } | null> {
-  const awb = awbNo.trim();
-  if (!awb) return null;
-  const { data, error } = await supabase
+  const q = queryKey.trim();
+  if (!q) return null;
+
+  let query = supabase
     .from("shipments")
-    .select("id, awb_no, current_status, book_date, pieces, charge_weight, consignee")
-    .eq("awb_no", awb)
-    .is("deleted_at", null)
-    .maybeSingle();
+    .select(`
+      id,
+      awb_no,
+      current_status,
+      book_date,
+      pieces,
+      charge_weight,
+      declared_value,
+      eway_bill_no,
+      consignee,
+      origin:origin_id ( name ),
+      destination:destination_id ( name ),
+      customer:customer_id ( name )
+    `)
+    .is("deleted_at", null);
+
+  if (searchBy === "ref") {
+    query = query.or(`forwarding_no.eq.${q},reference_no.eq.${q}`);
+  } else {
+    query = query.eq("awb_no", q);
+  }
+
+  const { data, error } = await query.maybeSingle();
   if (error) throw translateDbError(error);
   if (!data) return null;
+
   const consignee = (data.consignee ?? {}) as { name?: string };
   return {
     shipment_id: data.id as string,
     awb_no: data.awb_no as string,
     current_status: data.current_status as string,
     book_date: (data.book_date as string | null) ?? null,
+    origin_name: (data.origin as any)?.name || "HYD",
+    destination_name: (data.destination as any)?.name || "",
+    customer_name: (data.customer as any)?.name || "",
+    consignee_name: consignee.name ?? null,
     pieces: Number(data.pieces ?? 1),
     charge_weight: Number(data.charge_weight ?? 0),
-    consignee_name: consignee.name ?? null,
+    shipment_value: data.declared_value != null ? Number(data.declared_value) : null,
+    eway_bill_no: (data.eway_bill_no as string | null) ?? null,
   };
+}
+
+export async function fetchPreDrsShipments(): Promise<
+  Array<{
+    shipment_id: string;
+    awb_no: string;
+    book_date: string | null;
+    origin_name: string | null;
+    destination_name: string | null;
+    customer_name: string | null;
+    consignee_name: string | null;
+    pieces: number;
+    charge_weight: number;
+    current_status: string;
+  }>
+> {
+  const { data, error } = await supabase
+    .from("shipments")
+    .select(`
+      id,
+      awb_no,
+      book_date,
+      pieces,
+      charge_weight,
+      current_status,
+      consignee,
+      origin:origin_id ( name ),
+      destination:destination_id ( name ),
+      customer:customer_id ( name )
+    `)
+    .eq("current_status", "MANIFEST_INSCANNED")
+    .is("deleted_at", null)
+    .order("book_date", { ascending: false });
+
+  if (error) throw translateDbError(error);
+  return (data ?? []).map((s: any) => {
+    const consignee = (s.consignee ?? {}) as { name?: string };
+    return {
+      shipment_id: s.id,
+      awb_no: s.awb_no,
+      book_date: s.book_date,
+      origin_name: s.origin?.name || "HYD",
+      destination_name: s.destination?.name || "",
+      customer_name: s.customer?.name || "",
+      consignee_name: consignee.name || "",
+      pieces: Number(s.pieces || 1),
+      charge_weight: Number(s.charge_weight || 0),
+      current_status: s.current_status,
+    };
+  });
 }
 
 export async function saveDrs(args: {

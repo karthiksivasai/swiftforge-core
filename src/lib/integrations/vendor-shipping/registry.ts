@@ -1,4 +1,5 @@
 import { XpresionAdapter } from "./adapters/xpresion/adapter";
+import { PostShippingAdapter } from "./adapters/postshipping/adapter";
 import { StubVendorAdapter } from "./adapters/stub";
 import type { VendorShippingAdapter } from "./types";
 
@@ -11,6 +12,15 @@ export function getVendorAdapter(providerCode: string): VendorShippingAdapter {
 
   let adapter: VendorShippingAdapter;
   switch (code) {
+    case "POSTSHIPPING":
+    case "DTDC":
+    case "DTAU":
+    case "DTDCSYD":
+    case "DTDCMEL":
+    case "DTDCPER":
+    case "DTDCNZ":
+      adapter = new PostShippingAdapter();
+      break;
     case "XPRESION":
     case "CW":
     case "COURIERWALA":
@@ -29,9 +39,6 @@ export function getVendorAdapter(providerCode: string): VendorShippingAdapter {
       break;
     case "UPS":
       adapter = new StubVendorAdapter("UPS");
-      break;
-    case "DTDC":
-      adapter = new StubVendorAdapter("DTDC");
       break;
     case "ARAMEX":
       adapter = new StubVendorAdapter("ARAMEX");

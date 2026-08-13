@@ -9,6 +9,17 @@ import { stripTsdSourcePlugin } from "./vite-plugins/strip-tsd-source";
 
 export default defineConfig({
   plugins: [...stripTsdSourcePlugin()],
+  // Avoid stale optimized-deps chunks after `.vite` cache clears (Chrome HTTP cache
+  // survives "Clear site data" and keeps requesting old `?v=` hashes).
+  vite: {
+    server: {
+      port: 8082,
+      strictPort: true,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    },
+  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this

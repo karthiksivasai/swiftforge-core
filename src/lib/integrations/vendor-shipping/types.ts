@@ -7,6 +7,7 @@ export type VendorApiStatus =
   | "OTP_REQUIRED"
   | "VENDOR_PENDING"
   | "VENDOR_BOOKED"
+  | "PREVIEW"
   | "FAILED";
 
 export type VendorSyncStatus = "IDLE" | "SYNCING" | "OK" | "PARTIAL" | "ERROR";
@@ -161,5 +162,6 @@ export const VENDOR_API_STATUS_LABELS: Record<VendorApiStatus, string> = {
   OTP_REQUIRED: "OTP Required",
   VENDOR_PENDING: "Vendor Pending",
   VENDOR_BOOKED: "Vendor Booked",
+  PREVIEW: "Dry-Run Preview",
   FAILED: "Failed",
 };

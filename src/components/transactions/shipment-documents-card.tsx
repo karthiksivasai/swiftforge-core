@@ -24,6 +24,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Checkbox } from "@/components/ui/checkbox";
+import { listVendorDocuments } from "@/lib/integrations/vendor-shipping/client";
+import type { VendorDocType, VendorDocumentRow } from "@/lib/integrations/vendor-shipping/types";
 import {
   DOCUMENT_STATUS_LABELS,
   documentObjectUrl,
@@ -33,8 +36,52 @@ import {
   revokeDocumentObjectUrl,
   type ShipmentDocumentItem,
   type ShipmentDocumentStatus,
+  type ShipmentDocumentType,
 } from "@/lib/transactions/shipmentDocuments";
 import { cn } from "@/lib/utils";
+
+/** Fixed CourierWala-style quick-link row — only enable when vendor/system data exists. */
+const AWB_DOCUMENT_QUICK_LINKS: ReadonlyArray<{
+  key: string;
+  label: string;
+  /** Prefer center catalog type when present. */
+  centerType?: ShipmentDocumentType;
+  /** Prefer raw vendor doc_type when present (labels/box/etc.). */
+  vendorDocType?: VendorDocType;
+  /** System docs that can be generated client-side. */
+  canGenerate?: boolean;
+  kind?: "link" | "excel";
+}> = [
+  { key: "LOI", label: "LOI" },
+  { key: "AUTHORITY_LETTER", label: "Authority Letter", centerType: "AUTHORITY_LETTER", vendorDocType: "AUTHORITY_LETTER" },
+  { key: "AWB", label: "AWB", centerType: "AWB_LABEL", canGenerate: true },
+  { key: "LABEL", label: "Label", centerType: "AWB_LABEL", vendorDocType: "SHIPPING_LABEL", canGenerate: true },
+  { key: "INVOICE", label: "Invoice", centerType: "INVOICE", canGenerate: true },
+  { key: "VENDOR_AWB", label: "Vendor AWB", centerType: "VENDOR_AWB", vendorDocType: "VENDOR_AWB" },
+  { key: "VENDOR_INVOICE", label: "Vendor Invoice", centerType: "VENDOR_INVOICE", vendorDocType: "VENDOR_INVOICE" },
+  { key: "FORWARDING_AWB", label: "Forwarding AWB" },
+  { key: "FORWARDING_BOX", label: "Forwarding Box", vendorDocType: "BOX_LABEL" },
+  { key: "FORWARDING_LABEL", label: "Forwarding Label", vendorDocType: "SHIPPING_LABEL" },
+  { key: "FIRST_MILE_LABEL", label: "First Mile Label" },
+  { key: "KYC", label: "KYC", centerType: "KYC", vendorDocType: "KYC" },
+  { key: "EXCEL", label: "Excel", kind: "excel" },
+];
+
+function vendorDocToItem(row: VendorDocumentRow, title: string): ShipmentDocumentItem {
+  const hasFile = Boolean(row.source_url || row.content_b64);
+  return {
+    type: (row.doc_type as ShipmentDocumentType) || "OTHER",
+    title,
+    status: hasFile ? "AVAILABLE" : "WAITING",
+    id: row.id,
+    url: row.source_url ?? null,
+    contentB64: row.content_b64 ?? null,
+    mimeType: row.mime_type ?? "application/pdf",
+    source: "VENDOR",
+    available: hasFile,
+    hasContent: hasFile,
+  };
+}
 
 function statusBadgeClass(status: ShipmentDocumentStatus): string {
   switch (status) {
@@ -114,34 +161,46 @@ function DocumentPreviewDrawer({
   onClose: () => void;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const htmlPreview = preview?.htmlPreview ?? null;
-  const canPreviewFile = preview ? isPreviewableMime(preview.mimeType) : false;
+  /** Keep last document mounted during Sheet exit so the slide-out isn't blank. */
+  const [displayed, setDisplayed] = useState<ShipmentDocumentItem | null>(null);
+
+  useEffect(() => {
+    if (preview) setDisplayed(preview);
+  }, [preview]);
+
+  const active = preview ?? displayed;
+  const htmlPreview = active?.htmlPreview ?? null;
+  const canPreviewFile = active ? isPreviewableMime(active.mimeType) : false;
 
   useEffect(() => {
     revokeDocumentObjectUrl(blobUrl);
     setBlobUrl(null);
-    if (!preview || htmlPreview) return;
-    const href = documentObjectUrl(preview);
+    if (!active || htmlPreview) return;
+    const href = documentObjectUrl(active);
     setBlobUrl(href);
     return () => revokeDocumentObjectUrl(href);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only rebind when preview identity changes
-  }, [preview?.id, preview?.type, preview?.contentB64, preview?.url, htmlPreview]);
+  }, [active?.id, active?.type, active?.contentB64, active?.url, htmlPreview]);
 
-  const canDownload = Boolean(preview && (preview.contentB64 || preview.url || preview.htmlPreview));
+  const canDownload = Boolean(active && (active.contentB64 || active.url || active.htmlPreview));
 
   return (
     <Sheet open={Boolean(preview)} onOpenChange={(o) => !o && onClose()}>
       <SheetContent
         side="right"
-        className="flex h-full w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-[56vw]"
+        className={cn(
+          "flex h-dvh w-[min(1100px,92vw)] max-w-[92vw] flex-col gap-0 overflow-hidden border-l p-0 sm:max-w-[92vw]",
+          "shadow-[-8px_0_24px_rgba(0,0,0,0.15)]",
+          "ease-in-out duration-300 data-[state=open]:duration-300 data-[state=closed]:duration-300",
+        )}
       >
-        <SheetHeader className="border-b px-5 py-4 text-left">
+        <SheetHeader className="shrink-0 border-b px-5 py-4 text-left">
           <div className="flex items-start justify-between gap-3 pr-8">
             <div>
-              <SheetTitle>{preview?.title ?? "Document"}</SheetTitle>
+              <SheetTitle>{active?.title ?? "Document"}</SheetTitle>
               <SheetDescription>
-                {preview?.fileName || preview?.type || "Shipment document"}
-                {preview?.version ? ` · v${preview.version}` : ""}
+                {active?.fileName || active?.type || "Shipment document"}
+                {active?.version ? ` · v${active.version}` : ""}
               </SheetDescription>
             </div>
           </div>
@@ -151,7 +210,7 @@ function DocumentPreviewDrawer({
               size="sm"
               variant="outline"
               disabled={!canDownload}
-              onClick={() => preview && printDocument(preview)}
+              onClick={() => active && printDocument(active)}
             >
               <Printer className="mr-1.5 h-3.5 w-3.5" />
               Print
@@ -161,7 +220,7 @@ function DocumentPreviewDrawer({
               size="sm"
               variant="outline"
               disabled={!canDownload}
-              onClick={() => preview && downloadDocument(preview)}
+              onClick={() => active && downloadDocument(active)}
             >
               <Download className="mr-1.5 h-3.5 w-3.5" />
               Download
@@ -172,12 +231,12 @@ function DocumentPreviewDrawer({
             </Button>
           </div>
         </SheetHeader>
-        <div className="min-h-0 flex-1 bg-slate-50">
+        <div className="min-h-0 flex-1 overflow-auto bg-slate-50">
           {htmlPreview ? (
             <iframe
-              title={preview?.title ?? "Document preview"}
+              title={active?.title ?? "Document preview"}
               srcDoc={htmlPreview}
-              className="h-full min-h-[70vh] w-full border-0 bg-white"
+              className="h-full min-h-full w-full border-0 bg-white"
             />
           ) : !blobUrl ? (
             <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
@@ -186,23 +245,23 @@ function DocumentPreviewDrawer({
           ) : !canPreviewFile ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-sm">
               <p className="text-muted-foreground">Preview not supported for this file type.</p>
-              <Button type="button" onClick={() => preview && downloadDocument(preview)}>
+              <Button type="button" onClick={() => active && downloadDocument(active)}>
                 Download instead
               </Button>
             </div>
-          ) : (preview?.mimeType || "").toLowerCase().startsWith("image/") ? (
+          ) : (active?.mimeType || "").toLowerCase().startsWith("image/") ? (
             <div className="flex h-full items-center justify-center overflow-auto p-4">
               <img
                 src={blobUrl}
-                alt={preview?.title ?? "Document"}
+                alt={active?.title ?? "Document"}
                 className="max-h-full max-w-full object-contain"
               />
             </div>
           ) : (
             <iframe
-              title={preview?.title ?? "Document preview"}
+              title={active?.title ?? "Document preview"}
               src={blobUrl}
-              className="h-full min-h-[70vh] w-full border-0"
+              className="h-full min-h-full w-full border-0"
             />
           )}
         </div>
@@ -211,7 +270,7 @@ function DocumentPreviewDrawer({
   );
 }
 
-/** Compact CourierWala-style document links under AWB header after search/open. */
+/** Compact CourierWala-style document links under AWB header after save/edit. */
 export function ShipmentDocumentQuickLinks({
   shipmentId,
   refreshKey = 0,
@@ -225,159 +284,176 @@ export function ShipmentDocumentQuickLinks({
   onEnsureDocument?: (type: ShipmentDocumentItem["type"]) => Promise<ShipmentDocumentItem | null>;
 }) {
   const [preview, setPreview] = useState<ShipmentDocumentItem | null>(null);
-  const [busyType, setBusyType] = useState<string | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const query = useQuery({
+  const centerQuery = useQuery({
     queryKey: ["shipment-documents-quick", shipmentId, refreshKey],
     queryFn: () => listShipmentDocuments(shipmentId),
     enabled: Boolean(shipmentId),
   });
-  const docs = query.data ?? [];
-  if (!shipmentId) return null;
+  const vendorQuery = useQuery({
+    queryKey: ["shipment-vendor-documents-quick", shipmentId, refreshKey],
+    queryFn: () => listVendorDocuments(shipmentId),
+    enabled: Boolean(shipmentId),
+  });
+  const centerDocs = centerQuery.data ?? [];
+  const vendorDocs = vendorQuery.data ?? [];
 
-  const writeHtmlToWindow = (w: Window, html: string, title: string) => {
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-    try {
-      w.document.title = title;
-    } catch {
-      /* ignore */
+  const resolveLink = (def: (typeof AWB_DOCUMENT_QUICK_LINKS)[number]) => {
+    const vendorHit = def.vendorDocType
+      ? vendorDocs.find(
+          (d) =>
+            d.doc_type === def.vendorDocType && Boolean(d.source_url || d.content_b64),
+        )
+      : undefined;
+    if (vendorHit) {
+      return {
+        doc: vendorDocToItem(vendorHit, def.label),
+        canGenerate: false,
+        available: true,
+      };
     }
+    const centerHit = def.centerType
+      ? centerDocs.find((d) => d.type === def.centerType)
+      : undefined;
+    const available = Boolean(centerHit?.available && centerHit.status === "AVAILABLE");
+    const canGenerate =
+      Boolean(def.canGenerate && def.centerType && onEnsureDocument) &&
+      (def.centerType === "AWB_LABEL" || def.centerType === "INVOICE");
+    return {
+      doc: centerHit
+        ? { ...centerHit, title: def.label }
+        : ({
+            type: def.centerType ?? "OTHER",
+            title: def.label,
+            status: "WAITING" as const,
+            available: false,
+          } satisfies ShipmentDocumentItem),
+      canGenerate,
+      available,
+    };
   };
 
-  const openDoc = async (doc: ShipmentDocumentItem) => {
-    const available = doc.available && doc.status === "AVAILABLE";
-    const isSystemDoc = doc.type === "AWB_LABEL" || doc.type === "INVOICE";
+  if (!shipmentId) return null;
 
-    // Open tab synchronously inside the click gesture (await would get blocked).
-    const pendingWindow =
-      isSystemDoc && onEnsureDocument ? window.open("", "_blank") : null;
-    if (isSystemDoc && onEnsureDocument && !pendingWindow) {
-      toast.error("Pop-up blocked — allow pop-ups for this site to view documents");
+  const openDoc = async (
+    key: string,
+    doc: ShipmentDocumentItem,
+    opts: { canGenerate: boolean; available: boolean },
+  ) => {
+    const { canGenerate, available } = opts;
+    if (!available && !canGenerate) {
+      toast.info(`${doc.title} is not available from the vendor yet`);
+      return;
     }
 
-    setBusyType(doc.type);
+    const isSystemDoc = doc.type === "AWB_LABEL" || doc.type === "INVOICE";
+
+    setBusyKey(key);
     try {
       let latest = doc;
 
       if (onEnsureDocument && (isSystemDoc || !available)) {
         const generated = await onEnsureDocument(doc.type);
-        if (generated?.htmlPreview) {
-          if (pendingWindow) {
-            writeHtmlToWindow(
-              pendingWindow,
-              generated.htmlPreview,
-              generated.title || doc.title,
-            );
-          }
-          setPreview(generated);
+        if (generated?.htmlPreview || generated?.available) {
+          setPreview({ ...generated, title: doc.title });
           void queryClient.invalidateQueries({ queryKey: ["shipment-documents-quick"] });
           void queryClient.invalidateQueries({ queryKey: ["shipment-documents"] });
           return;
         }
-        pendingWindow?.close();
-        if (generated?.available) {
-          latest = generated;
-        } else if (!available) {
-          onOpenCenter?.();
+        if (!available) {
+          toast.info(`${doc.title} is not available yet`);
           return;
         }
       } else if (!available) {
-        pendingWindow?.close();
-        onOpenCenter?.();
+        toast.info(`${doc.title} is not available yet`);
         return;
-      } else if (!latest.contentB64 && !latest.url && !latest.htmlPreview) {
+      } else if (!latest.contentB64 && !latest.url && !latest.htmlPreview && doc.type) {
         const stored = await getShipmentDocument(shipmentId, doc.type);
         if (stored?.available) latest = { ...doc, ...stored, title: doc.title };
       }
 
-      if (latest.htmlPreview) {
-        if (pendingWindow) {
-          writeHtmlToWindow(pendingWindow, latest.htmlPreview, latest.title || doc.title);
-        } else {
-          const w = window.open("", "_blank");
-          if (w) writeHtmlToWindow(w, latest.htmlPreview, latest.title || doc.title);
-        }
+      if (latest.htmlPreview || latest.url || latest.contentB64) {
         setPreview(latest);
         return;
       }
 
-      pendingWindow?.close();
-
-      // Vendor docs (Authority Letter, etc.): open vendor URL in a new tab when present.
-      if (latest.url) {
-        window.open(latest.url, "_blank", "noopener,noreferrer");
-        setPreview(latest);
-        return;
-      }
-
-      if (!latest.contentB64) {
-        toast.error(
-          latest.type === "AUTHORITY_LETTER"
-            ? "Authority Letter not received from vendor yet — complete live vendor booking"
-            : `Could not open ${doc.title}`,
-        );
-        return;
-      }
-      setPreview(latest);
+      toast.error(
+        latest.type === "AUTHORITY_LETTER"
+          ? "Authority Letter not received from vendor yet — complete live vendor booking"
+          : `Could not open ${doc.title}`,
+      );
     } catch (e) {
-      pendingWindow?.close();
       toast.error(e instanceof Error ? e.message : `Could not open ${doc.title}`);
     } finally {
-      setBusyType(null);
+      setBusyKey(null);
     }
   };
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border/60 pb-3 text-xs">
-        {docs.map((doc) => {
-          const available = doc.available && doc.status === "AVAILABLE";
-          const canGenerate =
-            (doc.type === "AWB_LABEL" || doc.type === "INVOICE") &&
-            Boolean(onEnsureDocument);
-          const active = available || canGenerate;
+      <div className="mb-4 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-b border-border/60 pb-3 text-xs">
+        {AWB_DOCUMENT_QUICK_LINKS.map((def) => {
+          if (def.kind === "excel") {
+            return (
+              <label
+                key={def.key}
+                className="inline-flex items-center gap-1.5 text-muted-foreground"
+                title="Excel export is not available for this booking yet"
+              >
+                <span className="font-medium">{def.label}</span>
+                <Checkbox checked={false} disabled className="h-3.5 w-3.5" />
+              </label>
+            );
+          }
+
+          const resolved = resolveLink(def);
+          const active = resolved.available || resolved.canGenerate;
           return (
             <button
-              key={doc.type}
+              key={def.key}
               type="button"
-              disabled={busyType === doc.type}
-              onClick={() => void openDoc(doc)}
+              disabled={!active || busyKey === def.key}
+              onClick={() => void openDoc(def.key, resolved.doc, resolved)}
               className={cn(
                 "inline-flex items-center gap-1.5 font-medium transition-colors",
                 active
-                  ? "text-sky-700 hover:text-sky-900 hover:underline"
-                  : "text-muted-foreground hover:text-foreground hover:underline",
+                  ? "text-foreground hover:text-sky-800 hover:underline"
+                  : "cursor-not-allowed text-muted-foreground/50",
               )}
               title={
-                available
-                  ? `Preview ${doc.title}`
-                  : canGenerate
-                    ? `Generate ${doc.title}`
-                    : `${DOCUMENT_STATUS_LABELS[doc.status] ?? "Not available"} — open Documents center`
+                resolved.available
+                  ? `Open ${def.label}`
+                  : resolved.canGenerate
+                    ? `Generate ${def.label}`
+                    : `${DOCUMENT_STATUS_LABELS[resolved.doc.status] ?? "Not available"}`
               }
             >
-              {busyType === doc.type ? (
+              {busyKey === def.key ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <FileText className="h-3.5 w-3.5" />
               )}
-              {doc.title}
+              {def.label}
             </button>
           );
         })}
-        <button
-          type="button"
-          onClick={() => {
-            void queryClient.invalidateQueries({ queryKey: ["shipment-documents"] });
-            void queryClient.invalidateQueries({ queryKey: ["shipment-documents-quick"] });
-            onOpenCenter?.();
-          }}
-          className="ml-auto text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
-        >
-          Documents center
-        </button>
+        {onOpenCenter ? (
+          <button
+            type="button"
+            onClick={() => {
+              void queryClient.invalidateQueries({ queryKey: ["shipment-documents"] });
+              void queryClient.invalidateQueries({ queryKey: ["shipment-documents-quick"] });
+              void queryClient.invalidateQueries({
+                queryKey: ["shipment-vendor-documents-quick"],
+              });
+              onOpenCenter();
+            }}
+            className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+          >
+            Documents center
+          </button>
+        ) : null}
       </div>
       <DocumentPreviewDrawer preview={preview} onClose={() => setPreview(null)} />
     </>
@@ -450,36 +526,16 @@ function DocumentTile({
   const canOpen = available || (isSystemDoc && Boolean(onEnsure));
 
   const open = async () => {
-    const pendingWindow = isSystemDoc && onEnsure ? window.open("", "_blank") : null;
-    if (isSystemDoc && onEnsure && !pendingWindow) {
-      toast.error("Pop-up blocked — allow pop-ups to view documents");
-    }
     try {
       if (onEnsure && isSystemDoc) {
         const generated = await onEnsure(doc.type);
-        if (generated?.htmlPreview) {
-          if (pendingWindow) {
-            pendingWindow.document.open();
-            pendingWindow.document.write(generated.htmlPreview);
-            pendingWindow.document.close();
-          }
-          onPreview(generated);
-          return;
-        }
-        pendingWindow?.close();
-        if (generated?.available) {
+        if (generated?.htmlPreview || generated?.available) {
           onPreview(generated);
           return;
         }
       }
-      pendingWindow?.close();
       const stored = await getShipmentDocument(shipmentId, doc.type);
-      if (stored?.url) {
-        window.open(stored.url, "_blank", "noopener,noreferrer");
-        onPreview({ ...doc, ...stored, title: doc.title });
-        return;
-      }
-      if (stored?.available || stored?.contentB64) {
+      if (stored?.htmlPreview || stored?.url || stored?.available || stored?.contentB64) {
         onPreview({ ...doc, ...stored, title: doc.title });
         return;
       }
@@ -489,7 +545,6 @@ function DocumentTile({
           : `Could not open ${doc.title}`,
       );
     } catch (e) {
-      pendingWindow?.close();
       toast.error(e instanceof Error ? e.message : `Could not open ${doc.title}`);
     }
   };

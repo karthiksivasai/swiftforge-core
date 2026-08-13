@@ -6,8 +6,6 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Loader2, Search } from "lucide-react";
-import { toast } from "sonner";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -65,6 +63,7 @@ export const DEMO_TO_LIVE_LOOKUP: Partial<Record<LookupKey, LiveLookupKey>> = {
   zone: "zone",
   pinCode: "pin-code",
   serviceCentre: "service-center",
+  airline: "airline",
 };
 
 type SearchHit = { id?: string; code: string; name: string; hint?: string | null };
@@ -142,8 +141,8 @@ export function SearchableLookupPair({
   manualSearch = false,
   displayVariant = "standard",
   displayLimit,
-  emptySearchMessage,
-  noResultsMessage = AWB_LOOKUP_NO_RESULTS,
+  emptySearchMessage: _emptySearchMessage,
+  noResultsMessage: _noResultsMessage = AWB_LOOKUP_NO_RESULTS,
 }: {
   value: LookupPairValue;
   onChange: (v: LookupPairValue) => void;
@@ -165,6 +164,8 @@ export function SearchableLookupPair({
   emptySearchMessage?: string;
   noResultsMessage?: string;
 }) {
+  void _emptySearchMessage;
+  void _noResultsMessage;
   const resultLimit = displayLimit ?? (manualSearch ? AWB_LOOKUP_RESULT_LIMIT : 50);
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
@@ -355,74 +356,19 @@ export function SearchableLookupPair({
     onCommit?.();
   }, [clearManualDropdown, onCommit]);
 
-  const applyManualHits = useCallback(
-    (hits: SearchHit[], opts?: { autoSelectSingle?: boolean }) => {
-      const autoSelectSingle = opts?.autoSelectSingle ?? false;
-      if (hits.length === 0) {
-        clearManualDropdown();
-        return false;
-      }
-      if (autoSelectSingle && hits.length === 1) {
-        pick(hits[0]);
-        return true;
-      }
-      setManualDropdownRows(hits);
-      setManualDropdownOpen(true);
-      setHighlight(0);
-      return true;
-    },
-    [clearManualDropdown, pick],
-  );
-
-  const openBrowsePopup = useCallback(() => {
+  const openBrowsePopup = useCallback((initialQuery = "") => {
     setInlineOpen(false);
     setManualDropdownOpen(false);
     setManualDropdownRows([]);
-    setPopupQuery("");
+    setPopupQuery(initialQuery);
     setManualPopupRows(null);
     setPopupOpen(true);
   }, []);
 
-  const runManualSearch = useCallback(
-    async (opts?: { autoSelectSingle?: boolean; showEmptyToast?: boolean }) => {
-      const autoSelectSingle = opts?.autoSelectSingle ?? true;
-      const q = searchQuery();
-      if (!q) {
-        openBrowsePopup();
-        return;
-      }
-      const seq = ++explicitSearchSeqRef.current;
-      setManualSearching(true);
-      try {
-        const hits = await fetchLookupHits(lookupKey, live, liveKey, q);
-        if (seq !== explicitSearchSeqRef.current) return;
-        if (hits.length === 0) {
-          clearManualDropdown();
-          toast.error(noResultsMessage);
-          return;
-        }
-        applyManualHits(hits, { autoSelectSingle });
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Search failed");
-      } finally {
-        if (seq === explicitSearchSeqRef.current) setManualSearching(false);
-      }
-    },
-    [
-      applyManualHits,
-      clearManualDropdown,
-      live,
-      liveKey,
-      lookupKey,
-      noResultsMessage,
-      openBrowsePopup,
-      searchQuery,
-    ],
-  );
-
+  /** Search icon / F2 always opens the select-list dialog (not the inline typeahead). */
   const triggerExplicitSearch = useCallback(() => {
-    void runManualSearch({ autoSelectSingle: false, showEmptyToast: true });
-  }, [runManualSearch]);
+    openBrowsePopup(searchQuery());
+  }, [openBrowsePopup, searchQuery]);
 
   const startInlineFrom = (_field: "code" | "name", text: string) => {
     if (manualSearch) return;

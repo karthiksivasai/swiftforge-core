@@ -28,7 +28,27 @@ export type LookupKey =
   | "exception"
   | "paymentType"
   | "obc"
+  | "flight"
+  | "airline"
   | "serviceType";
+
+const AIRLINES: LookupOption[] = [
+  { code: "AI", name: "AIR INDIA", hint: "AI" },
+  { code: "6E", name: "INDIGO", hint: "6E" },
+  { code: "EK", name: "EMIRATES", hint: "EK" },
+  { code: "SQ", name: "SINGAPORE AIRLINES", hint: "SQ" },
+  { code: "BA", name: "BRITISH AIRWAYS", hint: "BA" },
+  { code: "QR", name: "QATAR AIRWAYS", hint: "QR" },
+  { code: "LH", name: "LUFTHANSA", hint: "LH" },
+  { code: "SG", name: "SPICEJET", hint: "SG" },
+  { code: "UK", name: "VISTARA", hint: "UK" },
+  { code: "QF", name: "QANTAS", hint: "QF" },
+  { code: "AK", name: "AIR ASIA", hint: "AK" },
+  { code: "NZ", name: "AIR NEW ZEALAND", hint: "NZ" },
+  { code: "CX", name: "CATHAY PACIFIC", hint: "CX" },
+  { code: "TG", name: "THAI AIRWAYS", hint: "TG" },
+  { code: "MH", name: "MALAYSIA AIRLINES", hint: "MH" },
+];
 
 const STATES: LookupOption[] = [
   { code: "AN", name: "Andaman & Nicobar Islands" },
@@ -321,6 +341,19 @@ const OBC_ENTRIES: LookupOption[] = [
   { code: "OBC005", name: "OBC HYD - DEL" },
 ];
 
+const FLIGHTS: LookupOption[] = [
+  { code: "AI101", name: "AIR INDIA HYD-DEL", hint: "Air India" },
+  { code: "6E204", name: "INDIGO HYD-BOM", hint: "IndiGo" },
+  { code: "6E502", name: "INDIGO HYD-DXB", hint: "IndiGo" },
+  { code: "EK501", name: "EMIRATES HYD-DXB", hint: "Emirates" },
+  { code: "SQ402", name: "SINGAPORE AIRLINES HYD-SIN", hint: "Singapore Airlines" },
+  { code: "BA118", name: "BRITISH AIRWAYS HYD-LHR", hint: "British Airways" },
+  { code: "QR500", name: "QATAR AIRWAYS HYD-DOH", hint: "Qatar Airways" },
+  { code: "LH756", name: "LUFTHANSA HYD-FRA", hint: "Lufthansa" },
+  { code: "SG301", name: "SPICEJET HYD-MAA", hint: "SpiceJet" },
+  { code: "UK820", name: "VISTARA HYD-BLR", hint: "Vistara" },
+];
+
 const SERVICE_TYPES: LookupOption[] = [
   { code: "DOX", name: "DOX" },
   { code: "SPX", name: "SPX" },
@@ -353,5 +386,7 @@ export const MASTER_LOOKUPS: Record<LookupKey, { title: string; options: LookupO
   exception: { title: "Select Exception", options: EXCEPTIONS },
   paymentType: { title: "Select Payment Type", options: PAYMENT_TYPES },
   obc: { title: "Select OBC", options: OBC_ENTRIES },
+  flight: { title: "Select Flight", options: FLIGHTS, hintLabel: "Airline" },
+  airline: { title: "Select Airline", options: AIRLINES, hintLabel: "Code" },
   serviceType: { title: "Select Service Type", options: SERVICE_TYPES },
 };

@@ -26,7 +26,6 @@ import {
   ERP_NAV_ACTION,
   ERP_NAV_ACTION_NEXT_TAB,
   ERP_NAV_ACTION_PREV_TAB,
-  ERP_NAV_ACTIVE,
   ERP_NAV_ORDER,
   focusErpFieldByOrder,
   focusFirstErpField,
@@ -72,20 +71,6 @@ export function ErpFormNavProvider({
   children: React.ReactNode;
 }) {
   const lastNavAnchorRef = useRef<HTMLElement | null>(null);
-  const activeNavAnchorRef = useRef<HTMLElement | null>(null);
-
-  const clearActiveNavAnchor = useCallback(() => {
-    activeNavAnchorRef.current?.removeAttribute(ERP_NAV_ACTIVE);
-    activeNavAnchorRef.current = null;
-  }, []);
-
-  const setActiveNavAnchor = useCallback((anchor: HTMLElement | null) => {
-    if (activeNavAnchorRef.current === anchor) return;
-    clearActiveNavAnchor();
-    if (!anchor) return;
-    anchor.setAttribute(ERP_NAV_ACTIVE, "");
-    activeNavAnchorRef.current = anchor;
-  }, [clearActiveNavAnchor]);
 
   const resolveAdvanceFrom = useCallback(
     (from: HTMLElement | null | undefined): HTMLElement | null => {
@@ -199,28 +184,12 @@ export function ErpFormNavProvider({
       if (!(target instanceof HTMLElement)) return;
       if (!container.contains(target)) return;
       const anchor = resolveErpNavAnchor(target, container);
-      if (anchor?.hasAttribute(ERP_NAV_ORDER)) {
-        setActiveNavAnchor(anchor);
-        lastNavAnchorRef.current = anchor;
-        return;
-      }
-      clearActiveNavAnchor();
-    };
-
-    const onFocusOut = (event: FocusEvent) => {
-      const related = event.relatedTarget;
-      if (related instanceof HTMLElement && container.contains(related)) return;
-      clearActiveNavAnchor();
+      if (anchor?.hasAttribute(ERP_NAV_ORDER)) lastNavAnchorRef.current = anchor;
     };
 
     container.addEventListener("focusin", onFocusIn, true);
-    container.addEventListener("focusout", onFocusOut, true);
-    return () => {
-      container.removeEventListener("focusin", onFocusIn, true);
-      container.removeEventListener("focusout", onFocusOut, true);
-      clearActiveNavAnchor();
-    };
-  }, [clearActiveNavAnchor, containerRef, enabled, setActiveNavAnchor]);
+    return () => container.removeEventListener("focusin", onFocusIn, true);
+  }, [containerRef, enabled]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -337,7 +306,7 @@ export function ErpNavSelect({
   triggerClassName?: string;
   contentClassName?: string;
   items: readonly ErpNavSelectItem[] | readonly string[];
-  /** Return false to block opening the dropdown (e.g. prerequisite validation). */
+  /** Return false to prevent the dropdown from opening. */
   beforeOpen?: () => boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -350,24 +319,20 @@ export function ErpNavSelect({
       ? (items as readonly string[]).map((v) => ({ value: v, label: v }))
       : [...(items as readonly ErpNavSelectItem[])];
 
-  const handleOpenChange = useCallback(
-    (next: boolean) => {
-      if (next && beforeOpen && !beforeOpen()) {
-        setOpen(false);
-        return;
-      }
-      setOpen(next);
-    },
-    [beforeOpen],
-  );
-
   return (
     <Select
-      open={beforeOpen ? open : undefined}
-      onOpenChange={beforeOpen ? handleOpenChange : undefined}
       value={value}
       onValueChange={onNavChange}
       disabled={disabled}
+      {...(beforeOpen
+        ? {
+            open,
+            onOpenChange: (next: boolean) => {
+              if (next && !beforeOpen()) return;
+              setOpen(next);
+            },
+          }
+        : {})}
     >
       <SelectTrigger className={triggerClassName} {...erpNavOrder(order)}>
         <SelectValue placeholder={placeholder} />

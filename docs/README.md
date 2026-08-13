@@ -2,6 +2,8 @@
 
 Permanent project documentation for the **Courier Management System**. Every future feature must reference these files before implementation.
 
+> **Start here for onboarding:** [`../PROJECT.md`](../PROJECT.md) — full A→Z project bible (product, features, tech stack, flows, components). Share that file with new developers or coding AI assistants first.
+
 | File | Purpose |
 | --- | --- |
 | [PROJECT_RULES.md](./PROJECT_RULES.md) | Non-negotiable rules: stack, structure, conventions, do/don't. |

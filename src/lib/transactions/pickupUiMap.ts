@@ -40,9 +40,11 @@ export type UiPickupRow = UiPickupForm & {
   status: string;
   rowVersion: number;
   passed: string;
+  passReason?: string;
   awbNo: string;
   confirm: string;
   cancel: string;
+  cancelType?: string;
   userId: string;
 };
 
@@ -112,10 +114,12 @@ export function dbPickupToUi(row: PickupDbRow): UiPickupRow {
     pickupTime: row.pickup_time ? String(row.pickup_time).slice(0, 5) : "",
     bookedBy: row.user_id ?? "",
     editedBy: "",
-    passed: "",
+    passed: row.passed === "YES" ? "YES" : (row.passed || ""),
+    passReason: row.pass_reason ?? "",
     awbNo: row.awb_no ?? "",
     confirm: row.status === "CONFIRMED" ? "Yes" : "",
-    cancel: row.status === "CANCELLED" ? "Yes" : "",
+    cancel: row.status === "CANCELLED" ? (row.cancel_type === "ATTEMPT_CANCEL" ? "Attempt Cancel" : "Call Cancel") : "",
+    cancelType: row.cancel_type ?? "",
     userId: row.user_id ?? "",
   };
 }

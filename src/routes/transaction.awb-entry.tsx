@@ -136,6 +136,15 @@ import {
   recalculateShipmentRating,
 } from "@/lib/transactions/resources/rating";
 import {
+  getBranchAwbStockSummary,
+  validateManualAwb,
+  type BranchAwbStockSummary,
+} from "@/lib/transactions/resources/awbStock";
+import {
+  validateDocumentId,
+  validatePartyIdNumbers,
+} from "@/lib/transactions/idValidators";
+import {
   ratingSnapshotToChargeLines,
   ratingToSummary,
   type RatingSummary,
@@ -284,6 +293,8 @@ type KycData = {
 
 type AwbFullForm = {
   awbNo: string;
+  /** Source AWB this entry was duplicated from (blank for normal creates). */
+  masterAwbNo: string;
   bookDate: string;
   bookTime: string;
   referenceNo: string;
@@ -723,6 +734,34 @@ const ENTRY_TYPES = ["Duplicate Entry"] as const;
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
 
+function lookupPairEqual(a: LookupPair, b: LookupPair): boolean {
+  return a.id === b.id && a.code === b.code && a.name === b.name;
+}
+
+function copyLookupPair(pair: LookupPair): LookupPair {
+  return { ...pair };
+}
+
+/** Mirror Shipment Details product/vendor/service into Forwarding delivery fields. */
+function syncForwardingDeliveryFromShipment(
+  forwarding: ForwardingData,
+  product: LookupPair,
+  vendor: LookupPair,
+  service: LookupPair,
+): Partial<ForwardingData> | null {
+  const patch: Partial<ForwardingData> = {};
+  if (!lookupPairEqual(forwarding.deliveryProduct, product)) {
+    patch.deliveryProduct = copyLookupPair(product);
+  }
+  if (!lookupPairEqual(forwarding.deliveryVendor, vendor)) {
+    patch.deliveryVendor = copyLookupPair(vendor);
+  }
+  if (!lookupPairEqual(forwarding.deliveryService, service)) {
+    patch.deliveryService = copyLookupPair(service);
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
 /** Default shipper origin for new AWB entries (CourierWala / HYD hub). */
 const DEFAULT_SHIPPER_ORIGIN: LookupPair = { code: "HYD", name: "Hyderabad" };
 
@@ -868,6 +907,7 @@ const emptyVendorChargeDraft = (): VendorChargeDraft => ({
 
 const emptyForm = (): AwbFullForm => ({
   awbNo: "",
+  masterAwbNo: "",
   bookDate: todayIso(),
   bookTime: nowBookTime(),
   referenceNo: "",
@@ -916,6 +956,137 @@ const emptyForm = (): AwbFullForm => ({
   forwarding: emptyForwarding(),
   kyc: emptyKyc(),
 });
+
+const cloneLookupPair = (pair: LookupPair): LookupPair => ({
+  id: pair.id,
+  code: pair.code,
+  name: pair.name,
+});
+
+const clonePartyDetails = (party: PartyDetails): PartyDetails => ({
+  ...party,
+  origin: cloneLookupPair(party.origin),
+  companyName: cloneLookupPair(party.companyName),
+});
+
+/**
+ * Duplicate Entry mapping — copies shipment detail across all tabs, regenerates
+ * identity / post-booking fields, and recomputes charge totals.
+ */
+const cloneAwbFormFromSource = (
+  source: AwbFullForm,
+  sourceAwbNo: string,
+  opts?: { awbNoPlus1?: boolean },
+): AwbFullForm => {
+  const blank = emptyForm();
+  let newAwbNo = "";
+  if (opts?.awbNoPlus1) {
+    const num = Number.parseInt(sourceAwbNo, 10);
+    if (!Number.isNaN(num)) newAwbNo = String(num + 1);
+  }
+
+  const piecesLines = (source.piecesLines ?? []).map((line, i) => ({
+    ...line,
+    id: crypto.randomUUID(),
+    childAwb: newAwbNo ? `${newAwbNo}-${i + 1}` : "",
+  }));
+
+  const chargeLines = (source.chargeLines ?? []).map((line) => ({
+    ...line,
+    id: crypto.randomUUID(),
+  }));
+  const customerChargesTotal = chargeLines
+    .reduce((s, l) => s + (Number.parseFloat(l.total) || Number.parseFloat(l.amount) || 0), 0)
+    .toFixed(2);
+
+  const srcFwd = source.forwarding ?? emptyForwarding();
+  const vendorChargeLines = (srcFwd.vendorChargeLines ?? []).map((line) => ({
+    ...line,
+    id: crypto.randomUUID(),
+  }));
+  const vendorChargesTotal = vendorChargeLines
+    .reduce((s, l) => s + (Number.parseFloat(l.total) || Number.parseFloat(l.amount) || 0), 0)
+    .toFixed(2);
+
+  const srcProforma = source.proforma ?? emptyProforma();
+  const proformaLines = (srcProforma.lines ?? []).map((line) => ({
+    ...line,
+    id: crypto.randomUUID(),
+  }));
+
+  return {
+    ...blank,
+    awbNo: newAwbNo,
+    masterAwbNo: sourceAwbNo,
+    bookDate: source.bookDate || blank.bookDate,
+    bookTime: source.bookTime || blank.bookTime,
+    referenceNo: source.referenceNo ?? "",
+    clientName: cloneLookupPair(source.clientName),
+    awbUserId: source.awbUserId || blank.awbUserId,
+    podUserId: source.podUserId ?? "",
+    // Regenerated / blank operational identifiers
+    manifestNo: blank.manifestNo,
+    manifestDate: "",
+    invoiceNo: "",
+    debitNoteNo: blank.debitNoteNo,
+    creditNoteNo: blank.creditNoteNo,
+    flightNo: "",
+    shipper: clonePartyDetails(source.shipper),
+    consignee: clonePartyDetails(source.consignee),
+    product: cloneLookupPair(source.product),
+    vendor: cloneLookupPair(source.vendor),
+    airline: source.airline ?? "",
+    service: cloneLookupPair(source.service),
+    shipmentValue: source.shipmentValue ?? "",
+    shipmentCurrency: source.shipmentCurrency || blank.shipmentCurrency,
+    pieces: source.pieces || blank.pieces,
+    piecesUnit: source.piecesUnit || blank.piecesUnit,
+    actualWeight: source.actualWeight || blank.actualWeight,
+    weightUnit: source.weightUnit || blank.weightUnit,
+    volWeight: source.volWeight || blank.volWeight,
+    chargeWeight: source.chargeWeight || blank.chargeWeight,
+    commercial: source.commercial === true,
+    oda: source.oda === true,
+    medicalCharges: source.medicalCharges === true,
+    piecesLines,
+    chargeLines,
+    customerChargesTotal,
+    vendorChargesTotal,
+    paymentType: source.paymentType ?? "",
+    content: source.content ?? "",
+    instruction: source.instruction ?? "",
+    fieldExecutive: cloneLookupPair(source.fieldExecutive),
+    cashReceiptNo: "",
+    amountReceived: "",
+    balanceAmount: "",
+    cashReceiptDate: "",
+    lock: false,
+    forwardingNo: "",
+    deliveryNo: "",
+    pickupId: undefined,
+    proforma: {
+      ...emptyProforma(),
+      ...srcProforma,
+      invoiceNo: "",
+      invoiceDate: "",
+      lines: proformaLines,
+    },
+    forwarding: {
+      ...emptyForwarding(),
+      deliveryProduct: cloneLookupPair(srcFwd.deliveryProduct ?? emptyPair()),
+      deliveryVendor: cloneLookupPair(srcFwd.deliveryVendor ?? emptyPair()),
+      deliveryService: cloneLookupPair(srcFwd.deliveryService ?? emptyPair()),
+      vendorWeight: srcFwd.vendorWeight || "0",
+      vendorAmount: srcFwd.vendorAmount || "0.00",
+      vendorInvoice: "",
+      deliveryAwb: "",
+      forwardingAwb: "",
+      vendorChargeLines,
+    },
+    // Keep shipper/consignee document type+no (on party); do not copy uploads / verification.
+    kyc: emptyKyc(),
+  };
+};
 
 const calcVolWeight = (draft: PiecesDraft) => {
   const l = Number.parseFloat(draft.length) || 0;
@@ -1302,6 +1473,7 @@ function AwbEntryPage() {
   const [saving, setSaving] = useState(false);
   const [bookingErrors, setBookingErrors] = useState<string[]>([]);
   const [cancelShipmentTarget, setCancelShipmentTarget] = useState<AwbRow | null>(null);
+  const [awbMode, setAwbMode] = useState<"AUTO" | "MANUAL">("AUTO");
   const [clientLoading, setClientLoading] = useState(false);
   const [loadedClientProfile, setLoadedClientProfile] = useState<ClientProfile | null>(null);
   const clientLoadSeqRef = useRef(0);
@@ -1311,7 +1483,33 @@ function AwbEntryPage() {
   const [vendorOtpMobile, setVendorOtpMobile] = useState<string | null>(null);
   const [vendorSandboxOtp, setVendorSandboxOtp] = useState<string | null>(null);
   const [vendorMeta, setVendorMeta] = useState<VendorShippingMeta>({});
+  const [vendorLastResult, setVendorLastResult] = useState<import("@/lib/integrations/vendor-shipping").VendorBookResult | null>(null);
   const [vendorPanelKey, setVendorPanelKey] = useState(0);
+
+  const branchStockQuery = useQuery({
+    queryKey: ["branch-awb-stock", profile?.home_branch_id],
+    queryFn: () => getBranchAwbStockSummary(profile?.home_branch_id || undefined),
+    enabled: authed,
+  });
+
+  // Alt+~ / Alt+` shortcut to toggle Auto vs Manual AWB
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && (e.key === "~" || e.key === "`")) {
+        e.preventDefault();
+        setAwbMode((m) => {
+          const next = m === "AUTO" ? "MANUAL" : "AUTO";
+          toast.info(next === "MANUAL" ? "Switched to MANUAL AWB mode" : "Switched to AUTO AWB mode");
+          if (next === "AUTO") {
+            setForm((f) => ({ ...f, awbNo: "" }));
+          }
+          return next;
+        });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   type DraftUiStatus = "idle" | "saving" | "saved" | "error";
   const [draftUiStatus, setDraftUiStatus] = useState<DraftUiStatus>("idle");
@@ -1326,8 +1524,8 @@ function AwbEntryPage() {
 
   const formStatus = editing?.status ?? (showForm && !editing ? "DRAFT" : undefined);
   const isReadOnly = Boolean(formStatus && formStatus !== "DRAFT");
-  const canBook = Boolean(formStatus === "DRAFT" || (!editing && showForm));
-  const canCancelShipment = Boolean(editing && (formStatus === "DRAFT" || formStatus === "BOOKED"));
+  /** Persisted shipment id from save/book/open-edit — not the AWB number input. */
+  const isSaved = Boolean(editing?.id);
   const hasUnfinishedDraft =
     showForm && !isReadOnly && isAwbDraftWorthKeeping(form);
 
@@ -1450,22 +1648,79 @@ function AwbEntryPage() {
     };
   };
 
+  const normalizeForwarding = (raw: unknown, fallback?: Partial<ForwardingData>): ForwardingData => {
+    const base = emptyForwarding();
+    const f =
+      raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const pair = (v: unknown, fb: LookupPair): LookupPair => {
+      if (!v || typeof v !== "object") return { ...fb };
+      const p = v as Record<string, unknown>;
+      return {
+        id: typeof p.id === "string" ? p.id : fb.id,
+        code: String(p.code ?? fb.code ?? ""),
+        name: String(p.name ?? fb.name ?? ""),
+      };
+    };
+    const linesRaw = Array.isArray(f.vendorChargeLines) ? f.vendorChargeLines : [];
+    return {
+      ...base,
+      ...fallback,
+      deliveryAwb: String(f.deliveryAwb ?? fallback?.deliveryAwb ?? base.deliveryAwb),
+      forwardingAwb: String(f.forwardingAwb ?? fallback?.forwardingAwb ?? base.forwardingAwb),
+      deliveryProduct: pair(f.deliveryProduct, fallback?.deliveryProduct ?? base.deliveryProduct),
+      deliveryVendor: pair(f.deliveryVendor, fallback?.deliveryVendor ?? base.deliveryVendor),
+      deliveryService: pair(f.deliveryService, fallback?.deliveryService ?? base.deliveryService),
+      vendorWeight: String(f.vendorWeight ?? fallback?.vendorWeight ?? base.vendorWeight),
+      vendorAmount: String(f.vendorAmount ?? fallback?.vendorAmount ?? base.vendorAmount),
+      vendorInvoice: String(f.vendorInvoice ?? fallback?.vendorInvoice ?? base.vendorInvoice),
+      vendorChargeLines: linesRaw.map((line, i) => {
+        const l = line && typeof line === "object" ? (line as Record<string, unknown>) : {};
+        return {
+          id: String(l.id ?? `vch-${i}`),
+          description: String(l.description ?? ""),
+          rate: String(l.rate ?? ""),
+          amount: String(l.amount ?? ""),
+          fuelApply: String(l.fuelApply ?? "No"),
+          fuelAmt: String(l.fuelAmt ?? "0"),
+          taxApply: String(l.taxApply ?? "No"),
+          taxOnFuel: String(l.taxOnFuel ?? "No"),
+          igst: String(l.igst ?? "0"),
+          sgst: String(l.sgst ?? "0"),
+          cgst: String(l.cgst ?? "0"),
+          total: String(l.total ?? "0"),
+          chargesType: String(l.chargesType ?? "Vendor"),
+        };
+      }),
+    };
+  };
+
   const normalizeForm = (data: AwbFullForm): AwbFullForm => {
-    const forwarding = data.forwarding ?? emptyForwarding();
     const bookTimeDigits = String(data.bookTime ?? "")
       .replace(/\D/g, "")
       .slice(0, 4);
+    const forwarding = normalizeForwarding(data.forwarding, {
+      deliveryAwb: data.deliveryNo,
+      forwardingAwb: data.forwardingNo,
+    });
     return {
       ...data,
+      masterAwbNo: String(data.masterAwbNo ?? ""),
       bookTime: bookTimeDigits || data.bookTime,
       proforma: normalizeProforma(data.proforma),
       forwarding: {
-        ...emptyForwarding(),
         ...forwarding,
-        deliveryAwb: forwarding.deliveryAwb || data.deliveryNo,
-        forwardingAwb: forwarding.forwardingAwb || data.forwardingNo,
+        deliveryAwb: forwarding.deliveryAwb || data.deliveryNo || "",
+        forwardingAwb: forwarding.forwardingAwb || data.forwardingNo || "",
       },
       kyc: data.kyc ?? emptyKyc(),
+      piecesLines: (data.piecesLines ?? []).map((l, i) => ({
+        ...l,
+        id: l.id || `pc-${i}`,
+      })),
+      chargeLines: (data.chargeLines ?? []).map((l, i) => ({
+        ...l,
+        id: l.id || `ch-${i}`,
+      })),
     };
   };
 
@@ -1692,27 +1947,89 @@ function AwbEntryPage() {
     setMasterAwb("");
   };
 
-  const handleEntrySearch = () => {
+  const resetCloneSessionState = () => {
+    setEditing(null);
+    setRatingSummary(null);
+    setPiecesDraft(emptyPiecesDraft());
+    setChargeDraft(emptyChargeDraft());
+    setProformaDraft(emptyProformaDraft());
+    setVendorChargeDraft(emptyVendorChargeDraft());
+    setKycSearchInput("");
+    setBookingErrors([]);
+    setLoadedClientProfile(null);
+    setClientLoading(false);
+    setVendorMeta({});
+    setVendorOtpOpen(false);
+    setVendorOtpError(null);
+    setVendorSandboxOtp(null);
+    setVendorBookingBusy(false);
+    setVendorPanelKey((k) => k + 1);
+    setActiveTab("awb");
+    setShowForm(true);
+  };
+
+  const handleEntrySearch = async () => {
     const key = masterAwb.trim();
     if (!key) return toast.error("Master AWB is required");
-
-    const match = rows.find((r) => r.awbNo === key);
-    if (!match) return toast.error("Master AWB not found");
-
-    if (entryType === "Duplicate Entry") {
-      const { id: _id, awbNo: _awb, ...rest } = match;
-      let next = normalizeForm({ ...rest, awbNo: "" });
-      if (formSetupSettings.awbNoPlus1) {
-        const num = Number.parseInt(key, 10);
-        if (!Number.isNaN(num)) next = { ...next, awbNo: String(num + 1) };
-      }
-      setEditing(null);
-      setForm(next);
-      setActiveTab("awb");
-      toast.success(`Duplicated from AWB ${key}`);
+    if (entryType !== "Duplicate Entry") {
+      closeEntry();
+      return;
     }
 
-    closeEntry();
+    setSaving(true);
+    try {
+      let sourceForm: AwbFullForm | null = null;
+      let sourceAwbNo = key;
+
+      if (authed) {
+        const found = await findShipmentBySearch({ query: key, field: "awb_no" });
+        if (!found) {
+          toast.error("Master AWB not found");
+          return;
+        }
+        sourceAwbNo = found.awb_no || key;
+        const children = await fetchShipmentChildren(found.id);
+        const patch = dbShipmentToFormPatch(found, children);
+        const {
+          id: _id,
+          rowVersion: _rv,
+          status: _st,
+          carrierProviderCode: _cpc,
+          carrierBookingRef: _cbr,
+          carrierTrackingNo: _ctn,
+          carrierBookingStatus: _cbs,
+          carrierLabelFileId: _clf,
+          ...rest
+        } = patch;
+        sourceForm = normalizeForm({ ...emptyForm(), ...rest } as AwbFullForm);
+      } else {
+        const match = rows.find(
+          (r) => r.awbNo === key || r.awbNo.toLowerCase() === key.toLowerCase(),
+        );
+        if (!match) {
+          toast.error("Master AWB not found");
+          return;
+        }
+        sourceAwbNo = match.awbNo;
+        const { id: _id, rowVersion: _rv, status: _st, ...rest } = match;
+        sourceForm = normalizeForm(rest);
+      }
+
+      const cloned = cloneAwbFormFromSource(sourceForm, sourceAwbNo, {
+        awbNoPlus1: formSetupSettings.awbNoPlus1,
+      });
+      resetCloneSessionState();
+      setForm(normalizeForm(cloned));
+      allowLeaveRef.current = true;
+      // Don't block the UI on draft cleanup.
+      void clearDraftState();
+      toast.success(`Duplicated from AWB ${sourceAwbNo}`);
+      closeEntry();
+    } catch (e) {
+      toast.error(toErrorMessage(e, "Could not duplicate AWB"));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const buildCurrentDraft = (): AwbEntryDraftPayload => ({
@@ -2091,13 +2408,32 @@ function AwbEntryPage() {
     if (!isAwbLookupSelected(form.service)) return toast.error("Service is required");
     if (!formSetupSettings.airlineNotRequired && !form.airline.trim())
       return toast.error("Airline is required");
-
     const payload = normalizeForm({
       ...form,
       awbNo: form.awbNo.trim(),
       deliveryNo: form.forwarding.deliveryAwb.trim(),
       forwardingNo: form.forwarding.forwardingAwb.trim(),
     });
+
+    if (authed && !editing && branchStockQuery.data?.is_exhausted) {
+      return toast.error("Branch AWB stock quota is exhausted (Balance: 0). Cannot save new shipments.");
+    }
+    if (authed && !editing && awbMode === "MANUAL") {
+      if (!payload.awbNo.trim()) {
+        return toast.error("Manual AWB mode requires entering an AWB Number");
+      }
+      try {
+        const check = await validateManualAwb({
+          branchId: profile?.home_branch_id || undefined,
+          awbNo: payload.awbNo,
+        });
+        if (!check.valid) {
+          return toast.error(check.message || "Manual AWB is invalid or outside allotted series");
+        }
+      } catch (err) {
+        return toast.error(`AWB validation error: ${toErrorMessage(err)}`);
+      }
+    }
 
     if (authed) {
       setSaving(true);
@@ -2124,11 +2460,31 @@ function AwbEntryPage() {
           consignee: payload.consignee,
         });
         await refreshLive();
-        toast.success(editing ? "AWB entry updated" : `AWB ${saved.awb_no} saved (DRAFT)`);
-        setLastSavedForm({ ...payload, awbNo: saved.awb_no || payload.awbNo });
+        // Keep form open in saved/edit mode so the document-button row can appear.
+        const allocatedAwb = saved.awb_no || payload.awbNo;
+        setEditing((prev) => ({
+          ...(prev ?? ({ ...payload, id: saved.id } as AwbRow)),
+          id: saved.id,
+          rowVersion: saved.row_version,
+          status: saved.current_status ?? prev?.status ?? "DRAFT",
+          awbNo: allocatedAwb,
+        }));
+        setForm((f) => ({
+          ...f,
+          awbNo: allocatedAwb,
+          // After clone save, stamp child AWBs as {newAwb}-n when still blank.
+          piecesLines: f.piecesLines.map((line, i) => ({
+            ...line,
+            childAwb:
+              line.childAwb.trim() ||
+              (allocatedAwb ? `${allocatedAwb}-${i + 1}` : ""),
+          })),
+        }));
+        setLastSavedForm({ ...payload, awbNo: allocatedAwb });
+        setVendorPanelKey((k) => k + 1);
         allowLeaveRef.current = true;
         await clearDraftState();
-        closeForm();
+        toast.success(editing ? "AWB entry updated" : `AWB ${allocatedAwb} saved (DRAFT)`);
       } catch (e) {
         toast.error(toErrorMessage(e));
       } finally {
@@ -2145,21 +2501,35 @@ function AwbEntryPage() {
             : r,
         ),
       );
+      setEditing((prev) =>
+        prev
+          ? { ...payload, id: prev.id, rowVersion: prev.rowVersion, status: prev.status ?? "DRAFT" }
+          : prev,
+      );
       toast.success("AWB entry updated");
     } else {
       if (demoRows.some((r) => r.awbNo === payload.awbNo))
         return toast.error("AWB No already exists");
-      setDemoRows((prev) => [{ id: crypto.randomUUID(), status: "DRAFT", ...payload }, ...prev]);
+      const id = crypto.randomUUID();
+      const row: AwbRow = { id, status: "DRAFT", ...payload };
+      setDemoRows((prev) => [row, ...prev]);
+      setEditing(row);
       toast.success("AWB entry saved");
     }
     setLastSavedForm(payload);
+    setVendorPanelKey((k) => k + 1);
     allowLeaveRef.current = true;
     await clearDraftState();
-    closeForm();
   };
 
   const collectClientBookingErrors = (): string[] => {
     const errors: string[] = [];
+    if (authed && !editing && branchStockQuery.data?.is_exhausted) {
+      errors.push("Branch AWB stock quota is exhausted (Balance: 0)");
+    }
+    if (awbMode === "MANUAL" && !editing && !form.awbNo.trim()) {
+      errors.push("Manual AWB mode requires entering an AWB Number");
+    }
     if (!form.clientName.code.trim() && !form.clientName.name.trim())
       errors.push("Customer is required");
     if (!form.shipper.origin.code.trim() && !form.shipper.origin.name.trim())
@@ -2208,6 +2578,48 @@ function AwbEntryPage() {
         }
       }
     }
+
+    // IEC compliance on Commercial / CSB-V Export (#35)
+    const csbTypeUpper = form.proforma.csbType.trim().toUpperCase();
+    const isCommercialExport =
+      form.commercial ||
+      csbTypeUpper === "CSB 5" ||
+      csbTypeUpper === "COMMERCIAL" ||
+      csbTypeUpper === "CBE XIII";
+
+    if (isCommercialExport) {
+      const shipperIec = (
+        form.shipper.iecNo.trim() ||
+        (form.shipper.documentType === "IEC" ? form.shipper.documentNo.trim() : "")
+      ).toUpperCase();
+
+      if (!shipperIec) {
+        errors.push("Valid 10-character IEC is required on Shipper for CSB-V / Commercial export");
+      } else if (!/^[A-Z0-9]{10}$/.test(shipperIec)) {
+        errors.push(`Invalid IEC "${shipperIec}". IEC must be exactly 10 alphanumeric characters`);
+      }
+    }
+
+    // CSB Type vs Export Reason Consistency
+    const exportReasonUpper = form.proforma.exportReason.trim().toUpperCase();
+    if (
+      (csbTypeUpper === "CSB 4" || csbTypeUpper === "CSB 3" || csbTypeUpper === "ECM SPX") &&
+      exportReasonUpper === "SALE"
+    ) {
+      errors.push('Commercial export reason "SALE" must be filed under CSB-V or COMMERCIAL, not CSB-IV/III');
+    } else if (
+      (csbTypeUpper === "CSB 5" || csbTypeUpper === "COMMERCIAL") &&
+      (exportReasonUpper === "BONAFIDE GIFT" || exportReasonUpper === "UNSOLICITED GIFT - NOT FOR SALE")
+    ) {
+      errors.push("Non-commercial gift exports cannot be filed under commercial CSB-V");
+    }
+
+    // Strict ID format validators for PAN, GSTIN, Aadhaar, IEC (#45)
+    const shipperDocErrors = validatePartyIdNumbers(form.shipper, "Shipper");
+    const consigneeDocErrors = validatePartyIdNumbers(form.consignee, "Consignee");
+    errors.push(...shipperDocErrors);
+    errors.push(...consigneeDocErrors);
+
     return errors;
   };
 
@@ -2231,6 +2643,18 @@ function AwbEntryPage() {
     if (authed) {
       setSaving(true);
       try {
+        if (awbMode === "MANUAL" && payload.awbNo.trim()) {
+          const manualCheck = await validateManualAwb({
+            branchId: profile?.home_branch_id || undefined,
+            awbNo: payload.awbNo,
+          });
+          if (!manualCheck.valid) {
+            setBookingErrors([manualCheck.message || "Manual AWB number is invalid"]);
+            toast.error(manualCheck.message || "Manual AWB number is invalid");
+            return;
+          }
+        }
+
         const vendorServiceError = await validateVendorServicePair(payload);
         if (vendorServiceError) {
           setBookingErrors([vendorServiceError]);
@@ -2333,6 +2757,7 @@ function AwbEntryPage() {
               syncStatus: outcome.result.syncStatus,
               lastError: outcome.result.error,
             });
+            setVendorLastResult(outcome.result);
             setVendorPanelKey((k) => k + 1);
             if (outcome.result.status === "OTP_REQUIRED") {
               const mobile =
@@ -2706,6 +3131,7 @@ function AwbEntryPage() {
         syncStatus: outcome.result.syncStatus,
         lastError: outcome.result.error,
       });
+      setVendorLastResult(outcome.result);
       setVendorPanelKey((k) => k + 1);
       if (outcome.result.status === "SUCCESS") {
         setVendorOtpOpen(false);
@@ -2752,6 +3178,7 @@ function AwbEntryPage() {
         syncStatus: outcome.result.syncStatus,
         lastError: outcome.result.error,
       });
+      setVendorLastResult(outcome.result);
       setVendorPanelKey((k) => k + 1);
       if (outcome.result.status === "OTP_REQUIRED") {
         const mobile =
@@ -3221,6 +3648,19 @@ function AwbEntryPage() {
     });
   }, [form, formSetupSettings.consigneeNotRequired]);
 
+  useEffect(() => {
+    setForm((f) => {
+      const patch = syncForwardingDeliveryFromShipment(
+        f.forwarding,
+        f.product,
+        f.vendor,
+        f.service,
+      );
+      if (!patch) return f;
+      return { ...f, forwarding: { ...f.forwarding, ...patch } };
+    });
+  }, [form.product, form.vendor, form.service]);
+
   return (
     <div className="flex w-full min-w-0 flex-col gap-1.5 px-3 py-2 md:gap-2 md:px-4 md:py-3">
       <MasterBreadcrumb trail={["Transaction", showForm ? "AWB Entry" : "AWB Entry List"]} />
@@ -3324,6 +3764,20 @@ function AwbEntryPage() {
                     POD UserID:{" "}
                     <span className="font-medium text-foreground">{form.podUserId || "—"}</span>
                   </span>
+                  <span>
+                    AWB Stock:{" "}
+                    <span
+                      className={cn(
+                        "font-medium",
+                        (branchStockQuery.data?.balance ?? 1) <= 0
+                          ? "text-destructive font-semibold"
+                          : "text-foreground",
+                      )}
+                    >
+                      Limit ({branchStockQuery.data?.limit ?? "—"}) · Used ({branchStockQuery.data?.used ?? "—"}) · Bal (
+                      {branchStockQuery.data?.balance ?? "—"})
+                    </span>
+                  </span>
                   <span>Manifest No ({form.manifestNo})</span>
                   <span>
                     Manifest Date: {form.manifestDate ? formatDisplayDate(form.manifestDate) : "—"}
@@ -3332,20 +3786,74 @@ function AwbEntryPage() {
                   <span>Debit Note No ({form.debitNoteNo})</span>
                   <span>Credit Note No ({form.creditNoteNo})</span>
                   <span>Flight No: {form.flightNo || "—"}</span>
+                  {form.masterAwbNo ? (
+                    <span>
+                      Master AWB:{" "}
+                      <span className="font-medium text-foreground">{form.masterAwbNo}</span>
+                    </span>
+                  ) : null}
                 </div>
 
                 <div className="p-2 md:p-2.5">
                   <div className="mb-2 rounded border border-border bg-card p-2 pt-2.5">
                     <div className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-2 lg:grid-cols-12 lg:gap-x-2">
-                      <FieldWrapper borderLabel label="AWB No." className="lg:col-span-2">
-                        <ErpNavInput
-                          order={AWB_NAV.AWB_NO}
-                          value={form.awbNo}
-                          disabled={!!editing || isReadOnly || clientSelected}
-                          onValueChange={(v) => setForm((f) => ({ ...f, awbNo: v }))}
-                          className="h-8 px-1.5 text-[13px]"
-                        />
-                      </FieldWrapper>
+                      <div className="flex flex-col lg:col-span-2">
+                        <FieldWrapper borderLabel label={`AWB No. [${awbMode}]`}>
+                          <div className="relative flex items-center w-full">
+                            <ErpNavInput
+                              order={AWB_NAV.AWB_NO}
+                              value={awbMode === "AUTO" && !form.awbNo && !editing ? "Auto" : form.awbNo}
+                              disabled={awbMode === "AUTO" || !!editing || isReadOnly || clientSelected}
+                              onValueChange={(v) => setForm((f) => ({ ...f, awbNo: v }))}
+                              onBlur={async () => {
+                                if (awbMode === "MANUAL" && form.awbNo.trim() && authed) {
+                                  try {
+                                    const res = await validateManualAwb({
+                                      branchId: profile?.home_branch_id || undefined,
+                                      awbNo: form.awbNo,
+                                    });
+                                    if (!res.valid) {
+                                      toast.error(res.message || "Invalid manual AWB number");
+                                    } else {
+                                      toast.success(res.message);
+                                    }
+                                  } catch (err) {
+                                    toast.error(`AWB validation error: ${toErrorMessage(err)}`);
+                                  }
+                                }
+                              }}
+                              placeholder={awbMode === "AUTO" ? "Auto" : "Enter Manual AWB"}
+                              className="h-8 pr-12 px-1.5 text-[13px]"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (editing || isReadOnly) return;
+                                const nextMode = awbMode === "AUTO" ? "MANUAL" : "AUTO";
+                                setAwbMode(nextMode);
+                                toast.info(
+                                  nextMode === "MANUAL"
+                                    ? "Switched to MANUAL AWB mode"
+                                    : "Switched to AUTO AWB mode",
+                                );
+                                if (nextMode === "AUTO") {
+                                  setForm((f) => ({ ...f, awbNo: "" }));
+                                }
+                              }}
+                              disabled={!!editing || isReadOnly}
+                              className={cn(
+                                "absolute right-1 px-1 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-colors border",
+                                awbMode === "AUTO"
+                                  ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300"
+                                  : "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300",
+                              )}
+                              title="Toggle Auto/Manual AWB mode (Alt+~)"
+                            >
+                              {awbMode}
+                            </button>
+                          </div>
+                        </FieldWrapper>
+                      </div>
                       <FieldWrapper borderLabel label="Book Date" className="lg:col-span-2">
                         <ErpNavDateInput
                           order={AWB_NAV.BOOK_DATE}
@@ -3396,7 +3904,7 @@ function AwbEntryPage() {
                     </div>
                   </div>
 
-                  {editing?.id && (formStatus === "BOOKED" || showShipmentDocumentsCenter) ? (
+                  {isSaved && editing?.id ? (
                     <ShipmentDocumentQuickLinks
                       shipmentId={editing.id}
                       refreshKey={vendorPanelKey}
@@ -3995,6 +4503,7 @@ function AwbEntryPage() {
                         bookingInProgress={vendorBookingBusy}
                         canRetry={canRetryVendorBooking && !vendorBookingBusy}
                         onRetry={() => void runVendorRetry()}
+                        lastResult={vendorLastResult}
                       />
                     )
                   ) : null}
@@ -4115,12 +4624,8 @@ function AwbEntryPage() {
                 <AwbFormFooter
                   showPrevious={false}
                   readOnly={isReadOnly}
-                  canBook={canBook}
-                  canCancelShipment={canCancelShipment}
                   saving={saving}
                   onSave={handleSave}
-                  onBook={handleBook}
-                  onCancelShipment={() => editing && setCancelShipmentTarget(editing)}
                   onNext={goNextTab}
                   onCancel={requestCloseForm}
                 />
@@ -4492,12 +4997,8 @@ function AwbEntryPage() {
                     showPrevious
                     onPrevious={goPrevTab}
                     readOnly={isReadOnly}
-                    canBook={canBook}
-                    canCancelShipment={canCancelShipment}
                     saving={saving}
                     onSave={handleSave}
-                    onBook={handleBook}
-                    onCancelShipment={() => editing && setCancelShipmentTarget(editing)}
                     onNext={goNextTab}
                     onCancel={requestCloseForm}
                   />
@@ -4788,12 +5289,8 @@ function AwbEntryPage() {
                     showPrevious
                     onPrevious={goPrevTab}
                     readOnly={isReadOnly}
-                    canBook={canBook}
-                    canCancelShipment={canCancelShipment}
                     saving={saving}
                     onSave={handleSave}
-                    onBook={handleBook}
-                    onCancelShipment={() => editing && setCancelShipmentTarget(editing)}
                     onNext={goNextTab}
                     onCancel={requestCloseForm}
                   />
@@ -4941,12 +5438,8 @@ function AwbEntryPage() {
                     showPrevious
                     onPrevious={goPrevTab}
                     readOnly={isReadOnly}
-                    canBook={canBook}
-                    canCancelShipment={canCancelShipment}
                     saving={saving}
                     onSave={handleSave}
-                    onBook={handleBook}
-                    onCancelShipment={() => editing && setCancelShipmentTarget(editing)}
                     onCancel={requestCloseForm}
                   />
                 </div>
@@ -5066,17 +5559,18 @@ function AwbEntryPage() {
                     onChange={(e) => setMasterAwb(e.target.value)}
                     placeholder="Master AWBNo"
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") handleEntrySearch();
+                      if (e.key === "Enter") void handleEntrySearch();
                     }}
                   />
                 </FieldWrapper>
               </div>
               <div className="flex justify-end gap-2 px-6 pb-6">
                 <Button
-                  onClick={handleEntrySearch}
+                  onClick={() => void handleEntrySearch()}
+                  disabled={saving}
                   className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
                 >
-                  Search
+                  {saving ? "Loading…" : "Search"}
                 </Button>
                 <Button variant="destructive" onClick={closeEntry}>
                   Close
@@ -5736,7 +6230,15 @@ function PartySection({
               order={nav.iec}
               className={inputClass}
               value={party.iecNo}
-              onValueChange={(v) => onChange({ iecNo: v })}
+              onValueChange={(v) => onChange({ iecNo: v.toUpperCase() })}
+              onBlur={() => {
+                if (party.iecNo && party.iecNo.trim()) {
+                  const res = validateDocumentId("IEC", party.iecNo, `${isConsignee ? "Consignee" : "Shipper"} IEC`);
+                  if (!res.valid && res.message) {
+                    toast.error(res.message);
+                  }
+                }
+              }}
             />
           </FieldWrapper>
         </div>
@@ -5757,7 +6259,15 @@ function PartySection({
               order={nav.docNo}
               className={inputClass}
               value={party.documentNo}
-              onValueChange={(v) => onChange({ documentNo: v })}
+              onValueChange={(v) => onChange({ documentNo: v.toUpperCase() })}
+              onBlur={() => {
+                if (party.documentType && party.documentNo && party.documentNo.trim()) {
+                  const res = validateDocumentId(party.documentType, party.documentNo, `${isConsignee ? "Consignee" : "Shipper"} ${party.documentType}`);
+                  if (!res.valid && res.message) {
+                    toast.error(res.message);
+                  }
+                }
+              }}
             />
           </FieldWrapper>
         </div>
@@ -6109,25 +6619,17 @@ function AwbFormFooter({
   showPrevious = true,
   onPrevious,
   onSave,
-  onBook,
-  onCancelShipment,
   onNext,
   onCancel,
   readOnly = false,
-  canBook = false,
-  canCancelShipment = false,
   saving = false,
 }: {
   showPrevious?: boolean;
   onPrevious?: () => void;
   onSave: () => void;
-  onBook?: () => void;
-  onCancelShipment?: () => void;
   onNext?: () => void;
   onCancel: () => void;
   readOnly?: boolean;
-  canBook?: boolean;
-  canCancelShipment?: boolean;
   saving?: boolean;
 }) {
   return (
@@ -6151,22 +6653,6 @@ function AwbFormFooter({
             Save
           </Button>
         ) : null}
-        {canBook && onBook && !readOnly ? (
-          <Button
-            size="sm"
-            onClick={onBook}
-            disabled={saving}
-            className="h-8 bg-sidebar text-xs text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-            {...erpNavOrder(AWB_NAV.FOOTER_BOOK)}
-          >
-            Book
-          </Button>
-        ) : null}
-        {canCancelShipment && onCancelShipment ? (
-          <Button size="sm" variant="destructive" className="h-8 text-xs" onClick={onCancelShipment} disabled={saving}>
-            Cancel Shipment
-          </Button>
-        ) : null}
         {onNext ? (
           <Button
             size="sm"
@@ -6180,13 +6666,13 @@ function AwbFormFooter({
         ) : null}
         <Button
           size="sm"
-          variant="outline"
+          variant="destructive"
           className="h-8 text-xs"
           onClick={onCancel}
           disabled={saving}
           {...erpNavOrder(AWB_NAV.FOOTER_CLOSE)}
         >
-          Close
+          Cancel
         </Button>
       </div>
     </div>

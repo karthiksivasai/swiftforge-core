@@ -250,7 +250,10 @@ async function bookViaLocalAdapter(args: {
     };
   }
 
-  if (!args.otp) {
+  // OTP-required adapters (e.g. Xpresion) need a shipper mobile to send/receive OTP.
+  // PostShipping (DTDC) does NOT use OTP — requires_otp=false — skip the mobile check.
+  const requiresOtp = context.integration.requires_otp !== false;
+  if (requiresOtp && !args.otp) {
     const mobile = extractShipperMobile(context.shipment.shipper);
     if (!mobile) {
       return {
@@ -388,7 +391,19 @@ export async function startVendorBooking(args: {
     if (!args.otp && result.status === "OTP_REQUIRED") {
       try {
         const context = await getVendorShippingContext(args.shipmentId);
-        result = await deliverOtpToShipper(context, result);
+        // Only deliver OTP for integrations that explicitly require it (e.g. not DTDC/PostShipping).
+        if (context.integration?.requires_otp !== false) {
+          result = await deliverOtpToShipper(context, result);
+        } else {
+          // Non-OTP vendor (e.g. DTDC) should never reach OTP_REQUIRED — treat as error.
+          result = {
+            ...result,
+            status: "ERROR",
+            message: "Unexpected OTP_REQUIRED for a non-OTP vendor. Booking failed.",
+            error: "OTP_NOT_SUPPORTED",
+            apiStatus: "FAILED",
+          };
+        }
       } catch {
         /* keep edge result */
       }

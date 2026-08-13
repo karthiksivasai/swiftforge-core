@@ -3,7 +3,7 @@
  * Provider-agnostic: no adapter brand names in UI copy.
  */
 import { useEffect, useState } from "react";
-import { Download, Eye, Loader2, Printer, RefreshCw, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, Download, Eye, Loader2, Printer, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import {
   type VendorActivityEvent,
   type VendorApiStatus,
   type VendorDocumentRow,
+  type VendorBookResult,
 } from "@/lib/integrations/vendor-shipping";
 import { cn } from "@/lib/utils";
 
@@ -123,23 +124,176 @@ export function VendorOtpDialog({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Dry-run payload preview card — shown when status is VENDOR_BOOKED in dry-run
+// ---------------------------------------------------------------------------
+export function DtdcDryRunPreviewCard({
+  result,
+}: {
+  result?: VendorBookResult | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const requestPayload = result?.request;
+  if (!requestPayload) return null;
+
+  // Only show for POSTSHIPPING dry-run results
+  const rawResp = result?.rawResponse as Record<string, unknown> | undefined;
+  if (!rawResp || rawResp["mode"] !== "DRY_RUN") return null;
+
+  const endpoint = String(requestPayload["endpoint"] ?? "");
+  const headers = requestPayload["headers"] as Record<string, string> | undefined;
+  const body = requestPayload["body"];
+  const stationCode = String(rawResp["stationCode"] ?? "");
+  const warnings = (rawResp["warnings"] as string[]) ?? [];
+
+  const bodyJson = JSON.stringify(body, null, 2);
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Copied to clipboard");
+    } catch {
+      toast.error("Could not copy");
+    }
+  };
+
+  const fullRequestJson = JSON.stringify(
+    {
+      method: "POST",
+      endpoint,
+      headers: {
+        Token: headers?.["Token"] ?? "(station key — server-side only)",
+        "Content-Type": "application/json",
+      },
+      body,
+    },
+    null,
+    2,
+  );
+
+  return (
+    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60">
+      {/* Header */}
+      <button
+        type="button"
+        className="flex w-full items-center justify-between px-4 py-2.5 text-left"
+        onClick={() => setExpanded((p) => !p)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="rounded bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-900 tracking-wide">
+            DRY-RUN
+          </span>
+          <span className="text-sm font-semibold text-amber-900">
+            PostShipping Payload Preview
+          </span>
+          {stationCode && (
+            <Badge variant="outline" className="text-xs">
+              Station: {stationCode}
+            </Badge>
+          )}
+        </div>
+        <span className="text-amber-700">
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </span>
+      </button>
+
+      {/* Warnings */}
+      {warnings.length > 0 && (
+        <div className="border-t border-amber-200 bg-amber-100/60 px-4 py-2">
+          {warnings.map((w, i) => (
+            <p key={i} className="text-xs text-amber-800">
+              ⚠ {w}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {/* Expanded payload */}
+      {expanded && (
+        <div className="border-t border-amber-200 px-4 py-3 space-y-3">
+          {/* Endpoint */}
+          <div>
+            <p className="mb-1 text-xs font-semibold text-amber-900">Endpoint</p>
+            <code className="block rounded bg-amber-100 px-3 py-1.5 text-xs font-mono text-amber-900 break-all">
+              POST {endpoint}
+            </code>
+          </div>
+
+          {/* Headers */}
+          <div>
+            <p className="mb-1 text-xs font-semibold text-amber-900">Headers</p>
+            <div className="rounded bg-amber-100 px-3 py-1.5 text-xs font-mono text-amber-900 space-y-0.5">
+              <div>
+                <span className="text-amber-600">Token:</span>{" "}
+                {headers?.["Token"] ?? "(server-side only — not exposed to client)"}
+              </div>
+              <div>
+                <span className="text-amber-600">Content-Type:</span> application/json
+              </div>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-xs font-semibold text-amber-900">
+                Request Body (Array — 1 shipment)
+              </p>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 gap-1 px-2 text-xs text-amber-800 hover:bg-amber-200"
+                onClick={() => void copyToClipboard(fullRequestJson)}
+              >
+                <Copy className="h-3 w-3" />
+                Copy full
+              </Button>
+            </div>
+            <pre className="max-h-96 overflow-auto rounded bg-amber-100 px-3 py-2 text-xs font-mono text-amber-950 whitespace-pre-wrap">
+              {bodyJson}
+            </pre>
+          </div>
+
+          {/* Note */}
+          <p className="text-xs text-amber-700">
+            <strong>No wallet charge.</strong> Live mode is OFF by default. Enable{" "}
+            <code className="bg-amber-100 px-1 rounded">is_live_mode</code> on the vendor row in
+            the database to send this payload to PostShipping.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main status strip
+// ---------------------------------------------------------------------------
 export function VendorBookingStatusStrip({
   meta,
   bookingInProgress,
   onRetry,
   canRetry,
+  lastResult,
 }: {
   meta: VendorShippingMeta;
   bookingInProgress?: boolean;
   onRetry?: () => void;
   canRetry?: boolean;
+  /** Last VendorBookResult — used to show dry-run payload when applicable */
+  lastResult?: VendorBookResult | null;
 }) {
   const status = (meta.status || "NONE") as VendorApiStatus;
   if (status === "NONE" && !bookingInProgress) return null;
 
+  const isDryRun =
+    lastResult?.rawResponse &&
+    (lastResult.rawResponse as Record<string, unknown>)["mode"] === "DRY_RUN";
+
   const label = bookingInProgress
     ? VENDOR_API_STATUS_LABELS.BOOKING_IN_PROGRESS
-    : VENDOR_API_STATUS_LABELS[status] || status;
+    : (VENDOR_API_STATUS_LABELS[status as VendorApiStatus] ?? status);
 
   return (
     <div className="mt-4 rounded-lg border bg-muted/20 px-4 py-3">
@@ -149,17 +303,22 @@ export function VendorBookingStatusStrip({
           <Badge
             variant={
               status === "VENDOR_BOOKED"
-                ? "default"
+                ? isDryRun
+                  ? "outline"
+                  : "default"
                 : status === "FAILED" || status === "VENDOR_PENDING"
                   ? "destructive"
                   : "secondary"
             }
+            className={isDryRun ? "border-amber-400 text-amber-700 bg-amber-50" : ""}
           >
             {bookingInProgress ? (
               <span className="inline-flex items-center gap-1">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 {label}
               </span>
+            ) : isDryRun ? (
+              `${label} (DRY-RUN)`
             ) : (
               label
             )}
@@ -205,6 +364,9 @@ export function VendorBookingStatusStrip({
       {meta.lastError ? (
         <p className="mt-2 text-xs text-destructive">{meta.lastError}</p>
       ) : null}
+
+      {/* Dry-run payload preview (PostShipping / DTDC only) */}
+      {isDryRun && <DtdcDryRunPreviewCard result={lastResult} />}
     </div>
   );
 }

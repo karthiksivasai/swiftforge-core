@@ -63,8 +63,8 @@ export function VendorServiceLookup({
   navOrder,
   onCommit,
   manualSearch = false,
-  emptySearchMessage,
-  noResultsMessage = AWB_LOOKUP_NO_RESULTS,
+  emptySearchMessage: _emptySearchMessage,
+  noResultsMessage: _noResultsMessage = AWB_LOOKUP_NO_RESULTS,
 }: {
   vendor: LookupPairValue;
   value: LookupPairValue;
@@ -81,6 +81,8 @@ export function VendorServiceLookup({
   emptySearchMessage?: string;
   noResultsMessage?: string;
 }) {
+  void _emptySearchMessage;
+  void _noResultsMessage;
   const { isAuthenticated: live } = useAuth();
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -267,82 +269,23 @@ export function VendorServiceLookup({
     onCommit?.();
   }, [clearManualDropdown, onCommit]);
 
-  const applyManualHits = useCallback(
-    (hits: VendorServiceHit[], opts?: { autoSelectSingle?: boolean }) => {
-      const autoSelectSingle = opts?.autoSelectSingle ?? false;
-      if (hits.length === 0) {
-        clearManualDropdown();
-        return false;
-      }
-      if (autoSelectSingle && hits.length === 1) {
-        pick(hits[0]);
-        return true;
-      }
-      setManualDropdownHits(hits);
-      setManualDropdownOpen(true);
-      setHighlight(0);
-      return true;
-    },
-    [clearManualDropdown, pick],
-  );
-
-  const openBrowsePopup = useCallback(() => {
+  const openBrowsePopup = useCallback((initialQuery = "") => {
     setInlineOpen(false);
     setManualDropdownOpen(false);
     setManualDropdownHits([]);
-    setPopupQuery("");
+    setPopupQuery(initialQuery);
     setManualPopupHits(null);
     setPopupOpen(true);
   }, []);
 
-  const runManualSearch = useCallback(
-    async (opts?: { autoSelectSingle?: boolean; showEmptyToast?: boolean }) => {
-      if (!hasVendor) return;
-      const autoSelectSingle = opts?.autoSelectSingle ?? true;
-      const q = searchQuery();
-      if (!q) {
-        openBrowsePopup();
-        return;
-      }
-      const seq = ++explicitSearchSeqRef.current;
-      setManualSearching(true);
-      try {
-        const hits = live
-          ? rankVendorServiceHits(
-              await listVendorServices({ ...vendorArgs, q, limit: 100 }),
-              q,
-            )
-          : filterDemoVendorServices(vendor.code, vendor.name, q);
-        if (seq !== explicitSearchSeqRef.current) return;
-        if (hits.length === 0) {
-          clearManualDropdown();
-          toast.error(noResultsMessage);
-          return;
-        }
-        applyManualHits(hits, { autoSelectSingle });
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Search failed");
-      } finally {
-        if (seq === explicitSearchSeqRef.current) setManualSearching(false);
-      }
-    },
-    [
-      applyManualHits,
-      clearManualDropdown,
-      hasVendor,
-      live,
-      noResultsMessage,
-      openBrowsePopup,
-      searchQuery,
-      vendor.code,
-      vendor.name,
-      vendorArgs,
-    ],
-  );
-
+  /** Search icon / F2 always opens the select-list dialog (not the inline typeahead). */
   const triggerExplicitSearch = useCallback(() => {
-    void runManualSearch({ autoSelectSingle: false, showEmptyToast: true });
-  }, [runManualSearch]);
+    if (!hasVendor) {
+      toast.error("Select a Vendor first");
+      return;
+    }
+    openBrowsePopup(searchQuery());
+  }, [hasVendor, openBrowsePopup, searchQuery]);
 
   const openInline = (text: string) => {
     if (manualSearch || !hasVendor) return;

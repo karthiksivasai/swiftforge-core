@@ -39,6 +39,11 @@ export type PickupRow = BaseRow & {
   reason: string | null;
   pickup_ready: boolean;
   status: PickupStatus;
+  cancel_type: "CALL_CANCEL" | "ATTEMPT_CANCEL" | null;
+  passed: string | null;
+  passed_at: string | null;
+  passed_by: string | null;
+  pass_reason: string | null;
   awb_id: string | null;
   awb_no: string | null;
   user_id: string | null;
@@ -61,7 +66,8 @@ const PICKUP_COLUMNS = `
   shipper_id, shipper_name, contact, address1, address2, zip, city, state,
   pay_option, consignee_details, branch_id, vehicle_type,
   area_id, field_executive_id, sales_executive_id,
-  special_instructions, reason, pickup_ready, status,
+  special_instructions, reason, pickup_ready, status, cancel_type,
+  passed, passed_at, passed_by, pass_reason,
   awb_id, awb_no, user_id, booked_by, edited_by,
   cancelled_at, confirmed_at,
   created_at, created_by, updated_at, updated_by, deleted_at, row_version,
@@ -145,10 +151,33 @@ export async function cancelPickup(args: {
   id: string;
   rowVersion: number;
   reason?: string;
+  cancelType?: "CALL_CANCEL" | "ATTEMPT_CANCEL";
 }): Promise<PickupRow> {
   const { data, error } = await supabase.rpc("cancel_pickup", {
     p_id: args.id,
     p_row_version: args.rowVersion,
+    p_reason: args.reason ?? null,
+    p_cancel_type: args.cancelType ?? "CALL_CANCEL",
+  });
+  if (error) {
+    if (error.code === "40001") throw new ConflictError(error.message);
+    throw translateDbError(error);
+  }
+  return data as PickupRow;
+}
+
+export async function passPickup(args: {
+  id: string;
+  rowVersion: number;
+  toFeId?: string | null;
+  toFeCode?: string | null;
+  reason?: string;
+}): Promise<PickupRow> {
+  const { data, error } = await supabase.rpc("pass_pickup", {
+    p_id: args.id,
+    p_row_version: args.rowVersion,
+    p_to_fe_id: args.toFeId ?? null,
+    p_to_fe_code: args.toFeCode ?? null,
     p_reason: args.reason ?? null,
   });
   if (error) {

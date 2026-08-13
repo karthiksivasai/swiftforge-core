@@ -53,6 +53,12 @@ export type UiManifestForm = {
   serviceCentre: string;
   connectStation: string;
   lines: UiManifestLine[];
+  attachments?: {
+    fileId: string;
+    label: string;
+    originalName?: string | null;
+    sizeBytes?: number | null;
+  }[];
   status?: string;
 };
 
@@ -126,6 +132,12 @@ export function dbManifestToForm(row: ManifestRow, children?: ManifestChildren):
     serviceCentre: sc?.code ?? "",
     connectStation: row.connect_station ?? "",
     lines: (children?.lines ?? []).map(dbLineToUi),
+    attachments: (children?.attachments ?? []).map((a) => ({
+      fileId: a.file_id,
+      label: a.label || "Manifest Copy",
+      originalName: a.original_name,
+      sizeBytes: a.size_bytes,
+    })),
     status: row.status,
   };
 }
@@ -147,6 +159,7 @@ export function dbManifestToListRow(row: ManifestRow): UiManifestForm & {
 export function uiFormToManifestPayload(form: UiManifestForm): {
   fields: ManifestFields;
   lines: ManifestLineInput[];
+  attachments: { file_id: string; label: string | null }[];
 } {
   const toType = form.manifestToServiceCenter ? "SERVICE_CENTER" : "THIRD_PARTY";
   const fields: ManifestFields = {
@@ -199,5 +212,10 @@ export function uiFormToManifestPayload(form: UiManifestForm): {
     reference_no: l.refNo.trim() || null,
   }));
 
-  return { fields, lines };
+  const attachments = (form.attachments ?? []).map((a) => ({
+    file_id: a.fileId,
+    label: a.label || null,
+  }));
+
+  return { fields, lines, attachments };
 }
