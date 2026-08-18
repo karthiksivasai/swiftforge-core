@@ -1,7 +1,8 @@
 /**
- * Maps rating breakdown / snapshots → AWB Entry charge UI (server-authoritative).
+ * Maps rating breakdown / snapshots / API rating results → AWB Entry charge UI.
  */
 import type { RatingBreakdown } from "@/lib/transactions/resources/rating";
+import type { RatingCalculationResult } from "@/lib/rating/ratingEngine";
 
 export type RatingChargeLine = {
   id: string;
@@ -39,6 +40,17 @@ function money(n: number): string {
   return (Number.isFinite(n) ? n : 0).toFixed(2);
 }
 
+function format3dp(n: number): string {
+  return (Number.isFinite(n) ? n : 0).toFixed(3);
+}
+
+function formatGst4dp(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "0.0000";
+  // Format up to 4 decimal places, keeping 3 or 4 places as per display
+  const str = n.toFixed(4);
+  return str;
+}
+
 export function ratingToSummary(b: RatingBreakdown): RatingSummary {
   const freight = money(b.freight);
   const fuel = money(b.fuel);
@@ -60,6 +72,54 @@ export function ratingToSummary(b: RatingBreakdown): RatingSummary {
     sgst: "0.00",
     totalAmount: money(b.total),
   };
+}
+
+/**
+ * Formats full-precision RatingCalculationResult from /api/shipments/rate
+ * into UI display values matching Xpresion reference output:
+ * - Contract Charges: 3 dp
+ * - Other Charges: 3 dp
+ * - Sub Total: 3 dp
+ * - Total Fuel: 3 dp
+ * - CGST / SGST: up to 4 dp
+ * - Total Amount: 2 dp
+ */
+export function apiRatingToSummary(r: RatingCalculationResult): RatingSummary {
+  return {
+    freight: money(r.contractCharges),
+    fuel: money(r.fuelAmount),
+    tax: money(r.cgst + r.sgst + r.igst),
+    otherCharges: format3dp(r.otherCharges),
+    vendorCost: "0.00",
+    total: money(r.totalAmount),
+    contractCharges: format3dp(r.contractCharges),
+    subTotal: format3dp(r.subTotal),
+    totalFuel: format3dp(r.fuelAmount),
+    igst: formatGst4dp(r.igst),
+    cgst: formatGst4dp(r.cgst),
+    sgst: formatGst4dp(r.sgst),
+    totalAmount: money(r.totalAmount),
+  };
+}
+
+export function apiRatingToChargeLines(r: RatingCalculationResult): RatingChargeLine[] {
+  return [
+    {
+      id: crypto.randomUUID(),
+      description: "FREIGHT",
+      rate: r.ratePerKg.toFixed(2),
+      amount: format3dp(r.contractCharges),
+      fuelApply: r.fuelAmount > 0 ? "Yes" : "Yes",
+      fuelAmt: format3dp(r.fuelAmount),
+      taxApply: "Yes",
+      taxOnFuel: "Yes",
+      igst: formatGst4dp(r.igst),
+      sgst: formatGst4dp(r.sgst),
+      cgst: formatGst4dp(r.cgst),
+      total: money(r.totalAmount),
+      chargesType: "System",
+    },
+  ];
 }
 
 export function ratingSnapshotToChargeLines(b: RatingBreakdown): RatingChargeLine[] {

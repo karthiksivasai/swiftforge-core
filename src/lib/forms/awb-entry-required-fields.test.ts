@@ -4,6 +4,7 @@ import { AWB_NAV } from "@/lib/forms/awb-entry-nav-order";
 import { isAwbLookupSelected, validateAwbNavField } from "@/lib/forms/awb-entry-required-fields";
 
 const emptyForm = () => ({
+  clientName: { code: "", name: "" },
   shipper: {
     origin: { code: "", name: "" },
     companyName: { code: "", name: "" },
@@ -17,6 +18,16 @@ const emptyForm = () => ({
 });
 
 describe("AWB lookup navigation validation", () => {
+  it("blocks advancing from client name when it is empty", () => {
+    expect(validateAwbNavField(AWB_NAV.CLIENT, emptyForm())).toBe(false);
+  });
+
+  it("allows advancing from client name after a value is entered", () => {
+    const form = emptyForm();
+    form.clientName = { code: "C001", name: "Telangana Textiles" };
+    expect(validateAwbNavField(AWB_NAV.CLIENT, form)).toBe(true);
+  });
+
   it("treats a typed name-only value as selected for keyboard advance", () => {
     expect(isAwbLookupSelected({ code: "", name: "New Company" })).toBe(true);
   });

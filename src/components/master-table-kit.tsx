@@ -46,13 +46,14 @@ export function FieldWrapper({
   const invalidLookupSplitClass = invalid
     ? "[&_.lookup-name]:border-destructive [&_.lookup-name]:ring-1 [&_.lookup-name]:ring-destructive"
     : undefined;
+  const invalidAttrs = invalid ? ({ "data-invalid": "true" } as const) : undefined;
 
   if (borderLabel && lookupSplit) {
     const blank = !label.trim();
     return (
       <div className={cn("relative min-w-0", className)}>
         <div className="pt-1.5">
-          <div className={cn("relative", invalidLookupSplitClass)}>
+          <div className={cn("relative", invalidLookupSplitClass)} {...invalidAttrs}>
             {!blank ? (
               <Label
                 className={cn(
@@ -86,6 +87,7 @@ export function FieldWrapper({
             "[&>.relative]:min-w-0 [&>.relative]:flex-1 [&_.flex.gap-1]:gap-0",
             "[&_.flex_input:nth-child(2)]:border-l [&_.flex_input:nth-child(2)]:border-input",
           )}
+          {...invalidAttrs}
         >
           {!blank ? (
             <Label

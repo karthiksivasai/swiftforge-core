@@ -142,11 +142,11 @@ html, body, * {
   color-adjust: exact !important;
 }
 .hdr {
-  background-color: #0b5c2e !important;
-  background-image: linear-gradient(#0b5c2e, #0b5c2e) !important;
+  background-color: #16803a !important;
+  background-image: linear-gradient(#16803a, #16803a) !important;
   color: #fff !important;
 }
-.logo-title { color: #0b5c2e !important; }
+.logo-title { color: #16803a !important; }
 @media print {
   html, body, .hdr, .logo-title, table.wt th, table.goods th {
     -webkit-print-color-adjust: exact !important;
@@ -154,8 +154,8 @@ html, body, * {
     color-adjust: exact !important;
   }
   .hdr {
-    background-color: #0b5c2e !important;
-    background-image: linear-gradient(#0b5c2e, #0b5c2e) !important;
+    background-color: #16803a !important;
+    background-image: linear-gradient(#16803a, #16803a) !important;
     color: #fff !important;
   }
 }
@@ -178,7 +178,7 @@ function ensurePrintColors(doc: Document) {
     const rect = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
     rect.setAttribute("width", "100%");
     rect.setAttribute("height", "100%");
-    rect.setAttribute("fill", "#0b5c2e");
+    rect.setAttribute("fill", "#16803a");
     svg.appendChild(rect);
     const host = el as HTMLElement;
     host.style.position = host.style.position || "relative";

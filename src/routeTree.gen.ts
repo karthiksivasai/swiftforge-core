@@ -101,6 +101,7 @@ import { Route as MasterCustomerExpenseRouteImport } from './routes/master.custo
 import { Route as MasterCustomerCustomerRateRouteImport } from './routes/master.customer.customer-rate'
 import { Route as MasterCustomerCustomerRouteImport } from './routes/master.customer.customer'
 import { Route as MasterCustomerConsigneeRouteImport } from './routes/master.customer.consignee'
+import { Route as ApiShipmentsRateRouteImport } from './routes/api/shipments.rate'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -606,6 +607,11 @@ const MasterCustomerConsigneeRoute = MasterCustomerConsigneeRouteImport.update({
   path: '/master/customer/consignee',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiShipmentsRateRoute = ApiShipmentsRateRouteImport.update({
+  id: '/api/shipments/rate',
+  path: '/api/shipments/rate',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -638,6 +644,7 @@ export interface FileRoutesByFullPath {
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/api/shipments/rate': typeof ApiShipmentsRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -732,6 +739,7 @@ export interface FileRoutesByTo {
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/api/shipments/rate': typeof ApiShipmentsRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -827,6 +835,7 @@ export interface FileRoutesById {
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/api/shipments/rate': typeof ApiShipmentsRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -923,6 +932,7 @@ export interface FileRouteTypes {
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
+    | '/api/shipments/rate'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -1017,6 +1027,7 @@ export interface FileRouteTypes {
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
+    | '/api/shipments/rate'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -1111,6 +1122,7 @@ export interface FileRouteTypes {
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
+    | '/api/shipments/rate'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -1206,6 +1218,7 @@ export interface RootRouteChildren {
   UtilityIntegrationConfigurationRoute: typeof UtilityIntegrationConfigurationRoute
   UtilityNotificationRoute: typeof UtilityNotificationRoute
   UtilityServiceablePincodeRoute: typeof UtilityServiceablePincodeRoute
+  ApiShipmentsRateRoute: typeof ApiShipmentsRateRoute
   MasterCustomerConsigneeRoute: typeof MasterCustomerConsigneeRoute
   MasterCustomerCustomerRoute: typeof MasterCustomerCustomerRoute
   MasterCustomerCustomerRateRoute: typeof MasterCustomerCustomerRateRoute
@@ -1916,6 +1929,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MasterCustomerConsigneeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/shipments/rate': {
+      id: '/api/shipments/rate'
+      path: '/api/shipments/rate'
+      fullPath: '/api/shipments/rate'
+      preLoaderRoute: typeof ApiShipmentsRateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -1950,6 +1970,7 @@ const rootRouteChildren: RootRouteChildren = {
   UtilityIntegrationConfigurationRoute: UtilityIntegrationConfigurationRoute,
   UtilityNotificationRoute: UtilityNotificationRoute,
   UtilityServiceablePincodeRoute: UtilityServiceablePincodeRoute,
+  ApiShipmentsRateRoute: ApiShipmentsRateRoute,
   MasterCustomerConsigneeRoute: MasterCustomerConsigneeRoute,
   MasterCustomerCustomerRoute: MasterCustomerCustomerRoute,
   MasterCustomerCustomerRateRoute: MasterCustomerCustomerRateRoute,

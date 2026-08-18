@@ -50,6 +50,8 @@ export type ClientProfile = {
   panNo: string;
   aadharNo: string;
   instructions: string;
+  country: string;
+  origin: ClientLookupPair;
   salesExecutive: ClientLookupPair;
   fieldExecutive: ClientLookupPair;
   defaultVendor: ClientLookupPair;
@@ -83,12 +85,15 @@ export type AwbClientHydrate = {
   instruction: string;
   fieldExecutive: ClientLookupPair;
   shipper: {
+    companyName: ClientLookupPair;
+    origin: ClientLookupPair;
     contactName: string;
     address1: string;
     address2: string;
     pincode: string;
     city: string;
     state: string;
+    country: string;
     telephone: string;
     mobileNo: string;
     email: string;
@@ -146,6 +151,8 @@ function pickShipperAddress(
   gstNo: string;
   panNo: string;
   aadharNo: string;
+  stateId: string | null;
+  countryId: string | null;
 } {
   const def = addresses.find((a) => a.is_default_shipper) ?? addresses[0];
   if (def) {
@@ -162,6 +169,8 @@ function pickShipperAddress(
       gstNo: str(def.gst_no) || str(row.gst_no),
       panNo: str(def.pan_no) || str(row.pan_no),
       aadharNo: str(def.aadhar_no) || str(row.aadhar_no),
+      stateId: def.state_id || row.state_id,
+      countryId: def.country_id,
     };
   }
   return {
@@ -177,6 +186,8 @@ function pickShipperAddress(
     gstNo: str(row.gst_no),
     panNo: str(row.pan_no),
     aadharNo: str(row.aadhar_no),
+    stateId: row.state_id,
+    countryId: null,
   };
 }
 
@@ -210,6 +221,8 @@ function mapRowToProfile(row: CustomerRow, addresses: DbCustomerAddress[]): Clie
     panNo: shipper.panNo,
     aadharNo: shipper.aadharNo,
     instructions: str(row.instructions),
+    country: "",
+    origin: pairFromExtra(row.origin),
     salesExecutive,
     fieldExecutive,
     defaultVendor,
@@ -237,8 +250,122 @@ function mapRowToProfile(row: CustomerRow, addresses: DbCustomerAddress[]): Clie
       register_type: row.register_type,
       branch: row.branch,
       origin: row.origin,
+      state_id: shipper.stateId,
+      country_id: shipper.countryId,
       addresses,
     },
+  };
+}
+
+async function resolveDestination(raw: string): Promise<ClientLookupPair> {
+  const q = str(raw);
+  if (!q) return { code: "", name: "" };
+  const { data: byCode } = await supabase
+    .from("destinations")
+    .select("id, code, name")
+    .is("deleted_at", null)
+    .ilike("code", q)
+    .limit(1)
+    .maybeSingle();
+  if (byCode) return { id: byCode.id, code: byCode.code, name: byCode.name };
+  const { data: byName } = await supabase
+    .from("destinations")
+    .select("id, code, name")
+    .is("deleted_at", null)
+    .ilike("name", q)
+    .limit(1)
+    .maybeSingle();
+  if (byName) return { id: byName.id, code: byName.code, name: byName.name };
+  return { code: q.toUpperCase(), name: q };
+}
+
+async function resolveNameById(table: "states" | "countries", id: string | null | undefined): Promise<string> {
+  if (!id) return "";
+  const { data } = await supabase.from(table).select("name").eq("id", id).maybeSingle();
+  return str(data?.name);
+}
+
+async function enrichShipperGeo(profile: ClientProfile): Promise<ClientProfile> {
+  const extras = asRecord(profile.extensions);
+  const stateId = str(extras.state_id) || null;
+  const countryId = str(extras.country_id) || null;
+  const originRaw = str(extras.origin) || profile.origin.code || profile.origin.name;
+
+  const [origin, stateName, countryName] = await Promise.all([
+    resolveDestination(originRaw),
+    resolveNameById("states", stateId),
+    resolveNameById("countries", countryId),
+  ]);
+
+  let city = profile.city;
+  let state = profile.state || stateName;
+  let country = profile.country || countryName;
+  const pin = profile.pincode;
+
+  if (pin.length >= 3 && (!city || !state || !country)) {
+    try {
+      const { searchPincodes } = await import("@/lib/pincodes/pincode.service");
+      const rows = await searchPincodes({ prefix: pin, live: true, limit: 8 });
+      const hit = rows.find((r) => r.pincode === pin) ?? rows[0];
+      if (hit) {
+        city = city || hit.city;
+        state = state || hit.state;
+        country = country || hit.country;
+      }
+    } catch {
+      /* pincode lookup optional */
+    }
+  }
+
+  if (!country && /^\d{6}$/.test(pin)) country = "INDIA";
+
+  return {
+    ...profile,
+    city,
+    state,
+    country,
+    origin: origin.code || origin.name ? origin : profile.origin,
+  };
+}
+
+async function overlayLinkedShipper(profile: ClientProfile): Promise<ClientProfile> {
+  const { data } = await supabase
+    .from("shippers")
+    .select(
+      "id, code, name, origin_id, origin_code, contact_person, address1, address2, pin_code, city, state_name, telephone1, mobile, email, iec_no, gst_no, pan_no, aadhar_no",
+    )
+    .eq("customer_id", profile.id)
+    .is("deleted_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (!data) return profile;
+
+  const originCode = str(data.origin_code);
+  const resolved =
+    originCode || data.origin_id
+      ? await resolveDestination(originCode || str(data.origin_id))
+      : profile.origin;
+  const origin: ClientLookupPair = {
+    ...resolved,
+    id: data.origin_id || resolved.id,
+  };
+
+  return {
+    ...profile,
+    contactPerson: str(data.contact_person) || profile.contactPerson,
+    address1: str(data.address1) || profile.address1,
+    address2: str(data.address2) || profile.address2,
+    pincode: str(data.pin_code) || profile.pincode,
+    city: str(data.city) || profile.city,
+    state: str(data.state_name) || profile.state,
+    telephone: str(data.telephone1) || profile.telephone,
+    mobile: str(data.mobile) || profile.mobile,
+    email: str(data.email) || profile.email,
+    iecNo: str(data.iec_no) || profile.iecNo,
+    gstNo: str(data.gst_no) || profile.gstNo,
+    panNo: str(data.pan_no) || profile.panNo,
+    aadharNo: str(data.aadhar_no) || profile.aadharNo,
+    origin: origin.code || origin.name ? origin : profile.origin,
   };
 }
 
@@ -251,20 +378,34 @@ async function fetchCustomerRow(ref: ClientLookupRef): Promise<CustomerRow | nul
       .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    return (data as CustomerRow | null) ?? null;
+    if (data) return data as CustomerRow;
   }
 
   const code = str(ref.code);
-  if (!code) return null;
+  if (code) {
+    const { data, error } = await supabase
+      .from(customersResource.table)
+      .select(customersResource.columns)
+      .eq("code", code)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data) return data as CustomerRow;
+  }
 
-  const { data, error } = await supabase
-    .from(customersResource.table)
-    .select(customersResource.columns)
-    .eq("code", code)
-    .is("deleted_at", null)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return (data as CustomerRow | null) ?? null;
+  const name = str(ref.name);
+  if (name) {
+    const { data, error } = await supabase
+      .from(customersResource.table)
+      .select(customersResource.columns)
+      .ilike("name", name)
+      .is("deleted_at", null)
+      .limit(2);
+    if (error) throw new Error(error.message);
+    if (data?.length === 1) return data[0] as CustomerRow;
+  }
+
+  return null;
 }
 
 /**
@@ -283,7 +424,18 @@ export async function loadClientProfile(ref: ClientLookupRef): Promise<ClientPro
     /* addresses optional — root customer fields still hydrate */
   }
 
-  return mapRowToProfile(row, addresses);
+  let profile = mapRowToProfile(row, addresses);
+  try {
+    profile = await overlayLinkedShipper(profile);
+  } catch {
+    /* linked shipper optional */
+  }
+  try {
+    profile = await enrichShipperGeo(profile);
+  } catch {
+    /* geo lookup optional */
+  }
+  return profile;
 }
 
 /** Map a loaded profile into AWB Entry form fields. */
@@ -298,12 +450,15 @@ export function clientProfileToAwbHydrate(profile: ClientProfile): AwbClientHydr
     instruction: profile.instructions,
     fieldExecutive: profile.fieldExecutive,
     shipper: {
+      companyName: { id: profile.id, code: profile.code, name: profile.name },
+      origin: profile.origin,
       contactName: profile.contactPerson,
       address1: profile.address1,
       address2: profile.address2,
       pincode: profile.pincode,
       city: profile.city,
       state: profile.state,
+      country: profile.country || "INDIA",
       telephone: profile.telephone,
       mobileNo: profile.mobile,
       email: profile.email || profile.accountEmail,

@@ -169,3 +169,71 @@
     text-rendering: optimizeLegibility;
   }
 }
+
+/*
+ * AWB Entry (`/transaction/awb-entry`): solid black focus on the active field.
+ * Most fields draw their border on a wrapper (FieldWrapper / lookup boxes) with
+ * nested inputs set to border-0, so we highlight the shell via :focus-within.
+ * Visual 2px black uses the existing 1px border + 1px inset shadow (no layout shift).
+ */
+.erp-form-nav {
+  --awb-focus-border: #000000;
+  --awb-error-border: var(--destructive);
+}
+
+.erp-form-nav :is(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible) {
+  outline: none;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+.erp-form-nav .erp-field-shell:focus-within,
+.erp-form-nav .erp-field-shell:has(button[role="combobox"][data-state="open"]),
+.erp-form-nav .lookup-name:focus-within,
+.erp-form-nav .lookup-code > div:first-child:focus-within {
+  border-color: var(--awb-focus-border);
+  border-style: solid;
+  box-shadow: inset 0 0 0 1px var(--awb-focus-border);
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+.erp-form-nav
+  :where(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible):not(
+    [type="checkbox"],
+    [type="radio"],
+    [type="hidden"]
+  ) {
+  border-color: var(--awb-focus-border);
+  border-style: solid;
+  box-shadow: inset 0 0 0 1px var(--awb-focus-border);
+}
+
+.erp-form-nav
+  :is(.erp-field-shell, .lookup-name, .lookup-code)
+  :where(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible) {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* Error / invalid wins over focus (FieldWrapper `invalid` → data-invalid, or aria-invalid). */
+.erp-form-nav .erp-field-shell[data-invalid="true"],
+.erp-form-nav .erp-field-shell[data-invalid="true"]:focus-within,
+.erp-form-nav .erp-field-shell[data-invalid="true"]:has(button[role="combobox"][data-state="open"]),
+.erp-form-nav [data-invalid="true"] .lookup-name,
+.erp-form-nav [data-invalid="true"] .lookup-name:focus-within,
+.erp-form-nav [data-invalid="true"] .lookup-code > div:first-child,
+.erp-form-nav [data-invalid="true"] .lookup-code > div:first-child:focus-within,
+.erp-form-nav :where(input, textarea, select, button[role="combobox"])[aria-invalid="true"],
+.erp-form-nav
+  :where(input, textarea, select, button[role="combobox"])[aria-invalid="true"]:is(
+    :focus,
+    :focus-visible
+  ) {
+  border-color: var(--awb-error-border);
+  border-style: solid;
+  box-shadow: inset 0 0 0 1px var(--awb-error-border);
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+

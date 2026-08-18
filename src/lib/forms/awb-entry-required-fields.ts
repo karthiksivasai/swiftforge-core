@@ -3,6 +3,7 @@ import { AWB_NAV } from "@/lib/forms/awb-entry-nav-order";
 type LookupPair = { id?: string; code: string; name: string };
 
 export const AWB_REQUIRED_NAV_ORDERS = new Set<number>([
+  AWB_NAV.CLIENT,
   AWB_NAV.SHIPPER_ORIGIN,
   AWB_NAV.SHIPPER_COMPANY,
   AWB_NAV.CONSIGNEE_DESTINATION,
@@ -47,6 +48,7 @@ export function getVendorChargePrerequisiteErrors(
 export function validateAwbNavField(
   order: number,
   form: {
+    clientName: LookupPair;
     shipper: { origin: LookupPair; companyName: LookupPair };
     consignee: { origin: LookupPair; companyName: LookupPair };
     product: LookupPair;
@@ -55,6 +57,8 @@ export function validateAwbNavField(
   opts?: { consigneeNotRequired?: boolean },
 ): boolean {
   switch (order) {
+    case AWB_NAV.CLIENT:
+      return isAwbLookupSelected(form.clientName);
     case AWB_NAV.SHIPPER_ORIGIN:
       return isAwbLookupSelected(form.shipper.origin);
     case AWB_NAV.SHIPPER_COMPANY:

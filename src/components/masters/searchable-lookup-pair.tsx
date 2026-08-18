@@ -4,7 +4,7 @@
  *  - manual search: F2 / 🔍 to search; Enter advances to next field (AWB ERP)
  *  - magnifying-glass popup (live RPC dialog or demo MasterLookupDialog)
  */
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -143,6 +143,8 @@ export function SearchableLookupPair({
   displayLimit,
   emptySearchMessage: _emptySearchMessage,
   noResultsMessage: _noResultsMessage = AWB_LOOKUP_NO_RESULTS,
+  onBrowseSearch: onBrowseSearchProp,
+  endAdornment,
 }: {
   value: LookupPairValue;
   onChange: (v: LookupPairValue) => void;
@@ -163,6 +165,10 @@ export function SearchableLookupPair({
   displayLimit?: number;
   emptySearchMessage?: string;
   noResultsMessage?: string;
+  /** Override F2 / magnifying-glass browse (e.g. Customer Help table). */
+  onBrowseSearch?: () => void;
+  /** Extra control after the search button (e.g. edit pencil). */
+  endAdornment?: ReactNode;
 }) {
   void _emptySearchMessage;
   void _noResultsMessage;
@@ -367,8 +373,12 @@ export function SearchableLookupPair({
 
   /** Search icon / F2 always opens the select-list dialog (not the inline typeahead). */
   const triggerExplicitSearch = useCallback(() => {
+    if (onBrowseSearchProp) {
+      onBrowseSearchProp();
+      return;
+    }
     openBrowsePopup(searchQuery());
-  }, [openBrowsePopup, searchQuery]);
+  }, [onBrowseSearchProp, openBrowsePopup, searchQuery]);
 
   const startInlineFrom = (_field: "code" | "name", text: string) => {
     if (manualSearch) return;
@@ -636,6 +646,7 @@ export function SearchableLookupPair({
               </div>
               {searchButton}
             </div>
+            {endAdornment}
           </div>
         ) : (
           <div className="flex w-full min-w-0 items-stretch gap-1">
@@ -651,6 +662,7 @@ export function SearchableLookupPair({
               </div>
             </div>
             {searchButton}
+            {endAdornment}
           </div>
         )}
 

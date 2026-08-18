@@ -63,10 +63,11 @@ import {
   AWB_LOOKUP_NO_RESULTS,
   type LookupDisplayVariant,
 } from "@/components/masters/lookup-autocomplete-ui";
+import { ClientNameField } from "@/components/transactions/client-name-field";
 import { PartyContactLookup } from "@/components/transactions/party-contact-lookup";
 import { VendorServiceLookup } from "@/components/transactions/vendor-service-lookup";
 import { PincodeAutocomplete } from "@/components/pincode-autocomplete";
-import { ErpFormNavProvider, ErpNavCycleSelect, ErpNavDateInput, ErpNavInput, ErpNavSelect, useErpFormNavOptional, useErpNavCommit, useErpSelectNav } from "@/components/forms/erp-form-nav-context";
+import { ErpFormNavProvider, ErpNavCycleSelect, ErpNavDateInput, ErpNavInput, ErpNavSelect, useErpNavCommit, useErpSelectNav } from "@/components/forms/erp-form-nav-context";
 import { AWB_NAV } from "@/lib/forms/awb-entry-nav-order";
 import {
   AWB_REQUIRED_NAV_ORDERS,
@@ -145,6 +146,12 @@ import {
   validatePartyIdNumbers,
 } from "@/lib/transactions/idValidators";
 import {
+  validateAwbEntry,
+  validateDocumentNoFormat,
+} from "@/lib/validation/awbValidations";
+import {
+  apiRatingToChargeLines,
+  apiRatingToSummary,
   ratingSnapshotToChargeLines,
   ratingToSummary,
   type RatingSummary,
@@ -1105,6 +1112,29 @@ const calcChargeWeight = (draft: PiecesDraft) => {
   return Math.max(vol, act).toFixed(3);
 };
 
+/** Service Details totals: Actual = Σ(weight/pc × pcs), Vol/Charge = Σ of piece-row values. */
+function summarizePieceLines(lines: PiecesLine[]): {
+  actualWeight: string;
+  volWeight: string;
+  chargeWeight: string;
+} {
+  let actual = 0;
+  let vol = 0;
+  let charge = 0;
+  for (const line of lines) {
+    const pcs = Number.parseFloat(line.pieces) || 0;
+    const perPc = Number.parseFloat(line.actualWeightPerPc) || 0;
+    actual += perPc * pcs;
+    vol += Number.parseFloat(line.volWeight) || 0;
+    charge += Number.parseFloat(line.chargeWeight) || 0;
+  }
+  return {
+    actualWeight: actual.toFixed(3),
+    volWeight: vol.toFixed(3),
+    chargeWeight: charge.toFixed(3),
+  };
+}
+
 /** Box numbers 1..N — one box per row added in AWB Pieces details. */
 function deriveAwbBoxNumbers(piecesLines: PiecesLine[]): string[] {
   const total = piecesLines.length;
@@ -1461,6 +1491,10 @@ function AwbEntryPage() {
   const awbFormNavRef = useRef<HTMLDivElement>(null);
   const [navInvalidOrders, setNavInvalidOrders] = useState<Set<number>>(() => new Set());
   const [vendorChargePrereqErrors, setVendorChargePrereqErrors] = useState<string[] | null>(null);
+  const [weightErrorModal, setWeightErrorModal] = useState<{ open: boolean; message: string }>({
+    open: false,
+    message: "",
+  });
   const [formSetupOpen, setFormSetupOpen] = useState(false);
   const [formSetupSettings, setFormSetupSettings] =
     useState<AwbFormSetupSettings>(defaultAwbFormSetup);
@@ -2120,6 +2154,140 @@ function AwbEntryPage() {
     }
   }, [navBlocker.status]);
 
+  const handleCheckRateCombination = async (options?: { silent?: boolean }) => {
+    try {
+      const piecesPayload = form.piecesLines.map((l) => ({
+        actualWeight: Number.parseFloat(l.actualWeightPerPc) || 0,
+        pieces: Number.parseInt(l.pieces, 10) || 1,
+        length: Number.parseFloat(l.length) || 0,
+        width: Number.parseFloat(l.breadth) || 0,
+        height: Number.parseFloat(l.height) || 0,
+      }));
+
+      if (piecesPayload.length === 0) {
+        if (!options?.silent) {
+          toast.error("Please add at least one piece row before calculating rates");
+        }
+        return;
+      }
+
+      const otherChargesSum = form.chargeLines
+        .filter((c) => c.description.toUpperCase() !== "FREIGHT")
+        .reduce((sum, c) => sum + (Number.parseFloat(c.amount) || 0), 0);
+
+      const payload = {
+        customerCode: form.clientName.code || "CKING",
+        contractNo: form.referenceNo || "243792",
+        productCode: form.product.code || "SPX",
+        vendorCode: form.vendor.code || "DTAU",
+        serviceCode: form.service.code || form.service.name || "COURIER PLEASE",
+        originCode: form.shipper.origin.code || "HYD",
+        destinationCode: form.consignee.origin.code || form.consignee.origin.name || "AUSTRALIA",
+        bookDate: form.bookDate || todayIso(),
+        pieces: piecesPayload,
+        division: 5000,
+        otherCharges: otherChargesSum,
+        customerBillingStateCode: form.shipper.state || "TELANGANA",
+        branchStateCode: "TELANGANA",
+      };
+
+      const res = await fetch("/api/shipments/rate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (
+          data.code === "WEIGHT_OUT_OF_RANGE" ||
+          (data.message && data.message.includes("weight allowed between"))
+        ) {
+          setWeightErrorModal({
+            open: true,
+            message: data.message || data.error,
+          });
+          setRatingSummary(null);
+          setForm((f) => ({
+            ...f,
+            customerChargesTotal: "0.00",
+            balanceAmount: "0.00",
+          }));
+          return;
+        }
+
+        if (!options?.silent) {
+          toast.error(data.message || "Failed to calculate rating");
+        }
+        return;
+      }
+
+      const summary = apiRatingToSummary(data);
+      const chargeLines = apiRatingToChargeLines(data);
+
+      setRatingSummary(summary);
+      setForm((f) => ({
+        ...f,
+        customerChargesTotal: summary.totalAmount,
+        balanceAmount: summary.totalAmount,
+        chargeLines,
+      }));
+
+      if (!options?.silent) {
+        toast.success(
+          `Check Rate Combination: Total ₹${summary.totalAmount} (Contract Charges: ₹${summary.contractCharges})`,
+        );
+      }
+    } catch (err) {
+      if (!options?.silent) {
+        toast.error(toErrorMessage(err, "Rate calculation request failed"));
+      }
+    }
+  };
+
+  useEffect(() => {
+    const totals = summarizePieceLines(form.piecesLines);
+    setForm((f) => {
+      if (
+        f.actualWeight === totals.actualWeight &&
+        f.volWeight === totals.volWeight &&
+        f.chargeWeight === totals.chargeWeight
+      ) {
+        return f;
+      }
+      return {
+        ...f,
+        actualWeight: totals.actualWeight,
+        volWeight: totals.volWeight,
+        chargeWeight: totals.chargeWeight,
+      };
+    });
+  }, [form.piecesLines]);
+
+  // Automatic reactive rate calculation whenever piece rows or shipment parameters change
+  useEffect(() => {
+    if (!showForm || form.piecesLines.length === 0) return;
+    const timer = setTimeout(() => {
+      void handleCheckRateCombination({ silent: true });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [
+    showForm,
+    form.piecesLines,
+    form.clientName.code,
+    form.product.code,
+    form.vendor.code,
+    form.service.code,
+    form.service.name,
+    form.shipper.origin.code,
+    form.consignee.origin.code,
+    form.consignee.origin.name,
+    form.referenceNo,
+    form.bookDate,
+    form.shipper.state,
+  ]);
+
   const openAdd = () => {
     const existing = restoreDraft ?? readLocalAwbDraft(userKey);
     if (existing && isAwbDraftWorthKeeping(existing.form)) {
@@ -2330,6 +2498,24 @@ function AwbEntryPage() {
 
   const handleSave = async () => {
     if (isReadOnly) return toast.error("BOOKED and CANCELLED shipments cannot be edited");
+
+    const awbValidation = validateAwbEntry({
+      paymentType: form.paymentType,
+      documentType: form.shipper.documentType,
+      documentNo: form.shipper.documentNo,
+      shipperContactName: form.shipper.contactName,
+      shipperTelephone: form.shipper.telephone,
+      shipperMobile: form.shipper.mobileNo,
+    });
+
+    if (!awbValidation.valid) {
+      setWeightErrorModal({
+        open: true,
+        message: awbValidation.message!,
+      });
+      return;
+    }
+
     if (!authed && !form.awbNo.trim()) return toast.error("AWB No is required");
     if (!form.clientName.code.trim() && !form.clientName.name.trim())
       return toast.error("Client Name is required");
@@ -3495,7 +3681,18 @@ function AwbEntryPage() {
   };
 
   const handleClientSelect = async (v: LookupPair) => {
-    setForm((f) => ({ ...f, clientName: v }));
+    setForm((f) => ({
+      ...f,
+      clientName: v,
+      shipper: {
+        ...f.shipper,
+        companyName: {
+          id: v.id,
+          code: v.code,
+          name: v.name,
+        },
+      },
+    }));
 
     if (!authed) return;
 
@@ -3521,10 +3718,23 @@ function AwbEntryPage() {
         fieldExecutive: hydrate.fieldExecutive.code
           ? hydrate.fieldExecutive
           : f.fieldExecutive,
+        product:
+          !f.product.code.trim() && !f.product.name.trim() && profile.defaults.preferredProduct.code
+            ? profile.defaults.preferredProduct
+            : f.product,
+        vendor:
+          !f.vendor.code.trim() && !f.vendor.name.trim() && profile.defaultVendor.code
+            ? profile.defaultVendor
+            : f.vendor,
         shipper: {
           ...f.shipper,
           ...hydrate.shipper,
-          origin: f.shipper.origin.code.trim() ? f.shipper.origin : DEFAULT_SHIPPER_ORIGIN,
+          origin:
+            hydrate.shipper.origin.code || hydrate.shipper.origin.name
+              ? hydrate.shipper.origin
+              : f.shipper.origin.code.trim()
+                ? f.shipper.origin
+                : DEFAULT_SHIPPER_ORIGIN,
         },
         proforma: {
           ...(f.proforma ?? emptyProforma()),
@@ -3802,8 +4012,14 @@ function AwbEntryPage() {
                         />
                       </FieldWrapper>
                       <div className="min-w-0 lg:col-span-3">
-                        <FieldWrapper borderLabel lookupSplit label="Client Name" required>
-                          <ClientNameLookupInput
+                        <FieldWrapper
+                          borderLabel
+                          lookupSplit
+                          label="Client Name"
+                          required
+                          invalid={navInvalidOrders.has(AWB_NAV.CLIENT)}
+                        >
+                          <ClientNameField
                             value={form.clientName}
                             onDraftChange={handleClientNameDraft}
                             onSelect={(v) => void handleClientSelect(v)}
@@ -3849,6 +4065,7 @@ function AwbEntryPage() {
                       originLookup="destination"
                       originRequired
                       invalidNavOrders={navInvalidOrders}
+                      onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
                     />
                     <PartySection
                       title="Consignee Details"
@@ -3858,6 +4075,7 @@ function AwbEntryPage() {
                       originRequired={consigneeFieldsRequired}
                       companyRequired={consigneeFieldsRequired}
                       invalidNavOrders={navInvalidOrders}
+                      onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
                     />
                     <ServicesSection
                       form={form}
@@ -3873,9 +4091,9 @@ function AwbEntryPage() {
                         size="sm"
                         className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
                         {...erpNavSkip()}
-                        onClick={() =>
-                          toast.info("Customer charges will be enabled with backend wiring")
-                        }
+                        onClick={() => {
+                          void handleCheckRateCombination();
+                        }}
                       >
                         Customer Charges
                       </Button>
@@ -4167,68 +4385,83 @@ function AwbEntryPage() {
                           </FieldWrapper>
                         ))}
                       </div>
-                      {authed && editing?.id ? (
-                        <div className="flex flex-wrap gap-2 border-b px-3 py-2.5">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8"
-                            {...erpNavSkip()}
-                            disabled={saving || isReadOnly}
-                            onClick={() => {
-                              void (async () => {
-                                try {
-                                  const breakdown = await calculateShipmentRating(editing.id!);
-                                  applyServerRating(breakdown);
-                                  await refreshLive();
-                                  toast.success(
-                                    `Rated — total ${ratingToSummary(breakdown).totalAmount}`,
-                                  );
-                                } catch (e) {
-                                  toast.error(toErrorMessage(e));
-                                }
-                              })();
-                            }}
-                          >
-                            Calculate rating
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8"
-                            {...erpNavSkip()}
-                            disabled={saving || isReadOnly}
-                            onClick={() => {
-                              void (async () => {
-                                try {
-                                  const breakdown = await recalculateShipmentRating({
-                                    id: editing.id!,
-                                    row_version: editing.rowVersion ?? 1,
-                                  });
-                                  applyServerRating(breakdown);
-                                  await refreshLive();
-                                  toast.success(
-                                    `Recalculated — total ${ratingToSummary(breakdown).totalAmount}`,
-                                  );
-                                } catch (e) {
-                                  toast.error(toErrorMessage(e));
-                                }
-                              })();
-                            }}
-                          >
-                            Recalculate
-                          </Button>
-                          {ratingSummary ? (
-                            <span className="self-center text-xs text-muted-foreground">
-                              Server rating: freight {ratingSummary.freight} · fuel{" "}
-                              {ratingSummary.fuel} · tax {ratingSummary.tax} · total{" "}
-                              {ratingSummary.totalAmount}
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
+                      <div className="flex flex-wrap gap-2 border-b px-3 py-2.5">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 border-emerald-600 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                          {...erpNavSkip()}
+                          disabled={saving || isReadOnly}
+                          onClick={() => {
+                            void handleCheckRateCombination();
+                          }}
+                        >
+                          Check Rate Combination
+                        </Button>
+                        {authed && editing?.id ? (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8"
+                              {...erpNavSkip()}
+                              disabled={saving || isReadOnly}
+                              onClick={() => {
+                                void (async () => {
+                                  try {
+                                    const breakdown = await calculateShipmentRating(editing.id!);
+                                    applyServerRating(breakdown);
+                                    await refreshLive();
+                                    toast.success(
+                                      `Rated — total ${ratingToSummary(breakdown).totalAmount}`,
+                                    );
+                                  } catch (e) {
+                                    toast.error(toErrorMessage(e));
+                                  }
+                                })();
+                              }}
+                            >
+                              Calculate rating
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8"
+                              {...erpNavSkip()}
+                              disabled={saving || isReadOnly}
+                              onClick={() => {
+                                void (async () => {
+                                  try {
+                                    const breakdown = await recalculateShipmentRating({
+                                      id: editing.id!,
+                                      row_version: editing.rowVersion ?? 1,
+                                    });
+                                    applyServerRating(breakdown);
+                                    await refreshLive();
+                                    toast.success(
+                                      `Recalculated — total ${ratingToSummary(breakdown).totalAmount}`,
+                                    );
+                                  } catch (e) {
+                                    toast.error(toErrorMessage(e));
+                                  }
+                                })();
+                              }}
+                            >
+                              Recalculate
+                            </Button>
+                          </>
+                        ) : null}
+                        {ratingSummary ? (
+                          <span className="self-center text-xs text-muted-foreground">
+                            Server rating: freight {ratingSummary.freight} · fuel{" "}
+                            {ratingSummary.fuel} · tax {ratingSummary.tax} · total{" "}
+                            {ratingSummary.totalAmount}
+                          </span>
+                        ) : null}
+                      </div>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                         <FieldWrapper borderLabel label="Description" required>
                           <ErpNavSelect
@@ -5785,6 +6018,35 @@ function AwbEntryPage() {
       />
 
       <AlertDialog
+        open={weightErrorModal.open}
+        onOpenChange={(open) => {
+          if (!open) setWeightErrorModal({ open: false, message: "" });
+        }}
+      >
+        <AlertDialogContent className="max-w-md p-6">
+          <AlertDialogHeader className="items-center text-center">
+            <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400">
+              <AlertTriangle className="h-8 w-8" aria-hidden />
+            </div>
+            <AlertDialogTitle className="text-center text-lg font-semibold text-foreground">
+              Weight Out of Range
+            </AlertDialogTitle>
+            <AlertDialogDescription className="mt-2 text-center text-sm font-medium text-destructive">
+              {weightErrorModal.message}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 sm:justify-center">
+            <AlertDialogAction
+              onClick={() => setWeightErrorModal({ open: false, message: "" })}
+              className="w-28 bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
         open={vendorChargePrereqErrors != null}
         onOpenChange={(open) => {
           if (!open) setVendorChargePrereqErrors(null);
@@ -5915,6 +6177,7 @@ function PartySection({
   originRequired,
   companyRequired = true,
   invalidNavOrders,
+  onValidationError,
 }: {
   title: string;
   party: PartyDetails;
@@ -5923,6 +6186,7 @@ function PartySection({
   originRequired?: boolean;
   companyRequired?: boolean;
   invalidNavOrders?: Set<number>;
+  onValidationError?: (message: string) => void;
 }) {
   const isConsignee = title.includes("Consignee");
   const originLabel = isConsignee ? "Destination" : "Origin";
@@ -6160,9 +6424,18 @@ function PartySection({
               onValueChange={(v) => onChange({ documentNo: v.toUpperCase() })}
               onBlur={() => {
                 if (party.documentType && party.documentNo && party.documentNo.trim()) {
-                  const res = validateDocumentId(party.documentType, party.documentNo, `${isConsignee ? "Consignee" : "Shipper"} ${party.documentType}`);
-                  if (!res.valid && res.message) {
-                    toast.error(res.message);
+                  const check = validateDocumentNoFormat(party.documentType, party.documentNo);
+                  if (!check.valid && check.message) {
+                    if (onValidationError) {
+                      onValidationError(check.message);
+                    } else {
+                      toast.error(check.message);
+                    }
+                  } else {
+                    const res = validateDocumentId(party.documentType, party.documentNo, `${isConsignee ? "Consignee" : "Shipper"} ${party.documentType}`);
+                    if (!res.valid && res.message) {
+                      toast.error(res.message);
+                    }
                   }
                 }
               }}
@@ -6192,6 +6465,8 @@ function ServicesSection({
   );
   const inputClass = "h-8 px-1.5 text-[13px]";
   const skip = erpNavSkip();
+  const pieceWeightTotals = summarizePieceLines(form.piecesLines);
+  const readOnlyWeightClass = `cursor-default bg-muted/40 ${inputClass}`;
 
   return (
     <FormSection title="Services Details">
@@ -6321,9 +6596,11 @@ function ServicesSection({
             <div className="flex w-full min-w-0 items-stretch">
               <ErpNavInput
                 order={AWB_NAV.ACTUAL_WEIGHT}
-                className={`min-w-0 flex-1 ${inputClass}`}
-                value={form.actualWeight}
-                onValueChange={(v) => setForm((f) => ({ ...f, actualWeight: v }))}
+                readOnly
+                aria-readonly="true"
+                title="Calculated from piece details"
+                className={`min-w-0 flex-1 ${readOnlyWeightClass}`}
+                value={pieceWeightTotals.actualWeight}
               />
               <Select
                 value={form.weightUnit}
@@ -6350,17 +6627,21 @@ function ServicesSection({
           <FieldWrapper borderLabel label="Volumetric Weight">
             <ErpNavInput
               order={AWB_NAV.VOL_WEIGHT}
-              className={inputClass}
-              value={form.volWeight}
-              onValueChange={(v) => setForm((f) => ({ ...f, volWeight: v }))}
+              readOnly
+              aria-readonly="true"
+              title="Calculated from piece details"
+              className={readOnlyWeightClass}
+              value={pieceWeightTotals.volWeight}
             />
           </FieldWrapper>
           <FieldWrapper borderLabel label="Charge Weight">
             <ErpNavInput
               order={AWB_NAV.CHARGE_WEIGHT}
-              className={inputClass}
-              value={form.chargeWeight}
-              onValueChange={(v) => setForm((f) => ({ ...f, chargeWeight: v }))}
+              readOnly
+              aria-readonly="true"
+              title="Calculated from piece details"
+              className={readOnlyWeightClass}
+              value={pieceWeightTotals.chargeWeight}
             />
           </FieldWrapper>
         </div>
@@ -6684,29 +6965,3 @@ function LookupPairInput({
   );
 }
 
-function ClientNameLookupInput({
-  value,
-  onDraftChange,
-  onSelect,
-  disabled,
-}: {
-  value: LookupPair;
-  onDraftChange: (v: LookupPair) => void;
-  onSelect: (v: LookupPair) => void;
-  disabled?: boolean;
-}) {
-  const nav = useErpFormNavOptional();
-  return (
-    <LookupPairInput
-      lookup="customer"
-      value={value}
-      onChange={onDraftChange}
-      onSelect={onSelect}
-      disabled={disabled}
-      displayVariant="client"
-      navOrder={AWB_NAV.CLIENT}
-      emptySearchMessage="Please enter a client name."
-      onCommit={() => nav?.focusFieldByOrder(AWB_NAV.SHIPPER_ORIGIN)}
-    />
-  );
-}
