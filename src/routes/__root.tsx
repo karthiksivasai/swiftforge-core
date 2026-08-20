@@ -18,6 +18,7 @@ import { AppHeader } from "@/components/app-header";
 import { TenantProvider } from "@/lib/tenant";
 import { ThemeProvider } from "@/lib/theme";
 import { AuthProvider } from "@/lib/auth";
+import { BranchProvider } from "@/lib/branch-context";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -162,26 +163,28 @@ function RootComponent() {
       <ThemeProvider>
         <TenantProvider>
           <AuthProvider>
-            <TooltipProvider delayDuration={0}>
-              {isBareRoute ? (
-                <>
-                  <Outlet />
-                  <Toaster />
-                </>
-              ) : (
-                <SidebarProvider defaultOpen={false}>
-                  <AppSidebar />
-                  <SidebarInset className="min-w-0 overflow-x-hidden">
-                    <AppHeader />
-                    <main className="min-w-0 flex-1 overflow-x-hidden">
-                      {/* Required: nested routes render here. */}
-                      <Outlet />
-                    </main>
+            <BranchProvider>
+              <TooltipProvider delayDuration={0}>
+                {isBareRoute ? (
+                  <>
+                    <Outlet />
                     <Toaster />
-                  </SidebarInset>
-                </SidebarProvider>
-              )}
-            </TooltipProvider>
+                  </>
+                ) : (
+                  <SidebarProvider defaultOpen={false}>
+                    <AppSidebar />
+                    <SidebarInset className="min-w-0 overflow-x-hidden">
+                      <AppHeader />
+                      <main className="min-w-0 flex-1 overflow-x-hidden">
+                        {/* Required: nested routes render here. */}
+                        <Outlet />
+                      </main>
+                      <Toaster />
+                    </SidebarInset>
+                  </SidebarProvider>
+                )}
+              </TooltipProvider>
+            </BranchProvider>
           </AuthProvider>
         </TenantProvider>
       </ThemeProvider>

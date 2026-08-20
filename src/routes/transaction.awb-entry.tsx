@@ -136,6 +136,8 @@ import {
   getRatingBreakdown,
   recalculateShipmentRating,
 } from "@/lib/transactions/resources/rating";
+import { useActiveBranch } from "@/lib/branch-context";
+import { getAwbEntryStatus } from "@/lib/transactions/resources/awbStatus";
 import {
   getBranchAwbStockSummary,
   validateManualAwb,
@@ -182,6 +184,12 @@ import {
   ShipmentDocumentQuickLinks,
   ShipmentDocumentsCard,
 } from "@/components/transactions/shipment-documents-card";
+import {
+  buildWfBookingPayload,
+  callWorldFirstBookingApi,
+  getWfClientConfig,
+  validateWfBookingRequest,
+} from "@/lib/integrations/world-first-api";
 
 type LookupPair = { id?: string; code: string; name: string };
 
@@ -749,6 +757,22 @@ function copyLookupPair(pair: LookupPair): LookupPair {
   return { ...pair };
 }
 
+function isWorldFirstVendor(vendor: LookupPair): boolean {
+  const code = (vendor.code || "").trim().toUpperCase();
+  const name = (vendor.name || "").trim().toUpperCase();
+  const wfConfig = getWfClientConfig();
+  const wfCode = wfConfig.vendorCode.toUpperCase();
+
+  return (
+    code === wfCode ||
+    code === "WFT" ||
+    code === "WORLD_FIRST" ||
+    name.includes("WORLD FREIGHT") ||
+    name.includes("WORLD-FIRST") ||
+    name.includes("WORLD FIRST")
+  );
+}
+
 /** Mirror Shipment Details product/vendor/service into Forwarding delivery fields. */
 function syncForwardingDeliveryFromShipment(
   forwarding: ForwardingData,
@@ -919,7 +943,7 @@ const emptyForm = (): AwbFullForm => ({
   bookTime: nowBookTime(),
   referenceNo: "",
   clientName: emptyPair(),
-  awbUserId: "SURYAA",
+  awbUserId: "",
   podUserId: "",
   manifestNo: "0",
   manifestDate: "",
@@ -1457,6 +1481,7 @@ export const Route = createFileRoute("/transaction/awb-entry")({
 
 function AwbEntryPage() {
   const { isAuthenticated: authed, profile } = useAuth();
+  const { activeBranchName, activeBranchId } = useActiveBranch();
   const queryClient = useQueryClient();
   const userKey = draftUserKey(profile?.id, profile?.auth_user_id);
   const [demoRows, setDemoRows] = useState<AwbRow[]>(seedRows);
@@ -1521,8 +1546,21 @@ function AwbEntryPage() {
   const [vendorPanelKey, setVendorPanelKey] = useState(0);
 
   const branchStockQuery = useQuery({
-    queryKey: ["branch-awb-stock", profile?.home_branch_id],
-    queryFn: () => getBranchAwbStockSummary(profile?.home_branch_id || undefined),
+    queryKey: ["branch-awb-stock", profile?.home_branch_id, activeBranchId],
+    queryFn: () => getBranchAwbStockSummary(activeBranchId || profile?.home_branch_id || undefined),
+    enabled: authed,
+  });
+
+  const currentUserId = profile?.username || profile?.full_name || profile?.id || null;
+
+  const awbStatusQuery = useQuery({
+    queryKey: ["awb-entry-status", currentUserId, activeBranchName, activeBranchId],
+    queryFn: () =>
+      getAwbEntryStatus({
+        userId: currentUserId,
+        branchName: activeBranchName,
+        branchId: activeBranchId,
+      }),
     enabled: authed,
   });
 
@@ -2575,6 +2613,33 @@ function AwbEntryPage() {
           toast.error(vendorServiceError);
           return;
         }
+
+        // Trigger World-First AWB Booking API if vendor is World Freight Transportation
+        if (isWorldFirstVendor(payload.vendor)) {
+          const wfPayload = buildWfBookingPayload(payload as unknown as Record<string, unknown>);
+          const validation = validateWfBookingRequest(wfPayload);
+          if (!validation.valid) {
+            const msg = `World-First Validation Error: ${validation.errors.join("; ")}`;
+            toast.error(msg);
+            setBookingErrors(validation.errors);
+            return;
+          }
+
+          const wfResult = await callWorldFirstBookingApi(wfPayload);
+          if (!wfResult.success) {
+            const err = wfResult.message || wfResult.apiError || "World-First AWB Booking Failed";
+            toast.error(`World-First API Error: ${err}`);
+            console.error("World-First AWB Booking Failed:", wfResult);
+            setBookingErrors([err]);
+            return; // Abort save if World-First booking fails
+          }
+
+          if (wfResult.awbNo) {
+            payload.forwarding.forwardingAwb = wfResult.awbNo;
+            payload.forwardingNo = wfResult.awbNo;
+          }
+          toast.success(`World-First AWB Booking Successful! (Ref: ${wfResult.awbNo || wfResult.refNo})`);
+        }
         const { fields, pieces, charges } = uiFormToShipmentPayload({
           ...payload,
           pickupId: editing?.pickupId ?? payload.pickupId,
@@ -2615,6 +2680,8 @@ function AwbEntryPage() {
         setVendorPanelKey((k) => k + 1);
         allowLeaveRef.current = true;
         await clearDraftState();
+        void awbStatusQuery.refetch();
+        void branchStockQuery.refetch();
         toast.success(editing ? "AWB entry updated" : `AWB ${allocatedAwb} saved (DRAFT)`);
       } catch (e) {
         toast.error(toErrorMessage(e));
@@ -2791,6 +2858,33 @@ function AwbEntryPage() {
           setBookingErrors([vendorServiceError]);
           toast.error(vendorServiceError);
           return;
+        }
+
+        // Trigger World-First AWB Booking API if vendor is World Freight Transportation
+        if (isWorldFirstVendor(payload.vendor)) {
+          const wfPayload = buildWfBookingPayload(payload as unknown as Record<string, unknown>);
+          const validation = validateWfBookingRequest(wfPayload);
+          if (!validation.valid) {
+            const msg = `World-First Validation Error: ${validation.errors.join("; ")}`;
+            toast.error(msg);
+            setBookingErrors(validation.errors);
+            return;
+          }
+
+          const wfResult = await callWorldFirstBookingApi(wfPayload);
+          if (!wfResult.success) {
+            const err = wfResult.message || wfResult.apiError || "World-First AWB Booking Failed";
+            toast.error(`World-First API Error: ${err}`);
+            console.error("World-First AWB Booking Failed:", wfResult);
+            setBookingErrors([err]);
+            return; // Abort booking if World-First booking fails
+          }
+
+          if (wfResult.awbNo) {
+            payload.forwarding.forwardingAwb = wfResult.awbNo;
+            payload.forwardingNo = wfResult.awbNo;
+          }
+          toast.success(`World-First AWB Booking Successful! (Ref: ${wfResult.awbNo || wfResult.refNo})`);
         }
         const { fields, pieces, charges } = uiFormToShipmentPayload({
           ...payload,
@@ -3882,44 +3976,77 @@ function AwbEntryPage() {
               >
             <TabsContent value="awb" className="mt-0">
               <fieldset disabled={isReadOnly} className="min-w-0 border-0 p-0 disabled:opacity-90">
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5 border-b bg-muted/10 px-2.5 py-0.5 text-[12px] leading-tight text-muted-foreground">
-                  <span>
-                    AWB UserID:{" "}
-                    <span className="font-medium text-foreground">{form.awbUserId}</span>
-                  </span>
-                  <span>
-                    POD UserID:{" "}
-                    <span className="font-medium text-foreground">{form.podUserId || "—"}</span>
-                  </span>
-                  <span>
-                    AWB Stock:{" "}
-                    <span
+                {(() => {
+                  const displayAwbUserId =
+                    awbStatusQuery.data?.awbUserId ||
+                    (profile?.username ? profile.username.toUpperCase() : profile?.full_name?.toUpperCase()) ||
+                    "—";
+
+                  const displayPodUserId =
+                    awbStatusQuery.data?.podUserId ||
+                    (profile as unknown as { pod_user_id?: string })?.pod_user_id ||
+                    "—";
+
+                  const displayLimit = awbStatusQuery.data?.limit ?? branchStockQuery.data?.limit ?? null;
+                  const displayUsed = awbStatusQuery.data?.used ?? branchStockQuery.data?.used ?? null;
+                  const displayBalance =
+                    displayLimit !== null && displayUsed !== null
+                      ? displayLimit - displayUsed
+                      : (branchStockQuery.data?.balance ?? null);
+
+                  const displayManifestNo = awbStatusQuery.data?.manifestNo ?? form.manifestNo ?? "0";
+                  const displayManifestDate = awbStatusQuery.data?.manifestDate || form.manifestDate || "";
+                  const displayInvoiceNo = awbStatusQuery.data?.invoiceNo || form.invoiceNo || "";
+                  const displayDebitNoteNo = awbStatusQuery.data?.debitNoteNo ?? form.debitNoteNo ?? "0";
+                  const displayCreditNoteNo = awbStatusQuery.data?.creditNoteNo ?? form.creditNoteNo ?? "0";
+                  const displayFlightNo = awbStatusQuery.data?.flightNo || form.flightNo || "";
+
+                  return (
+                    <div
                       className={cn(
-                        "font-medium",
-                        (branchStockQuery.data?.balance ?? 1) <= 0
-                          ? "text-destructive font-semibold"
-                          : "text-foreground",
+                        "flex flex-wrap gap-x-3 gap-y-0.5 border-b bg-muted/10 px-2.5 py-0.5 text-[12px] leading-tight text-muted-foreground transition-opacity",
+                        awbStatusQuery.isFetching && "animate-pulse opacity-80",
                       )}
                     >
-                      Limit ({branchStockQuery.data?.limit ?? "—"}) · Used ({branchStockQuery.data?.used ?? "—"}) · Bal (
-                      {branchStockQuery.data?.balance ?? "—"})
-                    </span>
-                  </span>
-                  <span>Manifest No ({form.manifestNo})</span>
-                  <span>
-                    Manifest Date: {form.manifestDate ? formatDisplayDate(form.manifestDate) : "—"}
-                  </span>
-                  <span>Invoice No: {form.invoiceNo || "—"}</span>
-                  <span>Debit Note No ({form.debitNoteNo})</span>
-                  <span>Credit Note No ({form.creditNoteNo})</span>
-                  <span>Flight No: {form.flightNo || "—"}</span>
-                  {form.masterAwbNo ? (
-                    <span>
-                      Master AWB:{" "}
-                      <span className="font-medium text-foreground">{form.masterAwbNo}</span>
-                    </span>
-                  ) : null}
-                </div>
+                      <span>
+                        AWB UserID:{" "}
+                        <span className="font-medium text-foreground">{displayAwbUserId}</span>
+                      </span>
+                      <span>
+                        POD UserID:{" "}
+                        <span className="font-medium text-foreground">{displayPodUserId}</span>
+                      </span>
+                      <span>
+                        AWB Stock:{" "}
+                        <span
+                          className={cn(
+                            "font-medium",
+                            displayBalance !== null && displayBalance <= 0
+                              ? "text-destructive font-semibold"
+                              : "text-foreground",
+                          )}
+                        >
+                          Limit ({displayLimit !== null ? displayLimit : "—"}) · Used ({displayUsed !== null ? displayUsed : "—"}) · Bal (
+                          {displayBalance !== null ? displayBalance : "—"})
+                        </span>
+                      </span>
+                      <span>Manifest No ({displayManifestNo})</span>
+                      <span>
+                        Manifest Date: {displayManifestDate ? formatDisplayDate(displayManifestDate) : "—"}
+                      </span>
+                      <span>Invoice No: {displayInvoiceNo || "—"}</span>
+                      <span>Debit Note No ({displayDebitNoteNo})</span>
+                      <span>Credit Note No ({displayCreditNoteNo})</span>
+                      <span>Flight No: {displayFlightNo || "—"}</span>
+                      {form.masterAwbNo ? (
+                        <span>
+                          Master AWB:{" "}
+                          <span className="font-medium text-foreground">{form.masterAwbNo}</span>
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })()}
 
                 <div className="p-2 md:p-2.5">
                   <div className="mb-2 rounded border border-border bg-card p-2 pt-2.5">

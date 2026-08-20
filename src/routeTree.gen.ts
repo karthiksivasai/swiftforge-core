@@ -39,6 +39,7 @@ import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as PublicTrackRouteImport } from './routes/public.track'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
 import { Route as ApiPincodesRouteImport } from './routes/api/pincodes'
+import { Route as RunNo_EntryRunNo_EntryRouteImport } from './routes/RunNo_Entry.RunNo_Entry'
 import { Route as ReportsRunIndexRouteImport } from './routes/reports.run.index'
 import { Route as UtilityUsersUserSetupRouteImport } from './routes/utility.users.user-setup'
 import { Route as UtilityUsersLoggedinUsersRouteImport } from './routes/utility.users.loggedin-users'
@@ -102,6 +103,8 @@ import { Route as MasterCustomerCustomerRateRouteImport } from './routes/master.
 import { Route as MasterCustomerCustomerRouteImport } from './routes/master.customer.customer'
 import { Route as MasterCustomerConsigneeRouteImport } from './routes/master.customer.consignee'
 import { Route as ApiShipmentsRateRouteImport } from './routes/api/shipments.rate'
+import { Route as ApiAwbEntryStatusRouteImport } from './routes/api/awb-entry.status'
+import { Route as ApiShippingWorldFirstBookRouteImport } from './routes/api/shipping.world-first.book'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -256,6 +259,11 @@ const MasterSplatRoute = MasterSplatRouteImport.update({
 const ApiPincodesRoute = ApiPincodesRouteImport.update({
   id: '/api/pincodes',
   path: '/api/pincodes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RunNo_EntryRunNo_EntryRoute = RunNo_EntryRunNo_EntryRouteImport.update({
+  id: '/RunNo_Entry/RunNo_Entry',
+  path: '/RunNo_Entry/RunNo_Entry',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReportsRunIndexRoute = ReportsRunIndexRouteImport.update({
@@ -612,12 +620,24 @@ const ApiShipmentsRateRoute = ApiShipmentsRateRouteImport.update({
   path: '/api/shipments/rate',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAwbEntryStatusRoute = ApiAwbEntryStatusRouteImport.update({
+  id: '/api/awb-entry/status',
+  path: '/api/awb-entry/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiShippingWorldFirstBookRoute =
+  ApiShippingWorldFirstBookRouteImport.update({
+    id: '/api/shipping/world-first/book',
+    path: '/api/shipping/world-first/book',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/demo': typeof DemoRoute
   '/login': typeof LoginRoute
+  '/RunNo_Entry/RunNo_Entry': typeof RunNo_EntryRunNo_EntryRoute
   '/api/pincodes': typeof ApiPincodesRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
@@ -644,6 +664,7 @@ export interface FileRoutesByFullPath {
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/api/awb-entry/status': typeof ApiAwbEntryStatusRoute
   '/api/shipments/rate': typeof ApiShipmentsRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
@@ -707,12 +728,14 @@ export interface FileRoutesByFullPath {
   '/utility/users/loggedin-users': typeof UtilityUsersLoggedinUsersRoute
   '/utility/users/user-setup': typeof UtilityUsersUserSetupRoute
   '/reports/run/': typeof ReportsRunIndexRoute
+  '/api/shipping/world-first/book': typeof ApiShippingWorldFirstBookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/demo': typeof DemoRoute
   '/login': typeof LoginRoute
+  '/RunNo_Entry/RunNo_Entry': typeof RunNo_EntryRunNo_EntryRoute
   '/api/pincodes': typeof ApiPincodesRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
@@ -739,6 +762,7 @@ export interface FileRoutesByTo {
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/api/awb-entry/status': typeof ApiAwbEntryStatusRoute
   '/api/shipments/rate': typeof ApiShipmentsRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
@@ -802,6 +826,7 @@ export interface FileRoutesByTo {
   '/utility/users/loggedin-users': typeof UtilityUsersLoggedinUsersRoute
   '/utility/users/user-setup': typeof UtilityUsersUserSetupRoute
   '/reports/run': typeof ReportsRunIndexRoute
+  '/api/shipping/world-first/book': typeof ApiShippingWorldFirstBookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -809,6 +834,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/demo': typeof DemoRoute
   '/login': typeof LoginRoute
+  '/RunNo_Entry/RunNo_Entry': typeof RunNo_EntryRunNo_EntryRoute
   '/api/pincodes': typeof ApiPincodesRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
@@ -835,6 +861,7 @@ export interface FileRoutesById {
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/api/awb-entry/status': typeof ApiAwbEntryStatusRoute
   '/api/shipments/rate': typeof ApiShipmentsRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
@@ -898,6 +925,7 @@ export interface FileRoutesById {
   '/utility/users/loggedin-users': typeof UtilityUsersLoggedinUsersRoute
   '/utility/users/user-setup': typeof UtilityUsersUserSetupRoute
   '/reports/run/': typeof ReportsRunIndexRoute
+  '/api/shipping/world-first/book': typeof ApiShippingWorldFirstBookRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -906,6 +934,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/demo'
     | '/login'
+    | '/RunNo_Entry/RunNo_Entry'
     | '/api/pincodes'
     | '/master/$'
     | '/public/track'
@@ -932,6 +961,7 @@ export interface FileRouteTypes {
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
+    | '/api/awb-entry/status'
     | '/api/shipments/rate'
     | '/master/customer/consignee'
     | '/master/customer/customer'
@@ -995,12 +1025,14 @@ export interface FileRouteTypes {
     | '/utility/users/loggedin-users'
     | '/utility/users/user-setup'
     | '/reports/run/'
+    | '/api/shipping/world-first/book'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/dashboard'
     | '/demo'
     | '/login'
+    | '/RunNo_Entry/RunNo_Entry'
     | '/api/pincodes'
     | '/master/$'
     | '/public/track'
@@ -1027,6 +1059,7 @@ export interface FileRouteTypes {
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
+    | '/api/awb-entry/status'
     | '/api/shipments/rate'
     | '/master/customer/consignee'
     | '/master/customer/customer'
@@ -1090,12 +1123,14 @@ export interface FileRouteTypes {
     | '/utility/users/loggedin-users'
     | '/utility/users/user-setup'
     | '/reports/run'
+    | '/api/shipping/world-first/book'
   id:
     | '__root__'
     | '/'
     | '/dashboard'
     | '/demo'
     | '/login'
+    | '/RunNo_Entry/RunNo_Entry'
     | '/api/pincodes'
     | '/master/$'
     | '/public/track'
@@ -1122,6 +1157,7 @@ export interface FileRouteTypes {
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
+    | '/api/awb-entry/status'
     | '/api/shipments/rate'
     | '/master/customer/consignee'
     | '/master/customer/customer'
@@ -1185,6 +1221,7 @@ export interface FileRouteTypes {
     | '/utility/users/loggedin-users'
     | '/utility/users/user-setup'
     | '/reports/run/'
+    | '/api/shipping/world-first/book'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1192,6 +1229,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   DemoRoute: typeof DemoRoute
   LoginRoute: typeof LoginRoute
+  RunNo_EntryRunNo_EntryRoute: typeof RunNo_EntryRunNo_EntryRoute
   ApiPincodesRoute: typeof ApiPincodesRoute
   MasterSplatRoute: typeof MasterSplatRoute
   PublicTrackRoute: typeof PublicTrackRoute
@@ -1218,6 +1256,7 @@ export interface RootRouteChildren {
   UtilityIntegrationConfigurationRoute: typeof UtilityIntegrationConfigurationRoute
   UtilityNotificationRoute: typeof UtilityNotificationRoute
   UtilityServiceablePincodeRoute: typeof UtilityServiceablePincodeRoute
+  ApiAwbEntryStatusRoute: typeof ApiAwbEntryStatusRoute
   ApiShipmentsRateRoute: typeof ApiShipmentsRateRoute
   MasterCustomerConsigneeRoute: typeof MasterCustomerConsigneeRoute
   MasterCustomerCustomerRoute: typeof MasterCustomerCustomerRoute
@@ -1281,6 +1320,7 @@ export interface RootRouteChildren {
   UtilityUsersLoggedinUsersRoute: typeof UtilityUsersLoggedinUsersRoute
   UtilityUsersUserSetupRoute: typeof UtilityUsersUserSetupRoute
   ReportsRunIndexRoute: typeof ReportsRunIndexRoute
+  ApiShippingWorldFirstBookRoute: typeof ApiShippingWorldFirstBookRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1493,6 +1533,13 @@ declare module '@tanstack/react-router' {
       path: '/api/pincodes'
       fullPath: '/api/pincodes'
       preLoaderRoute: typeof ApiPincodesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/RunNo_Entry/RunNo_Entry': {
+      id: '/RunNo_Entry/RunNo_Entry'
+      path: '/RunNo_Entry/RunNo_Entry'
+      fullPath: '/RunNo_Entry/RunNo_Entry'
+      preLoaderRoute: typeof RunNo_EntryRunNo_EntryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reports/run/': {
@@ -1936,6 +1983,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiShipmentsRateRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/awb-entry/status': {
+      id: '/api/awb-entry/status'
+      path: '/api/awb-entry/status'
+      fullPath: '/api/awb-entry/status'
+      preLoaderRoute: typeof ApiAwbEntryStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/shipping/world-first/book': {
+      id: '/api/shipping/world-first/book'
+      path: '/api/shipping/world-first/book'
+      fullPath: '/api/shipping/world-first/book'
+      preLoaderRoute: typeof ApiShippingWorldFirstBookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -1944,6 +2005,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   DemoRoute: DemoRoute,
   LoginRoute: LoginRoute,
+  RunNo_EntryRunNo_EntryRoute: RunNo_EntryRunNo_EntryRoute,
   ApiPincodesRoute: ApiPincodesRoute,
   MasterSplatRoute: MasterSplatRoute,
   PublicTrackRoute: PublicTrackRoute,
@@ -1970,6 +2032,7 @@ const rootRouteChildren: RootRouteChildren = {
   UtilityIntegrationConfigurationRoute: UtilityIntegrationConfigurationRoute,
   UtilityNotificationRoute: UtilityNotificationRoute,
   UtilityServiceablePincodeRoute: UtilityServiceablePincodeRoute,
+  ApiAwbEntryStatusRoute: ApiAwbEntryStatusRoute,
   ApiShipmentsRateRoute: ApiShipmentsRateRoute,
   MasterCustomerConsigneeRoute: MasterCustomerConsigneeRoute,
   MasterCustomerCustomerRoute: MasterCustomerCustomerRoute,
@@ -2042,6 +2105,7 @@ const rootRouteChildren: RootRouteChildren = {
   UtilityUsersLoggedinUsersRoute: UtilityUsersLoggedinUsersRoute,
   UtilityUsersUserSetupRoute: UtilityUsersUserSetupRoute,
   ReportsRunIndexRoute: ReportsRunIndexRoute,
+  ApiShippingWorldFirstBookRoute: ApiShippingWorldFirstBookRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

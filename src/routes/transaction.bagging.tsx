@@ -19,6 +19,9 @@ import {
   Mail,
   Tag,
   Copy,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -89,6 +92,7 @@ import {
   type BaggingListRow,
   type BaggingHeaderDto,
   type BaggingAwbLineDto,
+  type ShipmentBaggingLookup,
 } from "@/lib/transactions/resources/bagging";
 
 type LookupPair = LookupPairValue;
@@ -338,7 +342,7 @@ export const Route = createFileRoute("/transaction/bagging")({
   component: BaggingPage,
 });
 
-function BaggingPage() {
+export function BaggingPage() {
   const { isAuthenticated: authed, profile } = useAuth();
   const queryClient = useQueryClient();
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -399,6 +403,14 @@ function BaggingPage() {
   const [bagLabelRow, setBagLabelRow] = useState<BaggingListRow | null>(null);
   const [bagLabelForm, setBagLabelForm] = useState<PrintBagLabelForm>(emptyPrintBagLabelForm());
 
+  const [printManifestOpen, setPrintManifestOpen] = useState(false);
+  const [printManifestRow, setPrintManifestRow] = useState<BaggingListRow | null>(null);
+  const [printManifestType, setPrintManifestType] = useState<"CSB-III" | "CSB-IV" | "CSB-V">("CSB-V");
+
+  const [awbPreviewData, setAwbPreviewData] = useState<ShipmentBaggingLookup | null>(null);
+  const [sortCol, setSortCol] = useState<ColFilterKey | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
   // Keep branch default updated
   useEffect(() => {
     if (defaultBranchCode && form.originCity.code === "HYD" && defaultBranchCode !== "HYD") {
@@ -427,9 +439,9 @@ function BaggingPage() {
   const patchForm = (patch: Partial<BaggingHeaderDto>) => setForm((f) => ({ ...f, ...patch }));
   const patchProgress = (patch: Partial<ProgressForm>) => setProgressForm((f) => ({ ...f, ...patch }));
 
-  // Client filtering on top of server data
+  // Client filtering & sorting on top of server data
   const filtered = useMemo(() => {
-    return rows.filter((row) => {
+    let result = rows.filter((row) => {
       const d = formatDisplayDate(row.manifest_date);
       const cf = colFilters;
       if (cf.manifestNo && !row.manifest_no.toLowerCase().includes(cf.manifestNo.toLowerCase())) return false;
@@ -444,7 +456,40 @@ function BaggingPage() {
       if (cf.weight && !String(row.total_weight).includes(cf.weight)) return false;
       return true;
     });
-  }, [rows, colFilters]);
+
+    if (sortCol) {
+      result = [...result].sort((a, b) => {
+        let valA: string | number = "";
+        let valB: string | number = "";
+        switch (sortCol) {
+          case "manifestNo": valA = a.manifest_no; valB = b.manifest_no; break;
+          case "masterAwbNo": valA = a.master_awb_no || ""; valB = b.master_awb_no || ""; break;
+          case "date": valA = a.manifest_date; valB = b.manifest_date; break;
+          case "origin": valA = a.origin; valB = b.origin; break;
+          case "from": valA = a.from_city; valB = b.from_city; break;
+          case "to": valA = a.to_city; valB = b.to_city; break;
+          case "destination": valA = a.destination; valB = b.destination; break;
+          case "vendor": valA = a.vendor_name; valB = b.vendor_name; break;
+          case "shipment": valA = a.total_awbs; valB = b.total_awbs; break;
+          case "weight": valA = parseWeight(a.total_weight); valB = parseWeight(b.total_weight); break;
+        }
+        if (valA < valB) return sortDir === "asc" ? -1 : 1;
+        if (valA > valB) return sortDir === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return result;
+  }, [rows, colFilters, sortCol, sortDir]);
+
+  const handleSort = (col: ColFilterKey) => {
+    if (sortCol === col) {
+      if (sortDir === "asc") setSortDir("desc");
+      else setSortCol(null);
+    } else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  };
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -453,6 +498,34 @@ function BaggingPage() {
   const endIdx = Math.min(currentPage * PAGE_SIZE, filtered.length);
 
   const selectedLine = (form.awbLines || []).find((line) => line.id === selectedLineId) ?? null;
+
+  // Auto-fetch AWB details preview when typing AWB number
+  useEffect(() => {
+    const clean = awbDraft.awbNo.trim().toUpperCase();
+    if (!clean || clean.length < 3) {
+      setAwbPreviewData(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const data = await fetchShipmentForBagging(clean);
+        if (data) {
+          setAwbPreviewData(data);
+          setAwbDraft((d) => ({
+            ...d,
+            weight: d.weight || data.weight || "",
+            pcs: d.pcs && d.pcs !== "1" ? d.pcs : data.pcs || "1",
+            forwardingNo: d.forwardingNo || data.forwarding_no || "",
+          }));
+        } else {
+          setAwbPreviewData(null);
+        }
+      } catch (e) {
+        console.warn("AWB preview fetch error:", e);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [awbDraft.awbNo]);
 
   const awbInBagLines = useMemo(() => {
     const q = awbInBagSearch.trim().toLowerCase();
@@ -491,15 +564,21 @@ function BaggingPage() {
       .filter((line) => line.bagNo === awbDraft.bagNo)
       .reduce((sum, line) => sum + parseWeight(line.weight), 0);
     const maxBag = Math.max(maxBagNo(lines), Number.parseInt(awbDraft.bagNo, 10) || 0);
+
+    const activePin =
+      selectedLine?.destination ||
+      awbPreviewData?.destination ||
+      (lines.length > 0 ? lines[lines.length - 1].destination : "");
+
     return {
       bagWeight: formatWeight(currentBagWeight),
-      consigneePinCode: "",
+      consigneePinCode: activePin || "—",
       totalBagNo: bagNos.size > 0 ? maxBag : 0,
       totalPieces,
       totalAwbNo: lines.length,
       totalWeight: lines.length > 0 ? formatWeight(totalWeight) : "0.000",
     };
-  }, [form.awbLines, awbDraft.bagNo]);
+  }, [form.awbLines, awbDraft.bagNo, selectedLine, awbPreviewData]);
 
   const openAdd = (prefill?: Partial<BaggingHeaderDto>) => {
     setEditingId(null);
@@ -1113,7 +1192,19 @@ function BaggingPage() {
               label="Service Center"
               lookup="serviceCentre"
               value={form.serviceCenter}
-              onChange={(serviceCenter) => patchForm({ serviceCenter })}
+              onChange={(serviceCenter) =>
+                patchForm({
+                  serviceCenter,
+                  destCity: form.destCity.code ? form.destCity : serviceCenter,
+                  destCountry: form.destCountry.code
+                    ? form.destCountry
+                    : ["HYD", "BAN", "MUM", "GUN", "MAH"].includes(serviceCenter.code)
+                      ? { code: "IN", name: "INDIA" }
+                      : serviceCenter.code
+                        ? { code: serviceCenter.code, name: serviceCenter.name }
+                        : form.destCountry,
+                })
+              }
               required
             />
             <BaggingLookupField
@@ -1300,15 +1391,15 @@ function BaggingPage() {
             <div className="space-y-1">
               {(
                 [
-                  ["AWB No.", selectedLine?.awbNo ?? ""],
-                  ["Shipper", selectedLine?.shipper ?? ""],
-                  ["Consignee", selectedLine?.consignee ?? ""],
-                  ["Vendor", selectedLine?.vendor ?? ""],
-                  ["Airline", selectedLine?.airline ?? ""],
-                  ["Service", selectedLine?.service ?? ""],
-                  ["Weight", selectedLine?.weight ? `${selectedLine.weight} kg` : ""],
-                  ["Pieces", selectedLine?.pcs ?? ""],
-                  ["Destination", selectedLine?.destination ?? ""],
+                  ["AWB No.", selectedLine?.awbNo || awbPreviewData?.awb_no || awbDraft.awbNo || ""],
+                  ["Shipper", selectedLine?.shipper || awbPreviewData?.shipper || ""],
+                  ["Consignee", selectedLine?.consignee || awbPreviewData?.consignee || ""],
+                  ["Vendor", selectedLine?.vendor || awbPreviewData?.vendor || form.vendor.name || ""],
+                  ["Airline", selectedLine?.airline || awbPreviewData?.airline || form.airlinesCode.code || ""],
+                  ["Service", selectedLine?.service || awbPreviewData?.service || ""],
+                  ["Weight", selectedLine?.weight ? `${selectedLine.weight} kg` : awbPreviewData?.weight ? `${awbPreviewData.weight} kg` : ""],
+                  ["Pieces", selectedLine?.pcs || awbPreviewData?.pcs || ""],
+                  ["Destination", selectedLine?.destination || awbPreviewData?.destination || form.destCity.name || ""],
                 ] as const
               ).map(([label, value]) => (
                 <div key={label} className="flex gap-2 text-sm">
@@ -1606,16 +1697,39 @@ function BaggingPage() {
           <table className="w-full min-w-[1100px] caption-bottom text-sm">
             <TableHeader>
               <TableRow className="bg-sidebar hover:bg-sidebar">
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Manifest No.</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Master AWBNo</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Date</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Origin</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">From</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">To</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Destination</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Vendor</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Shipment</TableHead>
-                <TableHead className="whitespace-nowrap text-sidebar-foreground">Weight</TableHead>
+                {(
+                  [
+                    ["manifestNo", "Manifest No."],
+                    ["masterAwbNo", "Master AWBNo"],
+                    ["date", "Date"],
+                    ["origin", "Origin"],
+                    ["from", "From"],
+                    ["to", "To"],
+                    ["destination", "Destination"],
+                    ["vendor", "Vendor"],
+                    ["shipment", "Shipment"],
+                    ["weight", "Weight"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <TableHead key={key} className="whitespace-nowrap text-sidebar-foreground">
+                    <button
+                      type="button"
+                      onClick={() => handleSort(key)}
+                      className="flex items-center gap-1 font-semibold text-sidebar-foreground hover:text-foreground"
+                    >
+                      {label}
+                      {sortCol === key ? (
+                        sortDir === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 opacity-50" />
+                      )}
+                    </button>
+                  </TableHead>
+                ))}
                 <TableHead className="whitespace-nowrap text-center text-sidebar-foreground">Action</TableHead>
               </TableRow>
               <TableRow className="bg-muted/20 hover:bg-muted/20">
@@ -1717,7 +1831,10 @@ function BaggingPage() {
                           label="Print Manifest"
                           variant="ghost"
                           size="row"
-                          onClick={() => handlePrintManifest(row)}
+                          onClick={() => {
+                            setPrintManifestRow(row);
+                            setPrintManifestOpen(true);
+                          }}
                         >
                           <Printer className="h-3.5 w-3.5" />
                         </IconButton>
@@ -1812,6 +1929,51 @@ function BaggingPage() {
           total={filtered.length}
         />
       </Card>
+
+      {/* Print Manifest CSB Dialog */}
+      <Dialog open={printManifestOpen} onOpenChange={(o) => !o && setPrintManifestOpen(false)}>
+        <DialogContent className="max-w-md gap-0 overflow-hidden p-0 sm:max-w-md">
+          <div className="bg-sidebar px-4 py-3">
+            <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+              Print Manifest
+            </DialogTitle>
+          </div>
+          <div className="grid grid-cols-1 gap-4 p-6">
+            <FieldWrapper label="Run No / Manifest No">
+              <Input value={printManifestRow?.manifest_no || form.manifestNo || "0"} disabled readOnly />
+            </FieldWrapper>
+            <FieldWrapper label="CSB Format Type">
+              <Select
+                value={printManifestType}
+                onValueChange={(v) => setPrintManifestType(v as "CSB-III" | "CSB-IV" | "CSB-V")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CSB-III">CSB-III (Documents)</SelectItem>
+                  <SelectItem value="CSB-IV">CSB-IV (Low Value Non-Docs)</SelectItem>
+                  <SelectItem value="CSB-V">CSB-V (Commercial / High Value)</SelectItem>
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+          </div>
+          <div className="flex justify-end gap-2 px-6 pb-6">
+            <Button
+              onClick={() => {
+                setPrintManifestOpen(false);
+                handlePrintManifest(printManifestRow || undefined);
+              }}
+              className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+            >
+              Print Manifest
+            </Button>
+            <Button variant="destructive" onClick={() => setPrintManifestOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* CSB Export Dialog */}
       <Dialog open={csbExportOpen} onOpenChange={(o) => !o && setCsbExportOpen(false)}>

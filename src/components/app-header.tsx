@@ -19,6 +19,15 @@ import { Badge } from "@/components/ui/badge";
 import { useTenant } from "@/lib/tenant";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
+import { useActiveBranch } from "@/lib/branch-context";
+
+const DEMO_BRANCHES = [
+  { name: "Head Office", code: "HO" },
+  { name: "Hyderabad Branch", code: "HYD" },
+  { name: "Mumbai Branch", code: "MUM" },
+  { name: "Bengaluru Branch", code: "BLR" },
+  { name: "Delhi Branch", code: "DEL" },
+];
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -31,6 +40,7 @@ export function AppHeader() {
   const tenant = useTenant();
   const { theme, toggle } = useTheme();
   const { isAuthenticated, profile, signOut } = useAuth();
+  const { activeBranchName, setActiveBranch } = useActiveBranch();
   const navigate = useNavigate();
 
   const displayName = profile?.full_name || profile?.username || "Guest";
@@ -51,16 +61,24 @@ export function AppHeader() {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="sm" className="gap-2 px-2">
             <Building2 className="h-4 w-4 text-muted-foreground" />
-            <span className="hidden text-sm font-medium sm:inline">{tenant.primaryBranch}</span>
+            <span className="hidden text-sm font-medium sm:inline">{activeBranchName}</span>
             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuLabel>Branch</DropdownMenuLabel>
-          <DropdownMenuItem>{tenant.primaryBranch}</DropdownMenuItem>
+          <DropdownMenuLabel>Select Branch Context</DropdownMenuLabel>
+          {DEMO_BRANCHES.map((b) => (
+            <DropdownMenuItem
+              key={b.name}
+              onClick={() => setActiveBranch({ name: b.name })}
+              className={activeBranchName === b.name ? "font-semibold text-primary" : ""}
+            >
+              {b.name}
+            </DropdownMenuItem>
+          ))}
           <DropdownMenuSeparator />
           <DropdownMenuLabel>Tenant</DropdownMenuLabel>
-          <DropdownMenuItem>{tenant.name}</DropdownMenuItem>
+          <DropdownMenuItem disabled>{tenant.name}</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 

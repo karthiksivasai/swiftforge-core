@@ -1,5 +1,6 @@
 import { XpresionAdapter } from "./adapters/xpresion/adapter";
 import { PostShippingAdapter } from "./adapters/postshipping/adapter";
+import { WorldFirstAdapter } from "./adapters/world-first";
 import { StubVendorAdapter } from "./adapters/stub";
 import type { VendorShippingAdapter } from "./types";
 
@@ -20,6 +21,11 @@ export function getVendorAdapter(providerCode: string): VendorShippingAdapter {
     case "DTDCPER":
     case "DTDCNZ":
       adapter = new PostShippingAdapter();
+      break;
+    case "WORLD_FIRST":
+    case "WORLD FREIGHT TRANSPORTATION":
+    case "WFT":
+      adapter = new WorldFirstAdapter();
       break;
     case "XPRESION":
     case "CW":
