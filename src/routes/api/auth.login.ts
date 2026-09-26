@@ -5,6 +5,7 @@ import {
   asInet,
   authEmailForUser,
   findUserByEmail,
+  findUserByUsername,
   loginLocked,
   recordLoginAsUser,
   signInWithPassword,
@@ -13,7 +14,7 @@ import {
 import { clientAddress } from "@/lib/security/rate-limit";
 import { requirePublicRateLimit } from "@/lib/security/require-api-auth.server";
 
-const GENERIC = { error: "Invalid email or password" };
+const GENERIC = { error: "Invalid username or password" };
 
 export const Route = createFileRoute("/api/auth/login")({
   server: {
@@ -22,21 +23,24 @@ export const Route = createFileRoute("/api/auth/login")({
         const limited = requirePublicRateLimit(request, "auth-login", 10, 60_000);
         if (limited) return limited;
 
-        let body: { email?: string; password?: string; channel?: string };
+        let body: { username?: string; email?: string; password?: string; channel?: string };
         try {
           body = (await request.json()) as typeof body;
         } catch {
           return Response.json(GENERIC, { status: 401 });
         }
 
+        const username = typeof body.username === "string" ? body.username.trim() : "";
         const email = normalizeEmail(body.email ?? "");
         const password = body.password ?? "";
         const channel = body.channel === "MOBILE" ? "MOBILE" : "WEB";
-        if (!email || !password) return Response.json(GENERIC, { status: 401 });
+        if ((!username && !email) || !password) return Response.json(GENERIC, { status: 401 });
 
         const ip = clientAddress(request);
         const userAgent = request.headers.get("user-agent");
-        const account = await findUserByEmail(email).catch(() => null);
+        const account = username
+          ? await findUserByUsername(username).catch(() => null)
+          : await findUserByEmail(email).catch(() => null);
         if (!account || account.status !== "ACTIVE" || account.deletedAt || !account.authUserId) {
           if (account) {
             await writeLoginLog({

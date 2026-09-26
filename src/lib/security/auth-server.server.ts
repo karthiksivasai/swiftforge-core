@@ -52,16 +52,10 @@ export type LoginAccount = {
   deletedAt: string | null;
 };
 
-export async function findUserByEmail(email: string): Promise<LoginAccount | null> {
-  const db = await admin();
-  const { data, error } = await db
-    .from("users")
-    .select("id, tenant_id, auth_user_id, email, username, status, application_type, otp_login_enabled, email_verified_at, deleted_at")
-    .eq("email_normalized", email)
-    .is("deleted_at", null)
-    .limit(2);
-  if (error || !Array.isArray(data) || data.length !== 1) return null;
-  const user = data[0] as Record<string, unknown>;
+const LOGIN_ACCOUNT_COLUMNS =
+  "id, tenant_id, auth_user_id, email, username, status, application_type, otp_login_enabled, email_verified_at, deleted_at";
+
+function mapLoginAccount(user: Record<string, unknown>): LoginAccount {
   return {
     tenantId: String(user.tenant_id),
     userId: String(user.id),
@@ -74,6 +68,37 @@ export async function findUserByEmail(email: string): Promise<LoginAccount | nul
     emailVerifiedAt: user.email_verified_at ? String(user.email_verified_at) : null,
     deletedAt: user.deleted_at ? String(user.deleted_at) : null,
   };
+}
+
+export async function findUserByEmail(email: string): Promise<LoginAccount | null> {
+  const db = await admin();
+  const { data, error } = await db
+    .from("users")
+    .select(LOGIN_ACCOUNT_COLUMNS)
+    .eq("email_normalized", email)
+    .is("deleted_at", null)
+    .limit(2);
+  if (error || !Array.isArray(data) || data.length !== 1) return null;
+  return mapLoginAccount(data[0] as Record<string, unknown>);
+}
+
+export async function findUserByUsername(username: string): Promise<LoginAccount | null> {
+  const wanted = username.trim().toLowerCase();
+  if (!wanted) return null;
+  const pattern = wanted.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+  const db = await admin();
+  const { data, error } = await db
+    .from("users")
+    .select(LOGIN_ACCOUNT_COLUMNS)
+    .is("deleted_at", null)
+    .ilike("username", pattern)
+    .limit(10);
+  if (error || !Array.isArray(data) || data.length === 0 || data.length >= 10) return null;
+  const matches = (data as Record<string, unknown>[]).filter(
+    (row) => String(row.username ?? "").trim().toLowerCase() === wanted,
+  );
+  if (matches.length !== 1) return null;
+  return mapLoginAccount(matches[0]);
 }
 
 export async function authEmailForUser(authUserId: string): Promise<string | null> {

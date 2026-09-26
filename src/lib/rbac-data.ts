@@ -155,3 +155,16 @@ export async function createGroup(tenantId: string, name: string): Promise<void>
   const { error } = await supabase.from("user_groups").insert({ tenant_id: tenantId, name });
   if (error) throw error;
 }
+
+export async function updateGroup(id: string, name: string): Promise<void> {
+  const { error } = await supabase.from("user_groups").update({ name }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function archiveGroup(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("user_groups")
+    .update({ deleted_at: new Date().toISOString(), status: "INACTIVE" })
+    .eq("id", id);
+  if (error) throw error;
+}

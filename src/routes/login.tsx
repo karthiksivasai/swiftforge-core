@@ -13,7 +13,7 @@ export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
       { title: "Sign in — Courier ERP" },
-      { name: "description", content: "Sign in with your email and password." },
+      { name: "description", content: "Sign in with your username and password." },
     ],
   }),
   component: LoginPage,
@@ -22,19 +22,19 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const onPassword = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!email.trim() || !password) {
-      toast.error("Enter your email and password");
+    if (!username.trim() || !password) {
+      toast.error("Enter your username and password");
       return;
     }
     setSubmitting(true);
     try {
-      await signIn(email, password);
+      await signIn(username, password);
       toast.success("Signed in");
       void navigate({ to: "/dashboard" });
     } catch (error) {
@@ -52,12 +52,20 @@ function LoginPage() {
             <LogIn className="h-5 w-5" />
           </div>
           <h1 className="text-xl font-semibold tracking-tight text-foreground">Sign in</h1>
-          <p className="text-sm text-muted-foreground">Use the email address on your account.</p>
+          <p className="text-sm text-muted-foreground">Use the username from User Setup.</p>
         </div>
         <form onSubmit={onPassword} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Label htmlFor="username">Username</Label>
+            <Input
+              id="username"
+              type="text"
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="password">Password</Label>

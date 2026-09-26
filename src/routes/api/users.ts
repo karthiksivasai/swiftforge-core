@@ -4,6 +4,7 @@ import { parseUserWrite } from "@/lib/security/account-rules";
 import { clientAddress } from "@/lib/security/rate-limit";
 import { asInet } from "@/lib/security/auth-server.server";
 import { requireApiAuth } from "@/lib/security/require-api-auth.server";
+import { saveUserAccount } from "@/lib/users/resources/user-setup.server";
 import {
   createManagedUser,
   deactivateManagedUser,
@@ -63,8 +64,18 @@ export const Route = createFileRoute("/api/users")({
           return Response.json(result);
         }
 
-        const auth = await requireApiAuth(request, { anyOf: [{ slug: "utl.user-setup", action: "add" }] });
+        const auth = await requireApiAuth(request, {
+          anyOf: [
+            { slug: "utility.user_setup", action: "add" },
+            { slug: "utl.user-setup", action: "add" },
+          ],
+        });
         if (auth instanceof Response) return auth;
+        if (body.screen === "user-setup") {
+          const result = await saveUserAccount({ supabase: auth.supabase, body });
+          if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
+          return Response.json(result, { status: 201 });
+        }
         const parsed = parseUserWrite(body);
         if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
         const result = await createManagedUser({
@@ -78,13 +89,23 @@ export const Route = createFileRoute("/api/users")({
         return Response.json(result, { status: 201 });
       },
       PATCH: async ({ request }) => {
-        const auth = await requireApiAuth(request, { anyOf: [{ slug: "utl.user-setup", action: "modify" }] });
+        const auth = await requireApiAuth(request, {
+          anyOf: [
+            { slug: "utility.user_setup", action: "modify" },
+            { slug: "utl.user-setup", action: "modify" },
+          ],
+        });
         if (auth instanceof Response) return auth;
         let body: Record<string, unknown>;
         try {
           body = (await request.json()) as Record<string, unknown>;
         } catch {
           return Response.json({ error: "Enter the user details" }, { status: 400 });
+        }
+        if (body.screen === "user-setup") {
+          const result = await saveUserAccount({ supabase: auth.supabase, body });
+          if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
+          return Response.json(result);
         }
         const userId = String(body.userId ?? "");
         if (!UUID_RE.test(userId)) return Response.json({ error: "User was not found" }, { status: 404 });

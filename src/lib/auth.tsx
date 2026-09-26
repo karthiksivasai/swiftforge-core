@@ -61,7 +61,7 @@ type AuthState = {
   profile: UserProfile | null;
   permissions: Record<string, PermissionActions>;
   isAuthenticated: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (username: string, password: string) => Promise<void>;
   signInWithOtp: (email: string, code: string) => Promise<void>;
   signOut: () => Promise<void>;
   hasPermission: (slug: string, action: PermissionAction) => boolean;
@@ -169,7 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const applyTokens = useCallback(
     async (body: { access_token?: string; refresh_token?: string; session_id?: string | null; error?: string }, responseOk: boolean) => {
       if (!responseOk || !body.access_token || !body.refresh_token) {
-        throw new Error(body.error || "Invalid email or password");
+        throw new Error(body.error || "Invalid username or password");
       }
       const { error } = await supabase.auth.setSession({
         access_token: body.access_token,
@@ -189,11 +189,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signIn = useCallback(
-    async (email: string, password: string) => {
+    async (username: string, password: string) => {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, channel: "WEB" }),
+        body: JSON.stringify({ username, password, channel: "WEB" }),
       });
       const body = (await response.json().catch(() => ({}))) as {
         error?: string;

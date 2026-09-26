@@ -21,12 +21,15 @@ describe("user lifecycle migration", () => {
 
 describe("user setup screen", () => {
   const source = readFileSync(join(root, "src/routes/utility.users.user-setup.tsx"), "utf8");
+  const resource = readFileSync(join(root, "src/lib/users/resources/user-setup.ts"), "utf8");
 
   it("persists through the users API and does not keep a local seed", () => {
-    expect(source).toContain("/api/users");
+    expect(resource).toContain("/api/users");
+    expect(source).toContain("saveUser");
     expect(source).not.toContain("rowsSeed");
     expect(source).toContain("utl.user-setup");
-    expect(source).toContain("Allow Mobile Scanning");
+    expect(source).toContain("utility.user_setup");
+    expect(source).toContain("Mobile App Lens");
     expect(source).not.toContain("Mobile app lens");
   });
 });
