@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, Printer } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth";
+import { useCan } from "@/lib/use-can";
 import {
   getGroupPermissions,
   listGroups,
@@ -33,7 +34,14 @@ import {
 import { MasterBreadcrumb } from "@/components/master-table-kit";
 
 type SectionKey =
-  "Masters" | "Transaction" | "Documents" | "Reports" | "Utilities" | "Mobile Application";
+  | "Masters"
+  | "Transaction"
+  | "Documents"
+  | "Reports"
+  | "Utilities"
+  | "Manager Notification"
+  | "CRM"
+  | "Mobile Application";
 type PermissionKey = "allAccess" | "add" | "modify" | "delete" | "list" | "search";
 
 type AccessItem = {
@@ -213,6 +221,8 @@ const accessSections: Record<SectionKey, AccessItem[]> = {
     "Zone Update|Utilities",
     "Rate Import|Utilities",
   ].map(toItem),
+  "Manager Notification": [],
+  CRM: [],
   "Mobile Application": [
     "AWBEntry|MobileApplication",
     "Delivery|MobileApplication",
@@ -245,6 +255,8 @@ const SECTION_CODE: Record<SectionKey, string> = {
   Documents: "doc",
   Reports: "rpt",
   Utilities: "utl",
+  "Manager Notification": "ntf",
+  CRM: "crm",
   "Mobile Application": "mob",
 };
 
@@ -306,6 +318,7 @@ export const Route = createFileRoute("/utility/users/access-rights")({
 
 function AccessRightsPage() {
   const { isAuthenticated, profile } = useAuth();
+  const canEdit = useCan("utl.access-rights", "modify");
   const [group, setGroup] = useState<string>("");
   const [searched, setSearched] = useState(false);
   const [openSections, setOpenSections] = useState<SectionKey[]>(["Masters"]);
@@ -372,6 +385,10 @@ function AccessRightsPage() {
   };
 
   const saveSection = async (section: SectionKey) => {
+    if (!canEdit) {
+      toast.error("Access Rights permission is required");
+      return;
+    }
     if (!isAuthenticated) {
       toast.success(`${section} access updated`);
       return;
@@ -517,6 +534,7 @@ function AccessRightsPage() {
               onSetSectionAccess={(checked) => setSectionAccess(section, checked)}
               onUpdateCell={(rowIndex, key, checked) => updateCell(section, rowIndex, key, checked)}
               onSave={() => saveSection(section)}
+              canEdit={canEdit}
             />
           ))}
         </div>
@@ -534,6 +552,7 @@ function AccessSection({
   onSetSectionAccess,
   onUpdateCell,
   onSave,
+  canEdit,
 }: {
   section: SectionKey;
   items: AccessItem[];
@@ -543,6 +562,7 @@ function AccessSection({
   onSetSectionAccess: (checked: boolean) => void;
   onUpdateCell: (rowIndex: number, key: PermissionKey, checked: boolean) => void;
   onSave: () => void;
+  canEdit: boolean;
 }) {
   const allChecked = items.every((_, rowIndex) =>
     permissionKeys.every((key) => permissions[permissionId(section, rowIndex, key)]),
@@ -565,7 +585,8 @@ function AccessSection({
         >
           <span>Un Check All</span>
           <Checkbox
-            checked={allChecked}
+            checked={items.length > 0 && allChecked}
+            disabled={!canEdit || items.length === 0}
             onCheckedChange={(value) => onSetSectionAccess(Boolean(value))}
           />
         </label>
@@ -577,8 +598,9 @@ function AccessSection({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-w-[320px]">Description</TableHead>
-                  <TableHead className="min-w-[140px]">UnderMenu</TableHead>
+                  <TableHead className="min-w-[220px]">Menu Name</TableHead>
+                  <TableHead className="min-w-[220px]">Description</TableHead>
+                  <TableHead className="min-w-[140px]">Under Menu</TableHead>
                   {permissionLabels.map((label) => (
                     <TableHead key={label} className="w-24 text-center">
                       {label}
@@ -590,11 +612,13 @@ function AccessSection({
                 {items.map((item, rowIndex) => (
                   <TableRow key={`${section}-${item.description}`}>
                     <TableCell>{item.description}</TableCell>
+                    <TableCell>{item.description}</TableCell>
                     <TableCell>{item.underMenu}</TableCell>
                     {permissionKeys.map((key) => (
                       <TableCell key={key} className="text-center">
                         <Checkbox
                           checked={permissions[permissionId(section, rowIndex, key)]}
+                          disabled={!canEdit}
                           onCheckedChange={(value) => onUpdateCell(rowIndex, key, Boolean(value))}
                           className="mx-auto"
                         />
@@ -605,14 +629,16 @@ function AccessSection({
               </TableBody>
             </Table>
           </div>
-          <div className="flex justify-end border-t px-3 py-2">
-            <Button
-              onClick={onSave}
-              className="h-8 rounded-full bg-green-500 px-6 text-white hover:bg-green-600"
-            >
-              Update
-            </Button>
-          </div>
+          {canEdit ? (
+            <div className="flex justify-end border-t px-3 py-2">
+              <Button
+                onClick={onSave}
+                className="h-8 rounded-full bg-green-500 px-6 text-white hover:bg-green-600"
+              >
+                Update
+              </Button>
+            </div>
+          ) : null}
         </>
       ) : null}
     </Card>

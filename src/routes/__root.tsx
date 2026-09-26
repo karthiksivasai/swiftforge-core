@@ -19,6 +19,7 @@ import { AppHeader } from "@/components/app-header";
 import { TenantProvider } from "@/lib/tenant";
 import { ThemeProvider } from "@/lib/theme";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { canOpenPath } from "@/lib/nav-permissions";
 import { isPublicAppPath } from "@/lib/security/public-paths";
 import { BranchProvider } from "@/lib/branch-context";
 import { Toaster } from "@/components/ui/sonner";
@@ -156,10 +157,11 @@ function RootShell({ children }: { children: ReactNode }) {
 }
 
 function AuthGate({ children }: { children: ReactNode }) {
-  const { loading, isAuthenticated } = useAuth();
+  const { loading, isAuthenticated, hasPermission, profile } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const isPublic = isPublicAppPath(pathname);
+  const allowed = canOpenPath(pathname, hasPermission, profile?.user_type === "ADMIN");
 
   useEffect(() => {
     if (!loading && !isAuthenticated && !isPublic) {
@@ -171,6 +173,19 @@ function AuthGate({ children }: { children: ReactNode }) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
         Checking session…
+      </div>
+    );
+  }
+
+  if (!isPublic && !allowed) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center px-6">
+        <div className="max-w-md text-center">
+          <h1 className="text-xl font-semibold">You do not have access to this page</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Your group does not have list access for this menu. Ask an administrator to update Access Rights.
+          </p>
+        </div>
       </div>
     );
   }

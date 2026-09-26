@@ -26,7 +26,9 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import { NAVIGATION, type NavGroup, type NavSection, type NavLeaf } from "@/lib/navigation";
+import { type NavGroup, type NavSection, type NavLeaf } from "@/lib/navigation";
+import { filterNavigation } from "@/lib/nav-permissions";
+import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { cn } from "@/lib/utils";
 
@@ -213,9 +215,11 @@ function LeafLink({
 
 export function AppSidebar() {
   const tenant = useTenant();
+  const { hasPermission, profile } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { state, isMobile } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
+  const sections = filterNavigation(hasPermission, profile?.user_type === "ADMIN");
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
@@ -235,7 +239,7 @@ export function AppSidebar() {
 
       <SidebarContent className="gap-2 px-3 py-4 group-data-[collapsible=icon]:px-2">
         <SidebarMenu className="gap-2">
-          {NAVIGATION.map((section) => (
+          {sections.map((section) => (
             <SidebarMenuItem key={section.slug}>
               <SectionCard section={section} pathname={pathname} collapsed={collapsed} />
             </SidebarMenuItem>

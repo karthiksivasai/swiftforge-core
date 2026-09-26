@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDashboardKpis } from "@/lib/dashboard/useDashboardKpis";
+import { useCan } from "@/lib/use-can";
 import { useTenant } from "@/lib/tenant";
 
 export const Route = createFileRoute("/dashboard")({
@@ -19,21 +20,38 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 const QUICK_LINKS = [
-  { label: "New AWB Entry", to: "/transaction/awb-entry" },
-  { label: "Pickup", to: "/transaction/pickup" },
-  { label: "Manifest Scan", to: "/transaction/manifest-scan" },
-  { label: "DRS Scan", to: "/transaction/drs-scan" },
-  { label: "AWB Query", to: "/transaction/tracking/awb-query" },
-  { label: "Operations Report", to: "/reports/operations" },
+  { label: "New AWB Entry", to: "/transaction/awb-entry", menu: "txn.awb-entry" },
+  { label: "Pickup", to: "/transaction/pickup", menu: "txn.pickup" },
+  { label: "Manifest Scan", to: "/transaction/manifest-scan", menu: "txn.manifest-scan" },
+  { label: "DRS Scan", to: "/transaction/drs-scan", menu: "txn.drs-scan" },
+  { label: "AWB Query", to: "/transaction/tracking/awb-query", menu: "txn.awb-query" },
+  { label: "Operations Report", to: "/reports/operations", menu: "rpt.operation-report" },
 ] as const;
 
 function DashboardPage() {
   const tenant = useTenant();
+  const showOperations = useCan("txn.opertation-dashboard", "list") || useCan("txn.opertation-dashboard", "search");
+  const showSales = useCan("txn.sales-dashboard", "list") || useCan("txn.sales-dashboard", "search");
+  const canAwb = useCan("txn.awb-entry", "list");
+  const canPickup = useCan("txn.pickup", "list");
+  const canManifest = useCan("txn.manifest-scan", "list");
+  const canDrs = useCan("txn.drs-scan", "list");
+  const canQuery = useCan("txn.awb-query", "list");
+  const canOpsReport = useCan("rpt.operation-report", "list");
+  const linkAllowed: Record<string, boolean> = {
+    "txn.awb-entry": canAwb,
+    "txn.pickup": canPickup,
+    "txn.manifest-scan": canManifest,
+    "txn.drs-scan": canDrs,
+    "txn.awb-query": canQuery,
+    "rpt.operation-report": canOpsReport,
+  };
   const { cards, isLoading, isError, error, refetch, summary } = useDashboardKpis();
 
-  const ops = cards.filter((c) => c.group === "operations");
-  const fin = cards.filter((c) => c.group === "finance");
-  const cust = cards.filter((c) => c.group === "customers");
+  const ops = showOperations ? cards.filter((c) => c.group === "operations") : [];
+  const fin = showSales ? cards.filter((c) => c.group === "finance") : [];
+  const cust = showSales ? cards.filter((c) => c.group === "customers") : [];
+  const quickLinks = QUICK_LINKS.filter((link) => linkAllowed[link.menu]);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 md:px-6 md:py-8">
@@ -67,14 +85,17 @@ function DashboardPage() {
         <p className="text-sm text-muted-foreground">Loading KPIs…</p>
       ) : (
         <>
-          <DashboardSummarySection title="Operations" cards={ops} />
-          <DashboardSummarySection title="Finance" cards={fin} />
-          <DashboardSummarySection title="Customers" cards={cust} />
+          {showOperations ? <DashboardSummarySection title="Operations" cards={ops} /> : null}
+          {showSales ? <DashboardSummarySection title="Sales" cards={fin} /> : null}
+          {showSales ? <DashboardSummarySection title="Customers" cards={cust} /> : null}
+          {!showOperations && !showSales ? (
+            <p className="text-sm text-muted-foreground">Your group does not have a dashboard assigned.</p>
+          ) : null}
         </>
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2 shadow-none">
+        {showOperations ? <Card className="lg:col-span-2 shadow-none">
           <CardHeader>
             <CardTitle className="text-base">Operations overview</CardTitle>
           </CardHeader>
@@ -84,15 +105,15 @@ function DashboardPage() {
               tooling). Use Reports for detailed history.
             </div>
           </CardContent>
-        </Card>
+        </Card> : null}
 
-        <Card className="shadow-none">
+        {quickLinks.length > 0 ? <Card className="shadow-none">
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Quick actions</CardTitle>
             <FileBarChart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="flex flex-col gap-1">
-            {QUICK_LINKS.map((q) => (
+            {quickLinks.map((q) => (
               <Link
                 key={q.to}
                 to={q.to as Parameters<typeof Link>[0]["to"]}
@@ -103,7 +124,7 @@ function DashboardPage() {
               </Link>
             ))}
           </CardContent>
-        </Card>
+        </Card> : null}
       </div>
     </div>
   );
