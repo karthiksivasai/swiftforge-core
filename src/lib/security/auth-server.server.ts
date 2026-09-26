@@ -84,7 +84,12 @@ export async function findUserByEmail(email: string): Promise<LoginAccount | nul
     .eq("email_normalized", email)
     .is("deleted_at", null)
     .limit(2);
-  if (error || !Array.isArray(data) || data.length !== 1) return null;
+  if (error) {
+    const failure = new Error("User lookup failed") as Error & { code?: string };
+    failure.code = error.code;
+    throw failure;
+  }
+  if (!Array.isArray(data) || data.length !== 1) return null;
   return mapLoginAccount(data[0] as Record<string, unknown>);
 }
 
@@ -99,7 +104,12 @@ export async function findUserByUsername(username: string): Promise<LoginAccount
     .is("deleted_at", null)
     .ilike("username", pattern)
     .limit(10);
-  if (error || !Array.isArray(data) || data.length === 0 || data.length >= 10) return null;
+  if (error) {
+    const failure = new Error("User lookup failed") as Error & { code?: string };
+    failure.code = error.code;
+    throw failure;
+  }
+  if (!Array.isArray(data) || data.length === 0 || data.length >= 10) return null;
   const matches = (data as Record<string, unknown>[]).filter(
     (row) => String(row.username ?? "").trim().toLowerCase() === wanted,
   );

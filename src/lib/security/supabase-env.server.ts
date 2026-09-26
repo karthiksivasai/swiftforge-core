@@ -1,14 +1,26 @@
+export function cleanEnv(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  let trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+  return trimmed || undefined;
+}
+
 /** Prefer the VITE_ project the browser bundle already uses. A stale SUPABASE_URL must not override it. */
 export function supabaseProjectUrl(): string | undefined {
-  return process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  return cleanEnv(process.env.VITE_SUPABASE_URL) || cleanEnv(process.env.SUPABASE_URL);
 }
 
 export function supabasePublishableKey(): string | undefined {
   return (
-    process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    process.env.SUPABASE_ANON_KEY
+    cleanEnv(process.env.VITE_SUPABASE_PUBLISHABLE_KEY) ||
+    cleanEnv(process.env.VITE_SUPABASE_ANON_KEY) ||
+    cleanEnv(process.env.SUPABASE_PUBLISHABLE_KEY) ||
+    cleanEnv(process.env.SUPABASE_ANON_KEY)
   );
 }
 

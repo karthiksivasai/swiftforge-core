@@ -16,6 +16,19 @@ import { requirePublicRateLimit } from "@/lib/security/require-api-auth.server";
 
 const GENERIC = { error: "Invalid username or password" };
 
+function loginHeaders(stage: string): HeadersInit {
+  let host = "missing";
+  try {
+    const url = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim().replace(/^["']|["']$/g, "");
+    host = url ? new URL(url).host : "missing";
+  } catch {
+    host = "invalid";
+  }
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim().replace(/^["']|["']$/g, "");
+  const kind = key.startsWith("sb_secret_") ? "secret" : key.startsWith("eyJ") ? "jwt" : key ? "other" : "missing";
+  return { "x-login-stage": stage, "x-supabase-host": host, "x-service-key": kind };
+}
+
 export const Route = createFileRoute("/api/auth/login")({
   server: {
     handlers: {
@@ -46,9 +59,17 @@ export const Route = createFileRoute("/api/auth/login")({
           if (message.includes("Missing Supabase environment variable")) {
             return Response.json({ error: "Server auth is not configured" }, { status: 500 });
           }
-          account = null;
+          const code =
+            error && typeof error === "object" && "code" in error
+              ? String((error as { code?: string }).code ?? "")
+              : "";
+          return Response.json(GENERIC, {
+            status: 401,
+            headers: loginHeaders(code ? `lookup-${code}` : "lookup-failed"),
+          });
         }
         if (!account || account.status !== "ACTIVE" || account.deletedAt || !account.authUserId) {
+          const stage = !account ? "no-account" : account.deletedAt ? "deleted" : !account.authUserId ? "no-auth-user" : "inactive";
           if (account) {
             await writeLoginLog({
               tenantId: account.tenantId,
@@ -60,11 +81,11 @@ export const Route = createFileRoute("/api/auth/login")({
               detail: account.deletedAt ? "deleted" : "inactive",
             }).catch(() => undefined);
           }
-          return Response.json(GENERIC, { status: 401 });
+          return Response.json(GENERIC, { status: 401, headers: loginHeaders(stage) });
         }
 
         if (!applicationAllows(account.applicationType, channel)) {
-          return Response.json(GENERIC, { status: 401 });
+          return Response.json(GENERIC, { status: 401, headers: loginHeaders("channel") });
         }
 
         if (await loginLocked(account.tenantId, account.username).catch(() => false)) {
@@ -81,7 +102,7 @@ export const Route = createFileRoute("/api/auth/login")({
         }
 
         const authEmail = await authEmailForUser(account.authUserId);
-        if (!authEmail) return Response.json(GENERIC, { status: 401 });
+        if (!authEmail) return Response.json(GENERIC, { status: 401, headers: loginHeaders("no-auth-email") });
         const signedIn = await signInWithPassword(authEmail, password);
         if ("error" in signedIn) {
           await writeLoginLog({
@@ -92,7 +113,7 @@ export const Route = createFileRoute("/api/auth/login")({
             ip,
             userAgent,
           }).catch(() => undefined);
-          return Response.json(GENERIC, { status: 401 });
+          return Response.json(GENERIC, { status: 401, headers: loginHeaders("password") });
         }
 
         const sessionId = await recordLoginAsUser(signedIn.accessToken, userAgent, asInet(ip)).catch(() => null);
