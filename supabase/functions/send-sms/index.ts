@@ -13,11 +13,26 @@ function str(v: unknown, fallback = ""): string {
   return v == null ? fallback : String(v).trim();
 }
 
+const DEFAULT_ORIGINS = ["http://localhost:8082", "http://127.0.0.1:8082"];
+
+function allowedOrigin(req: Request): string | null {
+  const origin = req.headers.get("Origin");
+  if (!origin) return null;
+  const extra = (Deno.env.get("APP_ORIGINS") ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return new Set([...DEFAULT_ORIGINS, ...extra]).has(origin) ? origin : null;
+}
+
 function corsHeaders(req: Request): HeadersInit {
+  const origin = allowedOrigin(req);
+  if (!origin) return { Vary: "Origin" };
   return {
-    "Access-Control-Allow-Origin": req.headers.get("Origin") ?? "*",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cms-session-id",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
+    Vary: "Origin",
   };
 }
 
@@ -223,7 +238,7 @@ Deno.serve(async (req) => {
           mobile,
           provider: "SANDBOX",
           status: "SUCCESS",
-          body: smsBody,
+          body: "OTP message suppressed",
           live: false,
           latency_ms: Date.now() - t0,
         },
@@ -235,8 +250,7 @@ Deno.serve(async (req) => {
           sandbox: true,
           provider: "SANDBOX",
           mobile_masked: masked,
-          sandbox_otp: otp,
-          message: `Sandbox OTP for shipper ${masked}: ${otp} (add MSG91/Twilio credentials with sandbox OFF for live SMS)`,
+          message: `OTP issued for shipper ${masked}. It is not shown in the app.`,
         },
         200,
         req,
@@ -272,7 +286,7 @@ Deno.serve(async (req) => {
         mobile,
         provider,
         status: sendResult.ok ? "SUCCESS" : "FAILED",
-        body: smsBody,
+        body: "OTP message suppressed",
         live: true,
         error: sendResult.error ?? null,
         provider_response: sendResult.response,

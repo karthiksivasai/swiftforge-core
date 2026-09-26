@@ -28,6 +28,7 @@ import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
 import { getShipmentTracking } from "@/lib/transactions/resources/tracking";
+import { searchAwbShipments, fetchAwbSubTables } from "@/lib/transactions/resources/awbQuery";
 import { mapTrackingToAwbQuery } from "@/lib/transactions/trackingUiMap";
 import { getCarrierAdapter } from "@/lib/integrations/adapter";
 import {
@@ -262,20 +263,33 @@ const SHIPMENT_DETAIL_FIELDS: { key: string; label: string }[] = [
   { key: "manifestNo", label: "Manifest No." },
   { key: "invoiceNo", label: "Invoice No." },
   { key: "payment", label: "Payment" },
+  { key: "airline", label: "Airline" },
   { key: "inscanWeight", label: "Inscan Weight" },
+  { key: "club", label: "Club." },
+  { key: "hold", label: "Hold" },
   { key: "inscanRemark", label: "Inscan Remark" },
   { key: "refNo", label: "Ref.No." },
   { key: "masterAwbNo", label: "MasterAWB No." },
+  { key: "eAwbNo", label: "eAWB No." },
+  { key: "drsVehicle", label: "DRS Vehicle" },
+  { key: "drsDriver", label: "DRS Driver" },
+  { key: "manifestVehicle", label: "Manifest Vehicle" },
+  { key: "manifestDriver", label: "Manifest Driver" },
+  { key: "assignTo", label: "Assign To" },
   { key: "commercial", label: "Commercial" },
   { key: "oda", label: "ODA" },
+  { key: "codType", label: "COD Type" },
   { key: "shipmentType", label: "Shipment Type" },
   { key: "pincodeType", label: "Pincode Type" },
   { key: "customerInvoice", label: "Customer Invoice" },
+  { key: "fieldExecutive", label: "Field Executive" },
   { key: "csbType", label: "CSB Type" },
   { key: "drsNo", label: "DRS No" },
   { key: "vehicleNo", label: "Vehicle No" },
+  { key: "prsNo", label: "PRS No" },
+  { key: "pickupFieldExecutive", label: "Pickup Field Executive" },
+  { key: "pickupNo", label: "Pickup No" },
   { key: "remark", label: "Remark" },
-  { key: "fieldExecutive", label: "Field Executive" },
 ];
 
 const FILTER_EXPORT_COLUMNS = [
@@ -606,6 +620,13 @@ function AwbQueryPage() {
           /* carrier columns optional if migration not applied yet */
         }
       }
+      let subTables = { volumetric: [], inscan: [], manifest: [], manifestInscan: [] };
+      try {
+        subTables = await fetchAwbSubTables(mapped.awbNo, mapped.shipmentId);
+      } catch (subErr) {
+        console.warn("Failed to load some sub-tables:", subErr);
+      }
+
       setQueryResult({
         awbNo: mapped.awbNo,
         lastAwbNo: mapped.lastAwbNo,
@@ -634,11 +655,11 @@ function AwbQueryPage() {
         progress: mapped.progress,
         comments: mapped.comments,
         shipmentLog: mapped.shipmentLog,
-        volumetric: [],
+        volumetric: subTables.volumetric,
         proforma: [],
-        inscan: [],
-        manifest: [],
-        manifestInscan: [],
+        inscan: subTables.inscan,
+        manifest: subTables.manifest,
+        manifestInscan: subTables.manifestInscan,
         statusDetails: mapped.statusDetails,
         shipmentId: mapped.shipmentId,
         ...carrierMeta,
@@ -695,36 +716,27 @@ function AwbQueryPage() {
     }
   };
 
-  const handleFilterSearch = () => {
-    let rows = seedFilterRows();
-    const f = filterForm;
-    if (f.bookingFromDate) {
-      rows = rows.filter((r) => r.bookingDate >= formatDisplayDate(f.bookingFromDate));
+  const [filterSearching, setFilterSearching] = useState(false);
+
+  const handleFilterSearch = async () => {
+    if (filterSearching) return;
+
+    setFilterSearching(true);
+    try {
+      const outcome = await searchAwbShipments(filterForm);
+      if (outcome.error) {
+        toast.error(outcome.error);
+        return;
+      }
+      setFilterResults(outcome.rows);
+      setFilterSearched(true);
+      setFilterPage(1);
+      toast.success(`Found ${outcome.rows.length} record(s)`);
+    } catch (err) {
+      toast.error(toErrorMessage(err));
+    } finally {
+      setFilterSearching(false);
     }
-    if (f.bookingToDate) {
-      rows = rows.filter((r) => r.bookingDate <= formatDisplayDate(f.bookingToDate));
-    }
-    if (f.customer.name.trim()) {
-      const q = f.customer.name.toLowerCase();
-      rows = rows.filter(
-        (r) => r.shipper.toLowerCase().includes(q) || r.consignee.toLowerCase().includes(q),
-      );
-    }
-    if (f.origin.code.trim()) rows = rows.filter((r) => r.destination.includes(f.origin.code));
-    if (f.destination.code.trim())
-      rows = rows.filter((r) => r.destination.includes(f.destination.code));
-    if (f.paymentType) rows = rows.filter((r) => r.paymentType === f.paymentType);
-    if (f.status && f.status !== "All") {
-      rows = rows.filter((r) => (f.status === "Delivered" ? r.deliveryDate : !r.deliveryDate));
-    }
-    if (f.shipper.trim())
-      rows = rows.filter((r) => r.shipper.toLowerCase().includes(f.shipper.toLowerCase()));
-    if (f.consignee.trim())
-      rows = rows.filter((r) => r.consignee.toLowerCase().includes(f.consignee.toLowerCase()));
-    setFilterResults(rows);
-    setFilterSearched(true);
-    setFilterPage(1);
-    toast.success(`Found ${rows.length} record(s)`);
   };
 
   const handleFilterReset = () => {

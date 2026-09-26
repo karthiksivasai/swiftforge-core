@@ -214,7 +214,7 @@ async function deliverOtpToShipper(
       return {
         ...result,
         message: sent.message || `OTP sent to shipper mobile ${sent.masked}`,
-        sandboxOtp: sent.live ? null : (sent.sandboxOtp ?? null),
+        sandboxOtp: null,
         shipperMobileMasked: sent.masked,
       };
     } catch (e) {

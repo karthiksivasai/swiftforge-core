@@ -1,6 +1,10 @@
 /**
  * World-First (Xpresion) AWB Booking Integration Service
- * Client proxy & helper functions — credentials reside strictly on the server (/api/shipping/world-first/book)
+ * Client proxy & helper functions — credentials reside strictly on the server.
+ *
+ * Supported vendors:
+ *   - WFT  → World-First Transport  (/api/shipping/world-first/book)
+ *   - UPS  → United Parcel Service   (/api/shipping/ups/book)
  */
 
 export type WfClientConfig = {
@@ -104,16 +108,18 @@ export type WfBookingPayload = {
   // Arrays & Nested objects
   Dimensions: WfDimension[];
   Performa: WfPerformaLine[];
-  additionalInfo: Record<string, unknown>;
-  Buyerdetails: Record<string, unknown>;
-  ManifestGstDetails: Record<string, unknown>;
-  fedexSpecial: Record<string, unknown>;
-  upsSpecial: Record<string, unknown>;
+  additionalInfo: WfAdditionalInfo;
+  Buyerdetails: WfBuyerDetails;
+  ManifestGstDetails: WfManifestGstDetails;
+  fedexSpecial: WfFedexSpecial;
+  upsSpecial: WfUpsSpecial;
 
   [key: string]: unknown;
 };
 
 export type WfBookingResponse = {
+  /** e.g. "RT01" (success) or "TD01" (fail) */
+  ResponseCode?: string;
   Status?: string;
   ErrorCode?: string | number;
   Message?: string;
@@ -127,6 +133,8 @@ export type WfBookingResponse = {
   Label?: string;
   BoxLabel?: string;
   AuxLbl?: string;
+  /** Structured validation errors returned by Xpresion */
+  Error?: Array<{ Description?: string; [key: string]: unknown }>;
   [key: string]: unknown;
 };
 
@@ -150,6 +158,120 @@ export type WfBookingResult = {
   noResponse?: boolean;
 };
 
+// ---------------------------------------------------------------------------
+// Nested object types
+// ---------------------------------------------------------------------------
+
+export type WfAdditionalInfo = {
+  discount?: string;
+  Freight_Charges?: string;
+  Insurance?: string;
+  Other_charges?: string;
+  SpecifyCharges?: string;
+  [key: string]: unknown;
+};
+
+export type WfBuyerDetails = {
+  DestinationCode?: string;
+  Name?: string;
+  Person?: string;
+  Address1?: string;
+  Address2?: string;
+  PinCode?: string;
+  City?: string;
+  State?: string;
+  Telephone?: string;
+  Mobile?: string;
+  Email?: string;
+  countryCode?: string;
+  IECNo?: string;
+  [key: string]: unknown;
+};
+
+export type WfManifestGstDetails = {
+  GST_Invoice?: string;
+  LUTIGST?: string;
+  TotalIGST?: string;
+  Format?: string;
+  BankADCode?: string;
+  BankAccount?: string;
+  BankIFSC?: string;
+  LUTNumber?: string;
+  ExchangeRate?: string;
+  Firm?: string;
+  NFEI?: string;
+  PayofIGST?: string;
+  ECommerce?: string;
+  MEISScheme?: string;
+  IECNo?: string;
+  LUTIssueDate?: string;
+  LUTTillDate?: string;
+  [key: string]: unknown;
+};
+
+/** FedEx-specific fields — leave as empty object {} for non-FedEx vendors */
+export type WfFedexSpecial = {
+  chkDangerousgd?: string;
+  Dangergd?: string;
+  chkDryIce?: string;
+  Totalwt?: string;
+  chkSatdelv?: string;
+  satddil?: string;
+  chkAlcohol?: string;
+  AlcoholPck?: string;
+  AlcoholCnt?: string;
+  FdxBillShipmentTo?: string;
+  ShipmentChargesAccountNo?: string;
+  fdxPaidBy?: string;
+  DutiesPaymentAccountNo?: string;
+  bsobroker?: {
+    chkBSOBroker?: string;
+    bsobrokername?: string;
+    bsocontactname?: string;
+    country_code?: string;
+    bso_address1?: string;
+    bso_statecode?: string;
+    bso_city?: string;
+    bso_postalcode?: string;
+    bso_phoneno?: string;
+  };
+  [key: string]: unknown;
+};
+
+/** UPS-specific fields — required when VendorName = "UPS" */
+export type WfUpsSpecial = {
+  /** "1" to enable declared-value insurance coverage, "" to disable */
+  chkInsuCvrg?: string;
+  /** Declared insurance value in the shipment currency */
+  Insurance_value?: string;
+  /** Account number to bill shipment charges to (leave blank = shipper account) */
+  UPSBillShipmentTo?: string;
+  /** UPS account number for shipment charges */
+  UPSShipmentChargesAccountNo?: string;
+  /** Postal code of the UPS billing account holder */
+  UPSPostalCode?: string;
+  /** Two-letter ISO country code of the UPS billing account holder */
+  UPSCountryCode?: string;
+  [key: string]: unknown;
+};
+
+/** Default empty UPS special block (all fields blank = shipper-account billing, no insurance) */
+export const DEFAULT_UPS_SPECIAL: WfUpsSpecial = {
+  chkInsuCvrg: "",
+  Insurance_value: "",
+  UPSBillShipmentTo: "",
+  UPSShipmentChargesAccountNo: "",
+  UPSPostalCode: "",
+  UPSCountryCode: "",
+};
+
+/** Default empty FedEx special block (use when carrier is NOT FedEx) */
+export const DEFAULT_FEDEX_SPECIAL: WfFedexSpecial = {};
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 export const ALLOWED_TERMS_OF_INVOICE = [
   "FOB",
   "CIF",
@@ -163,8 +285,22 @@ export const ALLOWED_TERMS_OF_INVOICE = [
   "DAP",
 ] as const;
 
-/** Correct Real Vendor Code for World Freight Transportation in system */
+/** Vendor code for World Freight Transportation */
 export const DEFAULT_WF_VENDOR_CODE = "WFT";
+
+/** Vendor code for United Parcel Service (UPS) via Xpresion */
+export const UPS_VENDOR_CODE = "UPS";
+
+/** Valid UPS service names accepted by the Xpresion API */
+export const UPS_SERVICE_NAMES = [
+  "WORLDWIDE EXPRESS SAVER",
+  "WORLDWIDE EXPRESS",
+  "WORLDWIDE EXPEDITED",
+  "UPS STANDARD",
+  "DOCUMENT",
+] as const;
+
+export type UpsServiceName = (typeof UPS_SERVICE_NAMES)[number];
 
 // Idempotency registry for CustomerRefNo
 const IN_FLIGHT_REFS = new Set<string>();
@@ -313,6 +449,11 @@ export function buildWfBookingPayload(
     if (!obj || typeof obj !== "object") return fallback;
     const val = (obj as Record<string, unknown>)[key];
     if (val == null) return fallback;
+    if (typeof val === "object" && !Array.isArray(val)) {
+      const rec = val as Record<string, unknown>;
+      if ("name" in rec && rec.name) return String(rec.name).trim() || fallback;
+      if ("code" in rec && rec.code) return String(rec.code).trim() || fallback;
+    }
     return String(val).trim() || fallback;
   };
 
@@ -460,8 +601,8 @@ export function buildWfBookingPayload(
     additionalInfo: {},
     Buyerdetails: {},
     ManifestGstDetails: {},
-    fedexSpecial: {},
-    upsSpecial: {},
+    fedexSpecial: DEFAULT_FEDEX_SPECIAL,
+    upsSpecial: DEFAULT_UPS_SPECIAL,
 
     ...(overrides || {}),
   };
@@ -579,9 +720,13 @@ export async function callWorldFirstBookingApi(
 
   const executeCall = async (attempt: number): Promise<WfBookingResult> => {
     try {
+      const authHeaders =
+        typeof window === "undefined"
+          ? {}
+          : await (await import("@/lib/security/authorized-fetch")).browserAuthHeaders();
       const res = await fetch(config.serverEndpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify(payload),
       });
 
@@ -634,4 +779,67 @@ export async function callWorldFirstBookingApi(
   } finally {
     if (refNo) IN_FLIGHT_REFS.delete(refNo);
   }
+}
+
+// ---------------------------------------------------------------------------
+// UPS-specific helpers
+// ---------------------------------------------------------------------------
+
+export type UpsClientConfig = WfClientConfig;
+
+/**
+ * Get UPS client configuration (NO credentials – server-side only).
+ */
+export function getUpsClientConfig(overrides?: Partial<UpsClientConfig>): UpsClientConfig {
+  return {
+    serverEndpoint: overrides?.serverEndpoint || "/api/shipping/ups/book",
+    vendorCode: overrides?.vendorCode || UPS_VENDOR_CODE,
+  };
+}
+
+/**
+ * Build a fully-typed UPS AWB booking payload from form/shipment data.
+ *
+ * This is a thin wrapper around `buildWfBookingPayload` that:
+ * 1. Forces VendorName = "UPS"
+ * 2. Populates the upsSpecial block from `upsOptions`
+ * 3. Clears fedexSpecial (empty object – UPS bookings must not include FedEx fields)
+ *
+ * @example
+ * ```ts
+ * const payload = buildUpsBookingPayload(formData, {
+ *   serviceName: "WORLDWIDE EXPRESS SAVER",
+ *   upsOptions: { chkInsuCvrg: "1", Insurance_value: "500" },
+ * });
+ * const result = await callWorldFirstBookingApi(payload, getUpsClientConfig());
+ * ```
+ */
+export function buildUpsBookingPayload(
+  form: Record<string, unknown>,
+  options?: {
+    /** UPS service name – defaults to "WORLDWIDE EXPRESS SAVER" */
+    serviceName?: UpsServiceName | string;
+    /** Override individual UPS-specific billing/insurance fields */
+    upsOptions?: Partial<WfUpsSpecial>;
+    /** Any additional top-level payload overrides */
+    overrides?: Partial<WfBookingPayload>;
+  },
+): WfBookingPayload {
+  const serviceName = options?.serviceName ?? "WORLDWIDE EXPRESS SAVER";
+  const upsSpecial: WfUpsSpecial = {
+    ...DEFAULT_UPS_SPECIAL,
+    ...(options?.upsOptions ?? {}),
+  };
+
+  return buildWfBookingPayload(
+    form,
+    {
+      VendorName: UPS_VENDOR_CODE,
+      ServiceName: serviceName,
+      fedexSpecial: DEFAULT_FEDEX_SPECIAL,
+      upsSpecial,
+      ...(options?.overrides ?? {}),
+    },
+    { serverEndpoint: "/api/shipping/ups/book", vendorCode: UPS_VENDOR_CODE },
+  );
 }

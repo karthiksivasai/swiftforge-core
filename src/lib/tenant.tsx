@@ -13,8 +13,8 @@ export type Tenant = {
 
 const TENANTS: Record<string, Tenant> = {
   default: {
-    id: "default",
-    slug: "default",
+    id: "99f2971a-d62d-4fe4-a465-7eb65dae4a89",
+    slug: "courierwalaexpress",
     name: "Courierwala Express",
     shortName: "Courierwala",
     logoInitials: "CW",

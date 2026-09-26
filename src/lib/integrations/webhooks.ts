@@ -3,6 +3,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { ConflictError, translateDbError } from "@/lib/masters/core/baseCrud";
+import { toPublicTrackingView } from "@/lib/security/public-tracking";
 
 export const WEBHOOK_EVENT_OPTIONS = [
   { code: "SHIPMENT_BOOKED", label: "Shipment Booked" },
@@ -183,18 +184,5 @@ export async function publicTrackShipment(params: {
     p_carrier_tracking_no: params.carrierTrackingNo ?? null,
   });
   if (error) throw translateDbError(error);
-  const row = asObject(data);
-  return {
-    found: row.found === true,
-    shipment_number: row.shipment_number ? String(row.shipment_number) : undefined,
-    carrier_tracking_number: (row.carrier_tracking_number as string | null) ?? null,
-    current_status: row.current_status ? String(row.current_status) : undefined,
-    origin: row.origin != null ? String(row.origin) : undefined,
-    destination: row.destination != null ? String(row.destination) : undefined,
-    carrier_name: row.carrier_name != null ? String(row.carrier_name) : undefined,
-    pod_status: (row.pod_status as string | null) ?? null,
-    estimated_delivery: (row.estimated_delivery as string | null) ?? null,
-    tracking_timeline: asArray(row.tracking_timeline),
-    shipment_timeline: asArray(row.shipment_timeline),
-  };
+  return toPublicTrackingView(asObject(data));
 }

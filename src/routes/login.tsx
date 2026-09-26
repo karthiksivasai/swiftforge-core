@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Loader2, LogIn } from "lucide-react";
 import { toast } from "sonner";
@@ -8,49 +8,37 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth";
-import { resolveTenantFromHost } from "@/lib/tenant";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
       { title: "Sign in — Courier ERP" },
-      { name: "description", content: "Sign in to the Courier Management System." },
+      { name: "description", content: "Sign in with your email and password." },
     ],
   }),
   component: LoginPage,
 });
 
-function defaultSlug(): string {
-  if (typeof window === "undefined") return "";
-  return resolveTenantFromHost(window.location.hostname).slug;
-}
-
 function LoginPage() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [tenantSlug, setTenantSlug] = useState(defaultSlug);
   const [submitting, setSubmitting] = useState(false);
 
-  const onSubmit = async (event: React.FormEvent) => {
+  const onPassword = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!username.trim() || !password) {
-      toast.error("Enter username and password");
-      return;
-    }
-    if (!tenantSlug.trim()) {
-      toast.error("Enter your company (tenant) code");
+    if (!email.trim() || !password) {
+      toast.error("Enter your email and password");
       return;
     }
     setSubmitting(true);
     try {
-      await signIn(username, password, tenantSlug);
+      await signIn(email, password);
       toast.success("Signed in");
       void navigate({ to: "/dashboard" });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Sign in failed";
-      toast.error(message);
+      toast.error(error instanceof Error ? error.message : "Sign in failed");
     } finally {
       setSubmitting(false);
     }
@@ -64,44 +52,25 @@ function LoginPage() {
             <LogIn className="h-5 w-5" />
           </div>
           <h1 className="text-xl font-semibold tracking-tight text-foreground">Sign in</h1>
-          <p className="text-sm text-muted-foreground">Courier Management System</p>
+          <p className="text-sm text-muted-foreground">Use the email address on your account.</p>
         </div>
-
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        <form onSubmit={onPassword} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="tenant">Company code</Label>
-            <Input
-              id="tenant"
-              value={tenantSlug}
-              onChange={(e) => setTenantSlug(e.target.value)}
-              autoComplete="organization"
-              placeholder="your-company"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="username">Username</Label>
-            <Input
-              id="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-            />
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-            />
+            <Input id="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
-          <Button type="submit" className="mt-2 w-full" disabled={submitting}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Sign in
           </Button>
         </form>
+        <Link to="/forgot-password" className="mt-4 block text-center text-sm text-muted-foreground underline">
+          Forgot password
+        </Link>
       </Card>
     </div>
   );

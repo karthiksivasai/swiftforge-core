@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   RefreshCw,
   Filter,
@@ -11,6 +11,11 @@ import {
   FileText,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  listObcEntries,
+  saveObcEntry,
+  deleteObcEntry,
+} from "@/lib/transactions/resources/obcEntry";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -262,6 +267,23 @@ function ObcEntryPage() {
   const [reportOpen, setReportOpen] = useState(false);
   const [masterEwayBillNo, setMasterEwayBillNo] = useState("");
 
+  const [saving, setSaving] = useState(false);
+
+  const fetchRows = async () => {
+    try {
+      const dbRows = await listObcEntries();
+      if (dbRows && dbRows.length > 0) {
+        setRows(dbRows);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch OBC entries:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchRows();
+  }, []);
+
   const patchForm = (patch: Partial<ObcForm>) => setForm((f) => ({ ...f, ...patch }));
 
   const filtered = useMemo(() => {
@@ -329,7 +351,9 @@ function ObcEntryPage() {
     setChargeDraft(emptyChargeDraft());
   };
 
-  const persistEntry = () => {
+  const persistEntry = async () => {
+    if (saving) return;
+
     if (!form.cdNo.trim()) return toast.error("CD No is required");
     if (!form.payType) return toast.error("Payment Type is required");
     if (!form.obc.code.trim() && !form.obc.name.trim()) return toast.error("OBC is required");
@@ -364,21 +388,44 @@ function ObcEntryPage() {
       despDate,
     );
 
-    if (editing) {
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? payload : r)));
-      toast.success("OBC entry saved");
-    } else {
-      setRows((prev) => [payload, ...prev]);
-      toast.success("OBC entry created");
+    setSaving(true);
+    try {
+      const outcome = await saveObcEntry(payload);
+      if (!outcome.success) {
+        toast.error(outcome.error || "Failed to save OBC entry");
+        return;
+      }
+
+      if (editing) {
+        setRows((prev) => prev.map((r) => (r.id === editing.id ? payload : r)));
+        toast.success("OBC entry saved");
+      } else {
+        setRows((prev) => [payload, ...prev]);
+        toast.success("OBC entry created");
+      }
+      closeEntry();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
     }
-    closeEntry();
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success(`Deleted manifest ${deleteTarget.manifestNo}`);
-    setDeleteTarget(null);
+    try {
+      const outcome = await deleteObcEntry(deleteTarget.id);
+      if (!outcome.success) {
+        toast.error(outcome.error || "Failed to delete OBC entry");
+        return;
+      }
+      setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+      toast.success(`Deleted manifest ${deleteTarget.manifestNo}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleteTarget(null);
+    }
   };
 
   const openFormSetup = () => {
@@ -413,8 +460,9 @@ function ObcEntryPage() {
     closeReport();
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setPage(1);
+    await fetchRows();
     toast.success("List refreshed");
   };
 

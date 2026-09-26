@@ -583,7 +583,7 @@ export function SearchableLookupPair({
       type="button"
       disabled={disabled}
       className={cn(
-        "shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground",
+        "shrink-0 rounded-md bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground",
         btnSize,
       )}
       aria-label="Search"

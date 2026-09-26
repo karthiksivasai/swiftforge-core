@@ -1,4 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
+
+import { requireApiAuth } from "@/lib/security/require-api-auth.server";
 import {
   calculatePieceWeights,
   computeShipmentRating,
@@ -14,6 +16,11 @@ export const Route = createFileRoute("/api/shipments/rate")({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        const auth = await requireApiAuth(request, {
+          anyOf: [{ slug: "txn.awb-entry", action: "search" }],
+        });
+        if (auth instanceof Response) return auth;
+
         try {
           const body = (await request.json()) as Partial<RateQueryInput>;
 
@@ -59,10 +66,10 @@ export const Route = createFileRoute("/api/shipments/rate")({
           // Service weight rules lookup from DB or SEED
           let serviceRules: ServiceWeightRuleRecord[] = [...SEED_SERVICE_WEIGHT_RULES];
           try {
-            const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-            const { data: rulesData } = await supabaseAdmin
+            const { data: rulesData } = await auth.supabase
               .from("service_weight_rules")
-              .select("*")
+              .select("id, service_code, service_name, min_weight, max_weight")
+              .eq("tenant_id", auth.tenantId)
               .eq("status", "ACTIVE")
               .is("deleted_at", null);
 
@@ -106,10 +113,12 @@ export const Route = createFileRoute("/api/shipments/rate")({
           // Database rate lookup with seed fallback
           let dbRates: CustomerRateRecord[] = [...SEED_CUSTOMER_RATES];
           try {
-            const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-            const { data } = await supabaseAdmin
+            const { data } = await auth.supabase
               .from("customer_rates")
-              .select("*")
+              .select(
+                "id, customer_code, customer_id, contract_no, product_code, vendor_code, origin_code, destination_code, zone_id, weight_slab_from, weight_slab_to, rate_per_kg, from_date, to_date",
+              )
+              .eq("tenant_id", auth.tenantId)
               .eq("status", "ACTIVE")
               .is("deleted_at", null);
 

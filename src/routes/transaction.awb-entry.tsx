@@ -129,6 +129,7 @@ import {
 } from "@/lib/transactions/invoiceGenerator";
 import {
   getShipmentDocument,
+  saveShipmentDocument,
   type ShipmentDocumentItem,
 } from "@/lib/transactions/shipmentDocuments";
 import {
@@ -186,8 +187,10 @@ import {
 } from "@/components/transactions/shipment-documents-card";
 import {
   buildWfBookingPayload,
+  buildUpsBookingPayload,
   callWorldFirstBookingApi,
   getWfClientConfig,
+  getUpsClientConfig,
   validateWfBookingRequest,
 } from "@/lib/integrations/world-first-api";
 
@@ -770,6 +773,18 @@ function isWorldFirstVendor(vendor: LookupPair): boolean {
     name.includes("WORLD FREIGHT") ||
     name.includes("WORLD-FIRST") ||
     name.includes("WORLD FIRST")
+  );
+}
+
+function isUpsVendor(vendor: LookupPair): boolean {
+  const code = (vendor.code || "").trim().toUpperCase();
+  const name = (vendor.name || "").trim().toUpperCase();
+  return (
+    code === "UPS" ||
+    code === "UPS2" ||
+    code === "UPS3" ||
+    name.includes("UNITED PARCEL SERVICE") ||
+    name.includes("UPS")
   );
 }
 
@@ -2229,7 +2244,8 @@ function AwbEntryPage() {
         branchStateCode: "TELANGANA",
       };
 
-      const res = await fetch("/api/shipments/rate", {
+      const { authorizedFetch } = await import("@/lib/security/authorized-fetch");
+      const res = await authorizedFetch("/api/shipments/rate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -2614,6 +2630,8 @@ function AwbEntryPage() {
           return;
         }
 
+        let carrierDocsToPersist: Array<{ docType: string; label: string; contentB64: string; mimeType: string }> = [];
+
         // Trigger World-First AWB Booking API if vendor is World Freight Transportation
         if (isWorldFirstVendor(payload.vendor)) {
           const wfPayload = buildWfBookingPayload(payload as unknown as Record<string, unknown>);
@@ -2626,7 +2644,12 @@ function AwbEntryPage() {
           }
 
           const wfResult = await callWorldFirstBookingApi(wfPayload);
-          if (!wfResult.success) {
+          if (wfResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
+            toast.warning(
+              wfResult.message ||
+                "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
+            );
+          } else if (!wfResult.success) {
             const err = wfResult.message || wfResult.apiError || "World-First AWB Booking Failed";
             toast.error(`World-First API Error: ${err}`);
             console.error("World-First AWB Booking Failed:", wfResult);
@@ -2638,7 +2661,45 @@ function AwbEntryPage() {
             payload.forwarding.forwardingAwb = wfResult.awbNo;
             payload.forwardingNo = wfResult.awbNo;
           }
+          if (wfResult.documents?.length) {
+            carrierDocsToPersist = wfResult.documents;
+          }
           toast.success(`World-First AWB Booking Successful! (Ref: ${wfResult.awbNo || wfResult.refNo})`);
+        } else if (isUpsVendor(payload.vendor)) {
+          // Trigger UPS AWB Booking API if vendor is UPS
+          const upsPayload = buildUpsBookingPayload(payload as unknown as Record<string, unknown>, {
+            serviceName: payload.service.name || payload.service.code || "WORLDWIDE EXPRESS SAVER",
+          });
+          const validation = validateWfBookingRequest(upsPayload);
+          if (!validation.valid) {
+            const msg = `UPS Validation Error: ${validation.errors.join("; ")}`;
+            toast.error(msg);
+            setBookingErrors(validation.errors);
+            return;
+          }
+
+          const upsResult = await callWorldFirstBookingApi(upsPayload, getUpsClientConfig());
+          if (upsResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
+            toast.warning(
+              upsResult.message ||
+                "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
+            );
+          } else if (!upsResult.success) {
+            const err = upsResult.message || upsResult.apiError || "UPS AWB Booking Failed";
+            toast.error(`UPS API Error: ${err}`);
+            console.error("UPS AWB Booking Failed:", upsResult);
+            setBookingErrors([err]);
+            return; // Abort save if UPS booking fails
+          }
+
+          if (upsResult.awbNo) {
+            payload.forwarding.forwardingAwb = upsResult.awbNo;
+            payload.forwardingNo = upsResult.awbNo;
+          }
+          if (upsResult.documents?.length) {
+            carrierDocsToPersist = upsResult.documents;
+          }
+          toast.success(`UPS AWB Booking Successful! (AWB: ${upsResult.awbNo || upsResult.refNo})`);
         }
         const { fields, pieces, charges } = uiFormToShipmentPayload({
           ...payload,
@@ -2651,6 +2712,38 @@ function AwbEntryPage() {
           pieces,
           charges,
         });
+        if (carrierDocsToPersist.length > 0) {
+          for (const doc of carrierDocsToPersist) {
+            try {
+              const vType = doc.docType === "INVOICE" ? "VENDOR_INVOICE" : "VENDOR_AWB";
+              const cType = doc.docType === "INVOICE" ? "INVOICE" : "AWB_LABEL";
+              await saveShipmentDocument({
+                shipmentId: saved.id,
+                documentType: vType as any,
+                source: "VENDOR",
+                vendor: payload.vendor.code || payload.vendor.name || "UPS",
+                fileName: `${payload.vendor.code || "UPS"}_${doc.docType}_${saved.awb_no}.pdf`,
+                contentB64: doc.contentB64,
+                mimeType: doc.mimeType || "application/pdf",
+                status: "AVAILABLE",
+                rawMeta: { awbNo: saved.awb_no, forwardingAwb: payload.forwardingNo },
+              });
+              await saveShipmentDocument({
+                shipmentId: saved.id,
+                documentType: cType as any,
+                source: "VENDOR",
+                vendor: payload.vendor.code || payload.vendor.name || "UPS",
+                fileName: `${payload.vendor.code || "UPS"}_${cType}_${saved.awb_no}.pdf`,
+                contentB64: doc.contentB64,
+                mimeType: doc.mimeType || "application/pdf",
+                status: "AVAILABLE",
+                rawMeta: { awbNo: saved.awb_no, forwardingAwb: payload.forwardingNo },
+              });
+            } catch (e) {
+              console.warn("Could not save carrier document:", e);
+            }
+          }
+        }
         await rememberPartiesAfterAwbSave({
           shipper: payload.shipper,
           consignee: payload.consignee,
@@ -2860,6 +2953,8 @@ function AwbEntryPage() {
           return;
         }
 
+        let carrierDocsToPersist: Array<{ docType: string; label: string; contentB64: string; mimeType: string }> = [];
+
         // Trigger World-First AWB Booking API if vendor is World Freight Transportation
         if (isWorldFirstVendor(payload.vendor)) {
           const wfPayload = buildWfBookingPayload(payload as unknown as Record<string, unknown>);
@@ -2872,7 +2967,12 @@ function AwbEntryPage() {
           }
 
           const wfResult = await callWorldFirstBookingApi(wfPayload);
-          if (!wfResult.success) {
+          if (wfResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
+            toast.warning(
+              wfResult.message ||
+                "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
+            );
+          } else if (!wfResult.success) {
             const err = wfResult.message || wfResult.apiError || "World-First AWB Booking Failed";
             toast.error(`World-First API Error: ${err}`);
             console.error("World-First AWB Booking Failed:", wfResult);
@@ -2884,7 +2984,45 @@ function AwbEntryPage() {
             payload.forwarding.forwardingAwb = wfResult.awbNo;
             payload.forwardingNo = wfResult.awbNo;
           }
+          if (wfResult.documents?.length) {
+            carrierDocsToPersist = wfResult.documents;
+          }
           toast.success(`World-First AWB Booking Successful! (Ref: ${wfResult.awbNo || wfResult.refNo})`);
+        } else if (isUpsVendor(payload.vendor)) {
+          // Trigger UPS AWB Booking API if vendor is UPS
+          const upsPayload = buildUpsBookingPayload(payload as unknown as Record<string, unknown>, {
+            serviceName: payload.service.name || payload.service.code || "WORLDWIDE EXPRESS SAVER",
+          });
+          const validation = validateWfBookingRequest(upsPayload);
+          if (!validation.valid) {
+            const msg = `UPS Validation Error: ${validation.errors.join("; ")}`;
+            toast.error(msg);
+            setBookingErrors(validation.errors);
+            return;
+          }
+
+          const upsResult = await callWorldFirstBookingApi(upsPayload, getUpsClientConfig());
+          if (upsResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
+            toast.warning(
+              upsResult.message ||
+                "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
+            );
+          } else if (!upsResult.success) {
+            const err = upsResult.message || upsResult.apiError || "UPS AWB Booking Failed";
+            toast.error(`UPS API Error: ${err}`);
+            console.error("UPS AWB Booking Failed:", upsResult);
+            setBookingErrors([err]);
+            return; // Abort booking if UPS booking fails
+          }
+
+          if (upsResult.awbNo) {
+            payload.forwarding.forwardingAwb = upsResult.awbNo;
+            payload.forwardingNo = upsResult.awbNo;
+          }
+          if (upsResult.documents?.length) {
+            carrierDocsToPersist = upsResult.documents;
+          }
+          toast.success(`UPS AWB Booking Successful! (AWB: ${upsResult.awbNo || upsResult.refNo})`);
         }
         const { fields, pieces, charges } = uiFormToShipmentPayload({
           ...payload,
@@ -2901,6 +3039,38 @@ function AwbEntryPage() {
           id: saved.id,
           rowVersion: saved.row_version,
         });
+        if (carrierDocsToPersist.length > 0) {
+          for (const doc of carrierDocsToPersist) {
+            try {
+              const vType = doc.docType === "INVOICE" ? "VENDOR_INVOICE" : "VENDOR_AWB";
+              const cType = doc.docType === "INVOICE" ? "INVOICE" : "AWB_LABEL";
+              await saveShipmentDocument({
+                shipmentId: booked.id,
+                documentType: vType as any,
+                source: "VENDOR",
+                vendor: payload.vendor.code || payload.vendor.name || "UPS",
+                fileName: `${payload.vendor.code || "UPS"}_${doc.docType}_${booked.awb_no}.pdf`,
+                contentB64: doc.contentB64,
+                mimeType: doc.mimeType || "application/pdf",
+                status: "AVAILABLE",
+                rawMeta: { awbNo: booked.awb_no, forwardingAwb: payload.forwardingNo },
+              });
+              await saveShipmentDocument({
+                shipmentId: booked.id,
+                documentType: cType as any,
+                source: "VENDOR",
+                vendor: payload.vendor.code || payload.vendor.name || "UPS",
+                fileName: `${payload.vendor.code || "UPS"}_${cType}_${booked.awb_no}.pdf`,
+                contentB64: doc.contentB64,
+                mimeType: doc.mimeType || "application/pdf",
+                status: "AVAILABLE",
+                rawMeta: { awbNo: booked.awb_no, forwardingAwb: payload.forwardingNo },
+              });
+            } catch (e) {
+              console.warn("Could not save carrier document:", e);
+            }
+          }
+        }
         await rememberPartiesAfterAwbSave({
           shipper: payload.shipper,
           consignee: payload.consignee,
@@ -2991,19 +3161,10 @@ function AwbEntryPage() {
                   ? maskMobile(form.shipper.mobileNo.trim() || form.shipper.telephone.trim())
                   : null);
               setVendorOtpMobile(mobile);
-              setVendorSandboxOtp(outcome.result.sandboxOtp ?? null);
+              setVendorSandboxOtp(null);
               setVendorOtpError(null);
               setVendorOtpOpen(true);
-              if (outcome.result.sandboxOtp) {
-                toast.message(
-                  `Sandbox OTP ${outcome.result.sandboxOtp} (live SMS not configured)`,
-                );
-              } else {
-                toast.message(
-                  outcome.result.message ||
-                    "OTP sent to shipper mobile — enter OTP to continue",
-                );
-              }
+              toast.message("OTP sent to the shipper mobile. Enter the code they received.");
             } else if (outcome.result.status === "SUCCESS") {
               toast.success("Vendor booking completed");
               if (outcome.result.vendorAwb) {
@@ -3412,14 +3573,10 @@ function AwbEntryPage() {
             ? maskMobile(form.shipper.mobileNo.trim() || form.shipper.telephone.trim())
             : null);
         setVendorOtpMobile(mobile);
-        setVendorSandboxOtp(outcome.result.sandboxOtp ?? null);
+        setVendorSandboxOtp(null);
         setVendorOtpError(null);
         setVendorOtpOpen(true);
-        if (outcome.result.sandboxOtp) {
-          toast.message(`Sandbox OTP ${outcome.result.sandboxOtp} (live SMS not configured)`);
-        } else {
-          toast.message(outcome.result.message || "OTP resent to shipper mobile");
-        }
+        toast.message("OTP sent to the shipper mobile. Enter the code they received.");
       } else if (outcome.result.status === "SUCCESS") {
         toast.success("Vendor booking completed");
       } else {

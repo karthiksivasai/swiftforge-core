@@ -3,6 +3,7 @@
  * Prefers live SMS via edge `send-sms` (MSG91/Twilio); falls back to sandbox RPC.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { toPublicOtpResult } from "@/lib/security/otp-response";
 
 export function extractShipperMobile(shipper: unknown): string {
   if (!shipper || typeof shipper !== "object") return "";
@@ -40,20 +41,16 @@ async function sendViaEdge(shipmentId: string): Promise<ShipperOtpSendResult | n
     if (raw.ok === false) {
       throw new Error(String(raw.message ?? raw.error ?? "Failed to send OTP SMS"));
     }
-    if (!raw.ok && !raw.mobile_masked && !raw.sandbox_otp) return null;
-    const masked = String(raw.mobile_masked ?? "—");
-    const sandboxOtp =
-      raw.sandbox_otp != null && String(raw.sandbox_otp).trim()
-        ? String(raw.sandbox_otp).trim()
-        : null;
+    if (!raw.ok && !raw.mobile_masked) return null;
+    const safe = toPublicOtpResult(raw);
     return {
       mobile: "",
-      masked,
-      message: String(raw.message ?? `OTP sent to shipper mobile ${masked}`),
-      sandbox: raw.sandbox === true || raw.live === false,
-      live: raw.live === true,
-      sandboxOtp: raw.live === true ? null : sandboxOtp,
-      provider: raw.provider != null ? String(raw.provider) : null,
+      masked: safe.masked,
+      message: safe.message,
+      sandbox: safe.sandbox,
+      live: safe.live,
+      sandboxOtp: null,
+      provider: safe.provider,
     };
   } catch (e) {
     if (e instanceof Error && /Failed to send OTP SMS|SMS provider/i.test(e.message)) {
@@ -79,20 +76,15 @@ export async function sendOtpToShipperMobile(args: {
   if (raw.ok === false) {
     throw new Error(String(raw.message ?? "Failed to send OTP"));
   }
-  const mobile = String(raw.mobile ?? "");
-  const masked = String(raw.mobile_masked ?? maskMobile(mobile));
-  const sandboxOtp =
-    raw.sandbox_otp != null && String(raw.sandbox_otp).trim()
-      ? String(raw.sandbox_otp).trim()
-      : null;
+  const safe = toPublicOtpResult(raw);
   return {
-    mobile,
-    masked,
-    message: String(raw.message ?? `OTP sent to shipper mobile ${masked}`),
+    mobile: "",
+    masked: safe.masked,
+    message: safe.message,
     sandbox: true,
     live: false,
-    sandboxOtp,
-    provider: "SANDBOX",
+    sandboxOtp: null,
+    provider: safe.provider ?? "SANDBOX",
   };
 }
 

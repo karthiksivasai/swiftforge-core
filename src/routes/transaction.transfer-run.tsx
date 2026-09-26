@@ -8,6 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FieldWrapper, MasterBreadcrumb } from "@/components/master-table-kit";
+import {
+  executeTransferRun,
+  executeOffloadRun,
+} from "@/lib/transactions/resources/transferRun";
 
 type RunMode = "transfer" | "offload";
 
@@ -18,6 +22,7 @@ type TransferRunRecord = {
   destinationManifestNo: string;
   originalBagNo: string;
   useOriginalBag: boolean;
+  offloadBagNo?: string;
   createdAt: string;
 };
 
@@ -26,6 +31,7 @@ type TransferForm = {
   destinationManifestNo: string;
   originalBagNo: string;
   useOriginalBag: boolean;
+  offloadBagNo: string;
 };
 
 const emptyTransferForm = (): TransferForm => ({
@@ -33,6 +39,7 @@ const emptyTransferForm = (): TransferForm => ({
   destinationManifestNo: "",
   originalBagNo: "",
   useOriginalBag: false,
+  offloadBagNo: "",
 });
 
 export const Route = createFileRoute("/transaction/transfer-run")({
@@ -52,6 +59,7 @@ function TransferRunPage() {
   const [mode, setMode] = useState<RunMode>("transfer");
   const [form, setForm] = useState<TransferForm>(emptyTransferForm);
   const [records, setRecords] = useState<TransferRunRecord[]>([]);
+  const [saving, setSaving] = useState(false);
 
   const resetForm = () => setForm(emptyTransferForm());
 
@@ -60,47 +68,92 @@ function TransferRunPage() {
     resetForm();
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
+
     const source = form.sourceManifestNo.trim();
     if (!source) return toast.error("Source Manifest No is required");
 
     if (mode === "transfer") {
       const destination = form.destinationManifestNo.trim();
       if (!destination) return toast.error("Destination Manifest No is required");
+      if (source.toUpperCase() === destination.toUpperCase()) {
+        return toast.error("Source and Destination manifest cannot be the same");
+      }
       if (form.useOriginalBag && !form.originalBagNo.trim()) {
         return toast.error("Original Bag No is required when selected");
       }
 
-      setRecords((prev) => [
-        {
-          id: crypto.randomUUID(),
-          mode: "transfer",
+      setSaving(true);
+      try {
+        const outcome = await executeTransferRun({
           sourceManifestNo: source,
           destinationManifestNo: destination,
-          originalBagNo: form.useOriginalBag ? form.originalBagNo.trim() : "",
+          originalBagNo: form.originalBagNo.trim(),
           useOriginalBag: form.useOriginalBag,
-          createdAt: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
-      toast.success(`Transferred run from ${source} to ${destination}`);
-    } else {
-      setRecords((prev) => [
-        {
-          id: crypto.randomUUID(),
-          mode: "offload",
-          sourceManifestNo: source,
-          destinationManifestNo: "",
-          originalBagNo: "",
-          useOriginalBag: false,
-          createdAt: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
-      toast.success(`Off-loaded manifest ${source}`);
-    }
+        });
 
-    resetForm();
+        if (!outcome.success) {
+          toast.error(outcome.error || "Transfer failed");
+          return;
+        }
+
+        setRecords((prev) => [
+          {
+            id: crypto.randomUUID(),
+            mode: "transfer",
+            sourceManifestNo: source,
+            destinationManifestNo: destination,
+            originalBagNo: form.useOriginalBag ? form.originalBagNo.trim() : "",
+            useOriginalBag: form.useOriginalBag,
+            createdAt: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
+        toast.success(outcome.message || `Transferred run from ${source} to ${destination}`);
+        resetForm();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      const offloadBag = form.offloadBagNo.trim();
+      if (!offloadBag) return toast.error("Bag No is required");
+
+      setSaving(true);
+      try {
+        const outcome = await executeOffloadRun({
+          sourceManifestNo: source,
+          bagNo: offloadBag,
+        });
+
+        if (!outcome.success) {
+          toast.error(outcome.error || "Off-load failed");
+          return;
+        }
+
+        setRecords((prev) => [
+          {
+            id: crypto.randomUUID(),
+            mode: "offload",
+            sourceManifestNo: source,
+            destinationManifestNo: "",
+            originalBagNo: "",
+            useOriginalBag: false,
+            offloadBagNo: offloadBag,
+            createdAt: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
+        toast.success(outcome.message || `Off-loaded bag ${offloadBag} from manifest ${source}`);
+        resetForm();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSaving(false);
+      }
+    }
   };
 
   const handleCancel = () => {
@@ -184,7 +237,7 @@ function TransferRunPage() {
             </FieldWrapper>
           </div>
         ) : (
-          <div className="max-w-md">
+          <div className="grid grid-cols-1 gap-4 max-w-2xl md:grid-cols-2">
             <FieldWrapper label="Source Manifest No." required>
               <Input
                 value={form.sourceManifestNo}
@@ -192,14 +245,20 @@ function TransferRunPage() {
                 autoFocus
               />
             </FieldWrapper>
+            <FieldWrapper label="Bag No." required>
+              <Input
+                value={form.offloadBagNo}
+                onChange={(e) => setForm((f) => ({ ...f, offloadBagNo: e.target.value }))}
+              />
+            </FieldWrapper>
           </div>
         )}
 
         <div className="mt-6 flex justify-end gap-2">
-          <Button onClick={handleSave} className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90">
+          <Button onClick={handleSave} disabled={saving} className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90">
             Save
           </Button>
-          <Button variant="destructive" onClick={handleCancel} className="min-w-24">
+          <Button variant="destructive" onClick={handleCancel} disabled={saving} className="min-w-24">
             Cancel
           </Button>
         </div>

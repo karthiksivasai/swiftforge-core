@@ -6,6 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { FieldWrapper, MasterBreadcrumb } from "@/components/master-table-kit";
+import {
+  findShipmentByAwb,
+  isAlreadyMisrouted,
+  recordMissRoute,
+} from "@/lib/transactions/resources/missRouteScan";
 
 const MISS_ROUTE_EVENT = "Shipment Mis routed";
 
@@ -52,28 +57,66 @@ function MissRouteScanPage() {
   const [records, setRecords] = useState<MissRouteScanRecord[]>([]);
   const [sessionCount, setSessionCount] = useState(0);
   const [awbNo, setAwbNo] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const displayScanDate = todayIso();
   const displayScanTime = nowScanTime();
   const serviceCenter = "HYD";
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
+
     const awb = awbNo.trim();
     if (!awb) return toast.error("AWB No is required");
 
-    const payload: MissRouteScanRecord = {
-      id: crypto.randomUUID(),
-      scanDate: displayScanDate,
-      scanTime: displayScanTime,
-      serviceCenter,
-      awbNo: awb,
-      event: MISS_ROUTE_EVENT,
-    };
+    setSaving(true);
+    try {
+      // 1. Verify AWB Existence
+      const shipment = await findShipmentByAwb(awb);
+      if (!shipment) {
+        toast.error("AWB not found");
+        return;
+      }
 
-    setRecords((prev) => [payload, ...prev]);
-    setSessionCount((count) => count + 1);
-    setAwbNo("");
-    toast.success(`AWB ${awb} saved`);
+      // 2. Duplicate Guard
+      const alreadyMisrouted = await isAlreadyMisrouted(awb, shipment.id);
+      if (alreadyMisrouted) {
+        toast.error("AWB already marked misrouted");
+        return;
+      }
+
+      // 3. DB Persistence
+      const outcome = await recordMissRoute({
+        awbNo: awb,
+        scanDate: displayScanDate,
+        scanTime: displayScanTime,
+        serviceCenter,
+        event: MISS_ROUTE_EVENT,
+      });
+
+      if (!outcome.success) {
+        toast.error(outcome.error || "Failed to record mis-route scan");
+        return;
+      }
+
+      const payload: MissRouteScanRecord = {
+        id: crypto.randomUUID(),
+        scanDate: displayScanDate,
+        scanTime: displayScanTime,
+        serviceCenter,
+        awbNo: awb,
+        event: MISS_ROUTE_EVENT,
+      };
+
+      setRecords((prev) => [payload, ...prev]);
+      setSessionCount((count) => count + 1);
+      setAwbNo("");
+      toast.success(outcome.message || `AWB ${awb} saved`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onAwbKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {

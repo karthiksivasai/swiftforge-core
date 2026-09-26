@@ -19,13 +19,9 @@ export async function getAwbEntryStatus(args: {
   branchName?: string | null;
   branchId?: string | null;
 }): Promise<AwbEntryStatus> {
-  const queryParams = new URLSearchParams();
-  if (args.userId) queryParams.set("userId", args.userId);
-  if (args.branchId) queryParams.set("branch", args.branchId);
-  else if (args.branchName) queryParams.set("branch", args.branchName);
-
   try {
-    const res = await fetch(`/api/awb-entry/status?${queryParams.toString()}`);
+    const { authorizedFetch } = await import("@/lib/security/authorized-fetch");
+    const res = await authorizedFetch("/api/awb-entry/status");
     if (res.ok) {
       const data = (await res.json()) as AwbEntryStatus;
       // Guarantee balance live calculation: balance = limit - used

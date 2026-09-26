@@ -9,9 +9,12 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as DemoRouteImport } from './routes/demo'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as ActivateRouteImport } from './routes/activate'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as UtilityServiceablePincodeRouteImport } from './routes/utility.serviceable-pincode'
 import { Route as UtilityNotificationRouteImport } from './routes/utility.notification'
@@ -38,6 +41,7 @@ import { Route as ReportsArReportRouteImport } from './routes/reports.ar-report'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as PublicTrackRouteImport } from './routes/public.track'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
+import { Route as ApiUsersRouteImport } from './routes/api/users'
 import { Route as ApiPincodesRouteImport } from './routes/api/pincodes'
 import { Route as RunNo_EntryRunNo_EntryRouteImport } from './routes/RunNo_Entry.RunNo_Entry'
 import { Route as ReportsRunIndexRouteImport } from './routes/reports.run.index'
@@ -104,11 +108,29 @@ import { Route as MasterCustomerCustomerRouteImport } from './routes/master.cust
 import { Route as MasterCustomerConsigneeRouteImport } from './routes/master.customer.consignee'
 import { Route as ApiShipmentsRateRouteImport } from './routes/api/shipments.rate'
 import { Route as ApiAwbEntryStatusRouteImport } from './routes/api/awb-entry.status'
+import { Route as ApiAuthResetPasswordRouteImport } from './routes/api/auth.reset-password'
+import { Route as ApiAuthOtpVerifyRouteImport } from './routes/api/auth.otp-verify'
+import { Route as ApiAuthOtpRequestRouteImport } from './routes/api/auth.otp-request'
+import { Route as ApiAuthLoginRouteImport } from './routes/api/auth.login'
+import { Route as ApiAuthForgotPasswordRouteImport } from './routes/api/auth.forgot-password'
+import { Route as ApiAuthForceLogoutRouteImport } from './routes/api/auth.force-logout'
+import { Route as ApiAuthActivateRouteImport } from './routes/api/auth.activate'
 import { Route as ApiShippingWorldFirstBookRouteImport } from './routes/api/shipping.world-first.book'
+import { Route as ApiShippingUpsBookRouteImport } from './routes/api/shipping.ups.book'
 
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DemoRoute = DemoRouteImport.update({
@@ -119,6 +141,11 @@ const DemoRoute = DemoRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ActivateRoute = ActivateRouteImport.update({
+  id: '/activate',
+  path: '/activate',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -254,6 +281,11 @@ const PublicTrackRoute = PublicTrackRouteImport.update({
 const MasterSplatRoute = MasterSplatRouteImport.update({
   id: '/master/$',
   path: '/master/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiUsersRoute = ApiUsersRouteImport.update({
+  id: '/api/users',
+  path: '/api/users',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPincodesRoute = ApiPincodesRouteImport.update({
@@ -625,20 +657,64 @@ const ApiAwbEntryStatusRoute = ApiAwbEntryStatusRouteImport.update({
   path: '/api/awb-entry/status',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAuthResetPasswordRoute = ApiAuthResetPasswordRouteImport.update({
+  id: '/api/auth/reset-password',
+  path: '/api/auth/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthOtpVerifyRoute = ApiAuthOtpVerifyRouteImport.update({
+  id: '/api/auth/otp-verify',
+  path: '/api/auth/otp-verify',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthOtpRequestRoute = ApiAuthOtpRequestRouteImport.update({
+  id: '/api/auth/otp-request',
+  path: '/api/auth/otp-request',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthLoginRoute = ApiAuthLoginRouteImport.update({
+  id: '/api/auth/login',
+  path: '/api/auth/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthForgotPasswordRoute = ApiAuthForgotPasswordRouteImport.update({
+  id: '/api/auth/forgot-password',
+  path: '/api/auth/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthForceLogoutRoute = ApiAuthForceLogoutRouteImport.update({
+  id: '/api/auth/force-logout',
+  path: '/api/auth/force-logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthActivateRoute = ApiAuthActivateRouteImport.update({
+  id: '/api/auth/activate',
+  path: '/api/auth/activate',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiShippingWorldFirstBookRoute =
   ApiShippingWorldFirstBookRouteImport.update({
     id: '/api/shipping/world-first/book',
     path: '/api/shipping/world-first/book',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiShippingUpsBookRoute = ApiShippingUpsBookRouteImport.update({
+  id: '/api/shipping/ups/book',
+  path: '/api/shipping/ups/book',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/activate': typeof ActivateRoute
   '/dashboard': typeof DashboardRoute
   '/demo': typeof DemoRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/RunNo_Entry/RunNo_Entry': typeof RunNo_EntryRunNo_EntryRoute
   '/api/pincodes': typeof ApiPincodesRoute
+  '/api/users': typeof ApiUsersRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
@@ -664,6 +740,13 @@ export interface FileRoutesByFullPath {
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/api/auth/activate': typeof ApiAuthActivateRoute
+  '/api/auth/force-logout': typeof ApiAuthForceLogoutRoute
+  '/api/auth/forgot-password': typeof ApiAuthForgotPasswordRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/otp-request': typeof ApiAuthOtpRequestRoute
+  '/api/auth/otp-verify': typeof ApiAuthOtpVerifyRoute
+  '/api/auth/reset-password': typeof ApiAuthResetPasswordRoute
   '/api/awb-entry/status': typeof ApiAwbEntryStatusRoute
   '/api/shipments/rate': typeof ApiShipmentsRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
@@ -728,15 +811,20 @@ export interface FileRoutesByFullPath {
   '/utility/users/loggedin-users': typeof UtilityUsersLoggedinUsersRoute
   '/utility/users/user-setup': typeof UtilityUsersUserSetupRoute
   '/reports/run/': typeof ReportsRunIndexRoute
+  '/api/shipping/ups/book': typeof ApiShippingUpsBookRoute
   '/api/shipping/world-first/book': typeof ApiShippingWorldFirstBookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/activate': typeof ActivateRoute
   '/dashboard': typeof DashboardRoute
   '/demo': typeof DemoRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/RunNo_Entry/RunNo_Entry': typeof RunNo_EntryRunNo_EntryRoute
   '/api/pincodes': typeof ApiPincodesRoute
+  '/api/users': typeof ApiUsersRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
@@ -762,6 +850,13 @@ export interface FileRoutesByTo {
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/api/auth/activate': typeof ApiAuthActivateRoute
+  '/api/auth/force-logout': typeof ApiAuthForceLogoutRoute
+  '/api/auth/forgot-password': typeof ApiAuthForgotPasswordRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/otp-request': typeof ApiAuthOtpRequestRoute
+  '/api/auth/otp-verify': typeof ApiAuthOtpVerifyRoute
+  '/api/auth/reset-password': typeof ApiAuthResetPasswordRoute
   '/api/awb-entry/status': typeof ApiAwbEntryStatusRoute
   '/api/shipments/rate': typeof ApiShipmentsRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
@@ -826,16 +921,21 @@ export interface FileRoutesByTo {
   '/utility/users/loggedin-users': typeof UtilityUsersLoggedinUsersRoute
   '/utility/users/user-setup': typeof UtilityUsersUserSetupRoute
   '/reports/run': typeof ReportsRunIndexRoute
+  '/api/shipping/ups/book': typeof ApiShippingUpsBookRoute
   '/api/shipping/world-first/book': typeof ApiShippingWorldFirstBookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/activate': typeof ActivateRoute
   '/dashboard': typeof DashboardRoute
   '/demo': typeof DemoRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/RunNo_Entry/RunNo_Entry': typeof RunNo_EntryRunNo_EntryRoute
   '/api/pincodes': typeof ApiPincodesRoute
+  '/api/users': typeof ApiUsersRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
@@ -861,6 +961,13 @@ export interface FileRoutesById {
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
+  '/api/auth/activate': typeof ApiAuthActivateRoute
+  '/api/auth/force-logout': typeof ApiAuthForceLogoutRoute
+  '/api/auth/forgot-password': typeof ApiAuthForgotPasswordRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/otp-request': typeof ApiAuthOtpRequestRoute
+  '/api/auth/otp-verify': typeof ApiAuthOtpVerifyRoute
+  '/api/auth/reset-password': typeof ApiAuthResetPasswordRoute
   '/api/awb-entry/status': typeof ApiAwbEntryStatusRoute
   '/api/shipments/rate': typeof ApiShipmentsRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
@@ -925,17 +1032,22 @@ export interface FileRoutesById {
   '/utility/users/loggedin-users': typeof UtilityUsersLoggedinUsersRoute
   '/utility/users/user-setup': typeof UtilityUsersUserSetupRoute
   '/reports/run/': typeof ReportsRunIndexRoute
+  '/api/shipping/ups/book': typeof ApiShippingUpsBookRoute
   '/api/shipping/world-first/book': typeof ApiShippingWorldFirstBookRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/activate'
     | '/dashboard'
     | '/demo'
+    | '/forgot-password'
     | '/login'
+    | '/reset-password'
     | '/RunNo_Entry/RunNo_Entry'
     | '/api/pincodes'
+    | '/api/users'
     | '/master/$'
     | '/public/track'
     | '/reports/$'
@@ -961,6 +1073,13 @@ export interface FileRouteTypes {
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
+    | '/api/auth/activate'
+    | '/api/auth/force-logout'
+    | '/api/auth/forgot-password'
+    | '/api/auth/login'
+    | '/api/auth/otp-request'
+    | '/api/auth/otp-verify'
+    | '/api/auth/reset-password'
     | '/api/awb-entry/status'
     | '/api/shipments/rate'
     | '/master/customer/consignee'
@@ -1025,15 +1144,20 @@ export interface FileRouteTypes {
     | '/utility/users/loggedin-users'
     | '/utility/users/user-setup'
     | '/reports/run/'
+    | '/api/shipping/ups/book'
     | '/api/shipping/world-first/book'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/activate'
     | '/dashboard'
     | '/demo'
+    | '/forgot-password'
     | '/login'
+    | '/reset-password'
     | '/RunNo_Entry/RunNo_Entry'
     | '/api/pincodes'
+    | '/api/users'
     | '/master/$'
     | '/public/track'
     | '/reports/$'
@@ -1059,6 +1183,13 @@ export interface FileRouteTypes {
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
+    | '/api/auth/activate'
+    | '/api/auth/force-logout'
+    | '/api/auth/forgot-password'
+    | '/api/auth/login'
+    | '/api/auth/otp-request'
+    | '/api/auth/otp-verify'
+    | '/api/auth/reset-password'
     | '/api/awb-entry/status'
     | '/api/shipments/rate'
     | '/master/customer/consignee'
@@ -1123,15 +1254,20 @@ export interface FileRouteTypes {
     | '/utility/users/loggedin-users'
     | '/utility/users/user-setup'
     | '/reports/run'
+    | '/api/shipping/ups/book'
     | '/api/shipping/world-first/book'
   id:
     | '__root__'
     | '/'
+    | '/activate'
     | '/dashboard'
     | '/demo'
+    | '/forgot-password'
     | '/login'
+    | '/reset-password'
     | '/RunNo_Entry/RunNo_Entry'
     | '/api/pincodes'
+    | '/api/users'
     | '/master/$'
     | '/public/track'
     | '/reports/$'
@@ -1157,6 +1293,13 @@ export interface FileRouteTypes {
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
+    | '/api/auth/activate'
+    | '/api/auth/force-logout'
+    | '/api/auth/forgot-password'
+    | '/api/auth/login'
+    | '/api/auth/otp-request'
+    | '/api/auth/otp-verify'
+    | '/api/auth/reset-password'
     | '/api/awb-entry/status'
     | '/api/shipments/rate'
     | '/master/customer/consignee'
@@ -1221,16 +1364,21 @@ export interface FileRouteTypes {
     | '/utility/users/loggedin-users'
     | '/utility/users/user-setup'
     | '/reports/run/'
+    | '/api/shipping/ups/book'
     | '/api/shipping/world-first/book'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ActivateRoute: typeof ActivateRoute
   DashboardRoute: typeof DashboardRoute
   DemoRoute: typeof DemoRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   RunNo_EntryRunNo_EntryRoute: typeof RunNo_EntryRunNo_EntryRoute
   ApiPincodesRoute: typeof ApiPincodesRoute
+  ApiUsersRoute: typeof ApiUsersRoute
   MasterSplatRoute: typeof MasterSplatRoute
   PublicTrackRoute: typeof PublicTrackRoute
   ReportsSplatRoute: typeof ReportsSplatRoute
@@ -1256,6 +1404,13 @@ export interface RootRouteChildren {
   UtilityIntegrationConfigurationRoute: typeof UtilityIntegrationConfigurationRoute
   UtilityNotificationRoute: typeof UtilityNotificationRoute
   UtilityServiceablePincodeRoute: typeof UtilityServiceablePincodeRoute
+  ApiAuthActivateRoute: typeof ApiAuthActivateRoute
+  ApiAuthForceLogoutRoute: typeof ApiAuthForceLogoutRoute
+  ApiAuthForgotPasswordRoute: typeof ApiAuthForgotPasswordRoute
+  ApiAuthLoginRoute: typeof ApiAuthLoginRoute
+  ApiAuthOtpRequestRoute: typeof ApiAuthOtpRequestRoute
+  ApiAuthOtpVerifyRoute: typeof ApiAuthOtpVerifyRoute
+  ApiAuthResetPasswordRoute: typeof ApiAuthResetPasswordRoute
   ApiAwbEntryStatusRoute: typeof ApiAwbEntryStatusRoute
   ApiShipmentsRateRoute: typeof ApiShipmentsRateRoute
   MasterCustomerConsigneeRoute: typeof MasterCustomerConsigneeRoute
@@ -1320,16 +1475,31 @@ export interface RootRouteChildren {
   UtilityUsersLoggedinUsersRoute: typeof UtilityUsersLoggedinUsersRoute
   UtilityUsersUserSetupRoute: typeof UtilityUsersUserSetupRoute
   ReportsRunIndexRoute: typeof ReportsRunIndexRoute
+  ApiShippingUpsBookRoute: typeof ApiShippingUpsBookRoute
   ApiShippingWorldFirstBookRoute: typeof ApiShippingWorldFirstBookRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/demo': {
@@ -1344,6 +1514,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/activate': {
+      id: '/activate'
+      path: '/activate'
+      fullPath: '/activate'
+      preLoaderRoute: typeof ActivateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -1526,6 +1703,13 @@ declare module '@tanstack/react-router' {
       path: '/master/$'
       fullPath: '/master/$'
       preLoaderRoute: typeof MasterSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/users': {
+      id: '/api/users'
+      path: '/api/users'
+      fullPath: '/api/users'
+      preLoaderRoute: typeof ApiUsersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/pincodes': {
@@ -1990,6 +2174,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAwbEntryStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/auth/reset-password': {
+      id: '/api/auth/reset-password'
+      path: '/api/auth/reset-password'
+      fullPath: '/api/auth/reset-password'
+      preLoaderRoute: typeof ApiAuthResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/otp-verify': {
+      id: '/api/auth/otp-verify'
+      path: '/api/auth/otp-verify'
+      fullPath: '/api/auth/otp-verify'
+      preLoaderRoute: typeof ApiAuthOtpVerifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/otp-request': {
+      id: '/api/auth/otp-request'
+      path: '/api/auth/otp-request'
+      fullPath: '/api/auth/otp-request'
+      preLoaderRoute: typeof ApiAuthOtpRequestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/login': {
+      id: '/api/auth/login'
+      path: '/api/auth/login'
+      fullPath: '/api/auth/login'
+      preLoaderRoute: typeof ApiAuthLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/forgot-password': {
+      id: '/api/auth/forgot-password'
+      path: '/api/auth/forgot-password'
+      fullPath: '/api/auth/forgot-password'
+      preLoaderRoute: typeof ApiAuthForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/force-logout': {
+      id: '/api/auth/force-logout'
+      path: '/api/auth/force-logout'
+      fullPath: '/api/auth/force-logout'
+      preLoaderRoute: typeof ApiAuthForceLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/activate': {
+      id: '/api/auth/activate'
+      path: '/api/auth/activate'
+      fullPath: '/api/auth/activate'
+      preLoaderRoute: typeof ApiAuthActivateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/shipping/world-first/book': {
       id: '/api/shipping/world-first/book'
       path: '/api/shipping/world-first/book'
@@ -1997,16 +2230,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiShippingWorldFirstBookRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/shipping/ups/book': {
+      id: '/api/shipping/ups/book'
+      path: '/api/shipping/ups/book'
+      fullPath: '/api/shipping/ups/book'
+      preLoaderRoute: typeof ApiShippingUpsBookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ActivateRoute: ActivateRoute,
   DashboardRoute: DashboardRoute,
   DemoRoute: DemoRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   RunNo_EntryRunNo_EntryRoute: RunNo_EntryRunNo_EntryRoute,
   ApiPincodesRoute: ApiPincodesRoute,
+  ApiUsersRoute: ApiUsersRoute,
   MasterSplatRoute: MasterSplatRoute,
   PublicTrackRoute: PublicTrackRoute,
   ReportsSplatRoute: ReportsSplatRoute,
@@ -2032,6 +2276,13 @@ const rootRouteChildren: RootRouteChildren = {
   UtilityIntegrationConfigurationRoute: UtilityIntegrationConfigurationRoute,
   UtilityNotificationRoute: UtilityNotificationRoute,
   UtilityServiceablePincodeRoute: UtilityServiceablePincodeRoute,
+  ApiAuthActivateRoute: ApiAuthActivateRoute,
+  ApiAuthForceLogoutRoute: ApiAuthForceLogoutRoute,
+  ApiAuthForgotPasswordRoute: ApiAuthForgotPasswordRoute,
+  ApiAuthLoginRoute: ApiAuthLoginRoute,
+  ApiAuthOtpRequestRoute: ApiAuthOtpRequestRoute,
+  ApiAuthOtpVerifyRoute: ApiAuthOtpVerifyRoute,
+  ApiAuthResetPasswordRoute: ApiAuthResetPasswordRoute,
   ApiAwbEntryStatusRoute: ApiAwbEntryStatusRoute,
   ApiShipmentsRateRoute: ApiShipmentsRateRoute,
   MasterCustomerConsigneeRoute: MasterCustomerConsigneeRoute,
@@ -2105,6 +2356,7 @@ const rootRouteChildren: RootRouteChildren = {
   UtilityUsersLoggedinUsersRoute: UtilityUsersLoggedinUsersRoute,
   UtilityUsersUserSetupRoute: UtilityUsersUserSetupRoute,
   ReportsRunIndexRoute: ReportsRunIndexRoute,
+  ApiShippingUpsBookRoute: ApiShippingUpsBookRoute,
   ApiShippingWorldFirstBookRoute: ApiShippingWorldFirstBookRoute,
 }
 export const routeTree = rootRouteImport

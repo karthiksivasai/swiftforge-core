@@ -1,11 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Loader2, Pencil, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth";
-import { listGroups, listUsers } from "@/lib/rbac-data";
-
+import { authorizedFetch } from "@/lib/security/authorized-fetch";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,356 +17,313 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { IconButton, MasterBreadcrumb, PAGE_SIZE, TablePager } from "@/components/master-table-kit";
-import { DataIoToolbar } from "@/components/data-io-toolbar";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { MasterBreadcrumb } from "@/components/master-table-kit";
 
-type Mode = "User" | "Group";
-type Status = "Active" | "In-Active";
-
-type UserSetupRow = {
+type Lookup = { id: string; code?: string; name: string };
+type UserRow = {
   id: string;
-  type: Mode;
-  name: string;
-  group: string;
-  company: string;
-  applicationType: string;
-  serviceCenter: string;
-  status: Status;
+  username: string;
+  full_name: string | null;
+  email: string | null;
+  mobile: string | null;
+  user_type: string;
+  user_subtype: string | null;
+  status: string;
+  application_type: string;
+  home_branch_id: string | null;
+  origin_id: string | null;
+  customer_id: string | null;
+  group_id: string | null;
+  birth_date: string | null;
+  joining_date: string | null;
+  allow_changing_date: string | null;
+  add_entry_on_manifest: boolean;
+  otp_login_enabled: boolean;
+  global_manifest: boolean;
+  allow_changing_awb_no: boolean;
+  allow_mobile_scanning: boolean;
+  weight_unit: string;
+  email_verified_at: string | null;
 };
 
-type UserForm = {
+type FormState = {
   userType: string;
+  userSubtype: string;
   username: string;
-  password: string;
-  confirmPassword: string;
+  fullName: string;
+  email: string;
+  mobile: string;
+  originId: string;
+  serviceCenterId: string;
+  customerId: string;
+  groupId: string;
   birthDate: string;
   joiningDate: string;
-  status: Status;
+  status: string;
   applicationType: string;
-  origin: string;
-  serviceCenter: string;
-  customer: string;
-  group: string;
-  emailId: string;
-  mobileNo: string;
   allowChangingDate: string;
+  addEntryOnManifest: boolean;
   allowLoginWithOtp: boolean;
   globalManifest: boolean;
   allowChangingAwbNo: boolean;
-  addEntryOnManifest: boolean;
-  mobileAppLens: boolean;
-  manifestBranch: "Yes" | "No";
-  weightType: "Kgs" | "Lbs";
+  allowMobileScanning: boolean;
+  weightType: string;
 };
 
-const rowsSeed: UserSetupRow[] = [
-  ["1", "User", "admin", "BS", "COUR", "", "HYD", "Active"],
-  ["2", "User", "SRAV", "BS", "COUR", "", "HYD", "Active"],
-  ["3", "User", "SKOKHIL", "OPERATION", "COUR", "", "HYD", "Active"],
-  ["4", "User", "SATYA", "OPERATION", "COUR", "", "HYD", "Active"],
-  ["5", "User", "CHINNU", "BS", "COUR", "", "HYD", "Active"],
-  ["6", "User", "kavya", "OPERATION", "COUR", "", "HYD", "In-Active"],
-  ["7", "User", "ARUNV", "OPERATION", "COUR", "", "HYD", "Active"],
-  ["8", "User", "BHAVS", "OPERATION", "COUR", "", "HYD", "Active"],
-  ["9", "User", "BILLING", "BS", "COUR", "", "HYD", "Active"],
-  ["10", "User", "SRAVANI", "Staff", "COUR", "", "HYD", "In-Active"],
-  ["11", "Group", "BS", "", "COUR", "", "HYD", "Active"],
-  ["12", "Group", "OPERATION", "BS", "COUR", "", "HYD", "Active"],
-  ["13", "Group", "Staff", "BS", "COUR", "", "HYD", "Active"],
-].map(([id, type, name, group, company, applicationType, serviceCenter, status]) => ({
-  id,
-  type: type as Mode,
-  name,
-  group,
-  company,
-  applicationType,
-  serviceCenter,
-  status: status as Status,
-}));
-
-const origins = [
-  "A S PETA",
-  "Aalo",
-  "ABHANPUR",
-  "ABHAYAPURI",
-  "ABOHAR",
-  "Achampet",
-  "Achampet-AP",
-  "ACHAMPETA",
-  "ACHANTA",
-  "ACHROL",
-  "ADAMPUR",
-  "ADASPUR",
-  "ADDANKI",
-  "ADDATTEEGALA",
-  "ADDURROAD",
-  "Adilabad",
-  "Adimali",
-  "Adirampattinam",
-  "ADONI",
-];
-const groups = ["BS", "OPERATION", "Staff"];
-const serviceCenters = ["HYD", "BLR", "BOM", "DEL"];
-const changingDateOptions = [
-  "Inscan",
-  "Manifest Scan",
-  "AWB Entry",
-  "DRS Scan",
-  "Progress",
-  "Comments",
-  "Receipt Entry",
-  "Debit Note",
-  "Credit Note",
-  "Manifest Inscan",
-];
-
-const today = () => new Date().toISOString().slice(0, 10);
-const emptyUser = (): UserForm => ({
-  userType: "",
+const emptyForm = (): FormState => ({
+  userType: "STAFF",
+  userSubtype: "BRANCH",
   username: "",
-  password: "",
-  confirmPassword: "",
-  birthDate: today(),
-  joiningDate: today(),
-  status: "Active",
-  applicationType: "",
-  origin: "",
-  serviceCenter: "",
-  customer: "",
-  group: "",
-  emailId: "",
-  mobileNo: "",
+  fullName: "",
+  email: "",
+  mobile: "",
+  originId: "",
+  serviceCenterId: "",
+  customerId: "",
+  groupId: "",
+  birthDate: "",
+  joiningDate: "",
+  status: "ACTIVE",
+  applicationType: "PORTAL",
   allowChangingDate: "",
+  addEntryOnManifest: false,
   allowLoginWithOtp: false,
   globalManifest: false,
   allowChangingAwbNo: false,
-  addEntryOnManifest: false,
-  mobileAppLens: false,
-  manifestBranch: "Yes",
-  weightType: "Kgs",
+  allowMobileScanning: false,
+  weightType: "KG",
 });
 
 export const Route = createFileRoute("/utility/users/user-setup")({
   head: () => ({
-    meta: [
-      { title: "User Setup — Utility — Courier ERP" },
-      { name: "description", content: "Manage users and groups for courier ERP access." },
-    ],
+    meta: [{ title: "User Setup — Utility — Courier ERP" }],
   }),
   component: UserSetupPage,
 });
 
 function UserSetupPage() {
-  const { isAuthenticated } = useAuth();
-  const [rows, setRows] = useState<UserSetupRow[]>(rowsSeed);
-  const [tab, setTab] = useState<Mode>("User");
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canList = hasPermission("utl.user-setup", "list") || hasPermission("utl.user-setup", "search");
+  const canAdd = hasPermission("utl.user-setup", "add");
+  const canModify = hasPermission("utl.user-setup", "modify");
+  const canDelete = hasPermission("utl.user-setup", "delete");
+  const [rows, setRows] = useState<UserRow[]>([]);
+  const [lookups, setLookups] = useState<{ branches: Lookup[]; origins: Lookup[]; customers: Lookup[]; groups: Lookup[] }>({
+    branches: [],
+    origins: [],
+    customers: [],
+    groups: [],
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [screen, setScreen] = useState<"list" | "form">("list");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<FormState>(emptyForm());
+  const [saving, setSaving] = useState(false);
+  const [confirm, setConfirm] = useState<{ id: string; action: "deactivate" | "delete" } | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [userRes, lookupRes] = await Promise.all([
+        authorizedFetch(`/api/users?search=${encodeURIComponent(search)}`),
+        authorizedFetch("/api/users?lookups=1"),
+      ]);
+      if (userRes.status === 403 || lookupRes.status === 403) {
+        setError("You do not have permission to manage users.");
+        setRows([]);
+        return;
+      }
+      if (!userRes.ok || !lookupRes.ok) throw new Error("Could not load users");
+      const userBody = (await userRes.json()) as { users: UserRow[] };
+      const lookupBody = (await lookupRes.json()) as typeof lookups;
+      setRows(userBody.users ?? []);
+      setLookups(lookupBody);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load users");
+    } finally {
+      setLoading(false);
+    }
+  }, [search]);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
-    let active = true;
-    Promise.all([listUsers(), listGroups()])
-      .then(([users, groups]) => {
-        if (!active) return;
-        const mapped: UserSetupRow[] = [
-          ...users.map((u) => ({
-            id: u.id,
-            type: "User" as Mode,
-            name: u.username,
-            group: "",
-            company: "",
-            applicationType: u.application_type,
-            serviceCenter: "",
-            status: (u.status === "ACTIVE" ? "Active" : "In-Active") as Status,
-          })),
-          ...groups.map((g) => ({
-            id: g.id,
-            type: "Group" as Mode,
-            name: g.name,
-            group: "",
-            company: "",
-            applicationType: "",
-            serviceCenter: "",
-            status: (g.status === "ACTIVE" ? "Active" : "In-Active") as Status,
-          })),
-        ];
-        setRows(mapped);
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : "Could not load users";
-        toast.error(message);
-      });
-    return () => {
-      active = false;
-    };
-  }, [isAuthenticated]);
-  const [screen, setScreen] = useState<"list" | "form">("list");
-  const [formTab, setFormTab] = useState<Mode>("User");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [userForm, setUserForm] = useState<UserForm>(emptyUser());
-  const [groupName, setGroupName] = useState("");
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState({
-    type: "",
-    name: "",
-    group: "",
-    company: "",
-    applicationType: "",
-    serviceCenter: "",
-    status: "",
-  });
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return rows.filter((row) => {
-      if (row.type !== tab) return false;
-      const values = [
-        row.type,
-        row.name,
-        row.group,
-        row.company,
-        row.applicationType,
-        row.serviceCenter,
-        row.status,
-      ];
-      if (q && !values.some((value) => value.toLowerCase().includes(q))) return false;
-      return (Object.keys(filters) as (keyof typeof filters)[]).every((key) => {
-        const rowValue = String(row[key] ?? "").toLowerCase();
-        return !filters[key] || rowValue.includes(filters[key].toLowerCase());
-      });
-    });
-  }, [filters, rows, search, tab]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const startIdx = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const endIdx = Math.min(currentPage * PAGE_SIZE, filtered.length);
-  const groupRows = rows.filter((row) => row.type === "Group");
-
-  const openAdd = () => {
-    setEditingId(null);
-    setUserForm(emptyUser());
-    setGroupName("");
-    setFormTab(tab);
-    setScreen("form");
-  };
-
-  const openEdit = (row: UserSetupRow) => {
-    setEditingId(row.id);
-    setFormTab(row.type);
-    if (row.type === "Group") setGroupName(row.name);
-    else
-      setUserForm({
-        ...emptyUser(),
-        username: row.name,
-        group: row.group,
-        serviceCenter: row.serviceCenter,
-        applicationType: row.applicationType,
-        status: row.status,
-      });
-    setScreen("form");
-  };
-
-  const save = () => {
-    if (formTab === "Group") {
-      if (!groupName.trim()) return toast.error("Groupname is required");
-      upsert({
-        id: editingId ?? crypto.randomUUID(),
-        type: "Group",
-        name: groupName.trim(),
-        group: "BS",
-        company: "COUR",
-        applicationType: "",
-        serviceCenter: "HYD",
-        status: "Active",
-      });
-      setTab("Group");
-      toast.success(editingId ? "Group updated" : "Group saved");
+    if (authLoading || !canList) {
+      if (!authLoading) setLoading(false);
       return;
     }
+    void load();
+  }, [authLoading, canList, load]);
 
-    if (!userForm.username.trim()) return toast.error("Username is required");
-    if (!editingId && !userForm.password.trim()) return toast.error("Password is required");
-    if (userForm.password !== userForm.confirmPassword)
-      return toast.error("Password and confirm password must match");
-    upsert({
-      id: editingId ?? crypto.randomUUID(),
-      type: "User",
-      name: userForm.username.trim(),
-      group: userForm.group || "BS",
-      company: "COUR",
-      applicationType: userForm.applicationType,
-      serviceCenter: userForm.serviceCenter || "HYD",
-      status: userForm.status,
+  const openEdit = (row: UserRow) => {
+    setEditingId(row.id);
+    setForm({
+      userType: row.user_type === "ADMIN" ? "ADMIN" : "STAFF",
+      userSubtype: row.user_subtype === "HUB" ? "HUB" : "BRANCH",
+      username: row.username,
+      fullName: row.full_name ?? "",
+      email: row.email ?? "",
+      mobile: row.mobile ?? "",
+      originId: row.origin_id ?? "",
+      serviceCenterId: row.home_branch_id ?? "",
+      customerId: row.customer_id ?? "",
+      groupId: row.group_id ?? "",
+      birthDate: row.birth_date ?? "",
+      joiningDate: row.joining_date ?? "",
+      status: row.status === "INACTIVE" ? "INACTIVE" : "ACTIVE",
+      applicationType: row.application_type || "PORTAL",
+      allowChangingDate: row.allow_changing_date ?? "",
+      addEntryOnManifest: row.add_entry_on_manifest,
+      allowLoginWithOtp: row.otp_login_enabled,
+      globalManifest: row.global_manifest,
+      allowChangingAwbNo: row.allow_changing_awb_no,
+      allowMobileScanning: row.allow_mobile_scanning,
+      weightType: row.weight_unit === "LB" ? "LB" : "KG",
     });
-    setTab("User");
-    toast.success(editingId ? "User updated" : "User saved");
+    setScreen("form");
   };
 
-  const upsert = (row: UserSetupRow) => {
-    setRows((current) =>
-      editingId ? current.map((item) => (item.id === editingId ? row : item)) : [row, ...current],
-    );
-    setScreen("list");
+  const save = async () => {
+    setSaving(true);
+    try {
+      const response = await authorizedFetch("/api/users", {
+        method: editingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, userId: editingId }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string; emailSent?: boolean };
+      if (!response.ok) {
+        toast.error(body.error || "Could not save the user");
+        return;
+      }
+      if (!editingId && body.emailSent === false) {
+        toast.warning("User created, but the activation email was not sent. Use Resend invite after mail is configured.");
+      } else {
+        toast.success(editingId ? "User updated" : "User created. An activation email was sent.");
+      }
+      setScreen("list");
+      await load();
+    } catch {
+      toast.error("Could not save the user");
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const runAction = async (userId: string, action: "deactivate" | "reactivate" | "delete" | "invite") => {
+    const response = await authorizedFetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, userId }),
+    });
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) {
+      toast.error(body.error || "Could not update the user");
+      return;
+    }
+    toast.success("User updated");
+    await load();
+  };
+
+  if (!authLoading && !canList) {
+    return (
+      <div className="p-6">
+        <h1 className="text-xl font-semibold">User Setup</h1>
+        <p className="mt-2 text-sm text-muted-foreground">You do not have permission to open User Setup.</p>
+      </div>
+    );
+  }
 
   if (screen === "form") {
     return (
       <div className="flex min-w-0 flex-col gap-4 p-4 md:p-6">
         <MasterBreadcrumb trail={["Utility", "Users", "User Setup"]} />
-        <Card className="relative min-w-0 border p-4 pt-7">
-          <span className="absolute -top-3 left-4 rounded-full bg-sidebar px-4 py-1 text-xs font-semibold text-sidebar-foreground shadow">
-            User Setup
-          </span>
-          <div className="mb-3 flex items-center gap-2">
-            <TabButton active={formTab === "User"} onClick={() => setFormTab("User")}>
-              User
-            </TabButton>
-            <TabButton active={formTab === "Group"} onClick={() => setFormTab("Group")}>
-              Group
-            </TabButton>
-          </div>
-          {formTab === "User" ? (
-            <UserFields form={userForm} setForm={setUserForm} />
-          ) : (
-            <div className="max-w-sm">
-              <TextField label="Groupname" value={groupName} onChange={setGroupName} />
-            </div>
-          )}
+        <h1 className="text-xl font-semibold">{editingId ? "Edit user" : "New user"}</h1>
+        <Card className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+          <Field label="User type">
+            <Select value={form.userType} onValueChange={(value) => setForm({ ...form, userType: value })}>
+              <SelectTrigger aria-label="User type"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ADMIN">Admin</SelectItem>
+                <SelectItem value="STAFF">User</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="User subtype">
+            <Select value={form.userSubtype} onValueChange={(value) => setForm({ ...form, userSubtype: value })}>
+              <SelectTrigger aria-label="User subtype"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="HUB">HUB</SelectItem>
+                <SelectItem value="BRANCH">Branch</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Text label="Username" value={form.username} onChange={(username) => setForm({ ...form, username })} />
+          <Text label="Full name" value={form.fullName} onChange={(fullName) => setForm({ ...form, fullName })} />
+          <Text label="Email" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
+          <Text label="Mobile" value={form.mobile} onChange={(mobile) => setForm({ ...form, mobile })} />
+          <LookupField label="Origin" value={form.originId} options={lookups.origins} onChange={(originId) => setForm({ ...form, originId })} />
+          <LookupField label="Service center" value={form.serviceCenterId} options={lookups.branches} onChange={(serviceCenterId) => setForm({ ...form, serviceCenterId })} />
+          <LookupField label="Customer" value={form.customerId} options={lookups.customers} onChange={(customerId) => setForm({ ...form, customerId })} />
+          <LookupField label="Group" value={form.groupId} options={lookups.groups} onChange={(groupId) => setForm({ ...form, groupId })} />
+          <Text label="Birth date" type="date" value={form.birthDate} onChange={(birthDate) => setForm({ ...form, birthDate })} />
+          <Text label="Joining date" type="date" value={form.joiningDate} onChange={(joiningDate) => setForm({ ...form, joiningDate })} />
+          <Field label="Status">
+            <Select value={form.status} onValueChange={(status) => setForm({ ...form, status })}>
+              <SelectTrigger aria-label="Status"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ACTIVE">Active</SelectItem>
+                <SelectItem value="INACTIVE">In-Active</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Application type">
+            <Select value={form.applicationType} onValueChange={(applicationType) => setForm({ ...form, applicationType })}>
+              <SelectTrigger aria-label="Application type"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All</SelectItem>
+                <SelectItem value="MOBILE">Mobile</SelectItem>
+                <SelectItem value="PORTAL">Portal</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Text label="Allow changing date" value={form.allowChangingDate} onChange={(allowChangingDate) => setForm({ ...form, allowChangingDate })} />
+          <Field label="Weight type">
+            <Select value={form.weightType} onValueChange={(weightType) => setForm({ ...form, weightType })}>
+              <SelectTrigger aria-label="Weight type"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="KG">Kgs</SelectItem>
+                <SelectItem value="LB">Lbs</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Check label="Add entry on manifest" checked={form.addEntryOnManifest} onChange={(addEntryOnManifest) => setForm({ ...form, addEntryOnManifest })} />
+          <Check label="Allow login with OTP" checked={form.allowLoginWithOtp} onChange={(allowLoginWithOtp) => setForm({ ...form, allowLoginWithOtp })} />
+          <Check label="Global manifest" checked={form.globalManifest} onChange={(globalManifest) => setForm({ ...form, globalManifest })} />
+          <Check label="Allow changing AWB number" checked={form.allowChangingAwbNo} onChange={(allowChangingAwbNo) => setForm({ ...form, allowChangingAwbNo })} />
+          <Check label="Allow Mobile Scanning" checked={form.allowMobileScanning} onChange={(allowMobileScanning) => setForm({ ...form, allowMobileScanning })} />
         </Card>
+        <p className="text-xs text-muted-foreground">
+          The user sets their own password from the activation email. Allow Mobile Scanning opens camera scan workflows only. Shipment, bagging, manifest, and status updates still require their own permissions. Manifest branch scope is always applied on the server.
+        </p>
         <div className="flex justify-end gap-2">
-          <Button
-            onClick={save}
-            className="h-8 rounded-full bg-green-500 px-6 text-white hover:bg-green-600"
-          >
+          <Button type="button" variant="outline" onClick={() => setScreen("list")}>Cancel</Button>
+          <Button type="button" onClick={save} disabled={saving || (editingId ? !canModify : !canAdd)}>
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Save
           </Button>
-          <Button
-            onClick={() => setScreen("list")}
-            className="h-8 rounded-full bg-red-500 px-6 text-white hover:bg-red-600"
-          >
-            Cancel
-          </Button>
         </div>
-        {formTab === "User" ? (
-          <Card className="border-yellow-200 bg-yellow-50 p-4 text-xs text-yellow-900">
-            <p className="mb-2 font-medium">Note</p>
-            <ul className="list-disc space-y-1 pl-4">
-              <li>Password must contain one special character.</li>
-              <li>Password must contain one numeric character.</li>
-              <li>Password length should be greater or equal to 8 characters.</li>
-              <li>UserName and Password cannot be same.</li>
-            </ul>
-          </Card>
-        ) : null}
       </div>
     );
   }
@@ -375,470 +331,144 @@ function UserSetupPage() {
   return (
     <div className="flex min-w-0 flex-col gap-4 p-4 md:p-6">
       <MasterBreadcrumb trail={["Utility", "Users", "User Setup"]} />
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">User Setup</h1>
-        <p className="text-sm text-muted-foreground">
-          Manage portal users, mobile users, application access, and groups.
-        </p>
-      </div>
-      <Card className="overflow-hidden p-0">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <DataIoToolbar
-              disabled={filtered.length === 0}
-              export={{
-                filename: tab === "User" ? "users" : "groups",
-                title: tab === "User" ? "Users" : "Groups",
-                columns: [
-                  { key: "type", header: "Type" },
-                  { key: "name", header: "Name" },
-                  { key: "group", header: "Group" },
-                  { key: "company", header: "Company" },
-                  { key: "applicationType", header: "Application Type" },
-                  { key: "serviceCenter", header: "Service Center" },
-                  { key: "status", header: "Status" },
-                ],
-                getRows: () =>
-                  filtered.map((row) => ({
-                    type: row.type,
-                    name: row.name,
-                    group: row.group,
-                    company: row.company,
-                    applicationType: row.applicationType,
-                    serviceCenter: row.serviceCenter,
-                    status: row.status,
-                  })),
-              }}
-            />
-            <TabButton
-              active={tab === "User"}
-              onClick={() => {
-                setTab("User");
-                setPage(1);
-              }}
-            >
-              User
-            </TabButton>
-            <TabButton
-              active={tab === "Group"}
-              onClick={() => {
-                setTab("Group");
-                setPage(1);
-              }}
-            >
-              Group
-            </TabButton>
-            <SummaryChip label="Portal Users" count={14} />
-            <SummaryChip label="Mobile Users" count={2} />
-            <SummaryChip label="Mob & Web" count={2} />
-            <SummaryChip label="Total" count={rows.length} />
-            <SummaryChip label="Group" count={groupRows.length} />
-          </div>
-          <div className="flex items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs text-foreground">
-              Search:
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(event) => {
-                    setSearch(event.target.value);
-                    setPage(1);
-                  }}
-                  className="h-9 w-56 pl-8"
-                />
-              </div>
-            </label>
-            <Button size="sm" className="h-9 gap-1.5" onClick={openAdd}>
-              <Plus className="h-4 w-4" />
-              Add
-            </Button>
-          </div>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">User Setup</h1>
+          <p className="text-sm text-muted-foreground">Create accounts, send activation email, and manage access.</p>
         </div>
-        <div className="overflow-x-auto">
+        <div className="flex items-end gap-2">
+          <label className="flex flex-col gap-1 text-xs">
+            Search
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 w-56 pl-8" aria-label="Search users" />
+            </div>
+          </label>
+          <Button type="button" variant="outline" onClick={() => void load()}>Refresh</Button>
+          {canAdd ? (
+            <Button type="button" onClick={() => { setEditingId(null); setForm(emptyForm()); setScreen("form"); }}>
+              <Plus className="mr-1 h-4 w-4" /> Add
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      <Card className="overflow-x-auto">
+        {loading ? (
+          <p className="p-6 text-sm text-muted-foreground">Loading users…</p>
+        ) : error ? (
+          <div className="flex flex-col gap-3 p-6">
+            <p className="text-sm">{error}</p>
+            <Button type="button" variant="outline" className="w-fit" onClick={() => void load()}>Try again</Button>
+          </div>
+        ) : rows.length === 0 ? (
+          <p className="p-6 text-sm text-muted-foreground">No users match this search.</p>
+        ) : (
           <Table>
             <TableHeader>
-              <TableRow className="bg-sidebar hover:bg-sidebar">
-                {[
-                  "Type",
-                  "Name",
-                  "Group",
-                  "Company",
-                  "Application Type",
-                  "Service Center",
-                  "Status",
-                  "Action",
-                ].map((heading) => (
-                  <TableHead key={heading} className="whitespace-nowrap text-sidebar-foreground">
-                    <span className="flex items-center justify-between gap-2">
-                      {heading}
-                      {heading !== "Action" ? <span className="text-xs">⇅</span> : null}
-                    </span>
-                  </TableHead>
+              <TableRow>
+                {["Username", "Email", "Type", "Subtype", "Status", "OTP", "Action"].map((heading) => (
+                  <TableHead key={heading}>{heading}</TableHead>
                 ))}
-              </TableRow>
-              <TableRow className="bg-muted/20 hover:bg-muted/20">
-                {(
-                  [
-                    "type",
-                    "name",
-                    "group",
-                    "company",
-                    "applicationType",
-                    "serviceCenter",
-                    "status",
-                  ] as const
-                ).map((key) => (
-                  <TableHead key={key} className="py-2">
-                    <Input
-                      value={filters[key]}
-                      onChange={(event) => {
-                        setFilters((current) => ({ ...current, [key]: event.target.value }));
-                        setPage(1);
-                      }}
-                      placeholder={
-                        key === "applicationType"
-                          ? "Application Type"
-                          : key === "serviceCenter"
-                            ? "Service Center"
-                            : key[0].toUpperCase() + key.slice(1)
-                      }
-                      className="h-8"
-                    />
-                  </TableHead>
-                ))}
-                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pageRows.map((row) => (
-                <TableRow key={row.id} className="odd:bg-muted/50">
-                  <TableCell>{row.type}</TableCell>
-                  <TableCell>{row.name}</TableCell>
-                  <TableCell>{row.group}</TableCell>
-                  <TableCell>{row.company}</TableCell>
-                  <TableCell>{row.applicationType}</TableCell>
-                  <TableCell>{row.serviceCenter}</TableCell>
-                  <TableCell>{row.status}</TableCell>
+              {rows.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell>{row.username}</TableCell>
+                  <TableCell>{row.email}</TableCell>
+                  <TableCell>{row.user_type === "ADMIN" ? "Admin" : "User"}</TableCell>
+                  <TableCell>{row.user_subtype ?? "—"}</TableCell>
+                  <TableCell>{row.status === "ACTIVE" ? "Active" : "In-Active"}</TableCell>
+                  <TableCell>{row.otp_login_enabled ? "Yes" : "No"}</TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1">
-                      <IconButton
-                        label="Edit"
-                        size="row"
-                        variant="ghost"
-                        onClick={() => openEdit(row)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </IconButton>
-                      <IconButton
-                        label="Delete"
-                        size="row"
-                        variant="ghost"
-                        onClick={() => {
-                          setRows((current) => current.filter((item) => item.id !== row.id));
-                          toast.success("Deleted");
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </IconButton>
+                    <div className="flex flex-wrap gap-1">
+                      {canModify ? <Button type="button" size="sm" variant="ghost" aria-label={`Edit ${row.username}`} onClick={() => openEdit(row)}><Pencil className="h-4 w-4" /></Button> : null}
+                      {canModify ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => void runAction(row.id, "invite")}>Resend invite</Button>
+                      ) : null}
+                      {canModify && row.status === "ACTIVE" ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => setConfirm({ id: row.id, action: "deactivate" })}>Deactivate</Button>
+                      ) : null}
+                      {canModify && row.status !== "ACTIVE" ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => void runAction(row.id, "reactivate")}>Reactivate</Button>
+                      ) : null}
+                      {canDelete ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => setConfirm({ id: row.id, action: "delete" })}>Delete</Button>
+                      ) : null}
                     </div>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        </div>
-        <TablePager
-          totalPages={totalPages}
-          currentPage={currentPage}
-          setPage={setPage}
-          startIdx={startIdx}
-          endIdx={endIdx}
-          total={filtered.length}
-        />
+        )}
       </Card>
+      <AlertDialog open={Boolean(confirm)} onOpenChange={(open) => !open && setConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirm?.action === "delete" ? "Delete this user?" : "Deactivate this user?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirm?.action === "delete"
+                ? "The account is hidden and cannot sign in. The record is kept."
+                : "The account cannot sign in until an administrator reactivates it."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirm) void runAction(confirm.id, confirm.action);
+                setConfirm(null);
+              }}
+            >
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-function UserFields({
-  form,
-  setForm,
-}: {
-  form: UserForm;
-  setForm: React.Dispatch<React.SetStateAction<UserForm>>;
-}) {
-  const update = <K extends keyof UserForm>(key: K, value: UserForm[K]) =>
-    setForm((current) => ({ ...current, [key]: value }));
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="grid gap-x-3 gap-y-2 md:grid-cols-4">
-      <SelectField
-        label="User Type"
-        value={form.userType}
-        placeholder="Select Type"
-        options={["Admin", "User", "Customer"]}
-        onChange={(value) => update("userType", value)}
-      />
-      <TextField
-        label="Username"
-        value={form.username}
-        onChange={(value) => update("username", value)}
-      />
-      <SelectField
-        label="Origin"
-        value={form.origin}
-        placeholder="Select Origin"
-        options={origins}
-        onChange={(value) => update("origin", value)}
-      />
-      <SelectField
-        label="Service Center"
-        value={form.serviceCenter}
-        placeholder="Select Service Center"
-        options={serviceCenters}
-        onChange={(value) => update("serviceCenter", value)}
-      />
-      <TextField
-        label="Password"
-        type="password"
-        value={form.password}
-        onChange={(value) => update("password", value)}
-      />
-      <TextField
-        label="Confirm Password"
-        type="password"
-        value={form.confirmPassword}
-        onChange={(value) => update("confirmPassword", value)}
-      />
-      <SelectField
-        label="Customer"
-        value={form.customer}
-        placeholder="Select Customer"
-        options={["COURIERWALA EXPRESS", "Retail Customer", "Corporate Customer"]}
-        onChange={(value) => update("customer", value)}
-      />
-      <SelectField
-        label="Group"
-        value={form.group}
-        placeholder="Select Group"
-        options={groups}
-        onChange={(value) => update("group", value)}
-      />
-      <TextField
-        label="Birth Date"
-        type="date"
-        value={form.birthDate}
-        onChange={(value) => update("birthDate", value)}
-      />
-      <TextField
-        label="Joining Date"
-        type="date"
-        value={form.joiningDate}
-        onChange={(value) => update("joiningDate", value)}
-      />
-      <TextField
-        label="Email ID"
-        value={form.emailId}
-        onChange={(value) => update("emailId", value)}
-      />
-      <TextField
-        label="Mobile No."
-        value={form.mobileNo}
-        onChange={(value) => update("mobileNo", value)}
-      />
-      <SelectField
-        label="Status"
-        value={form.status}
-        options={["Active", "In-Active"]}
-        onChange={(value) => update("status", value as Status)}
-      />
-      <SelectField
-        label="Application Type"
-        value={form.applicationType}
-        placeholder="Select Type"
-        options={["All", "Mobile", "Portal"]}
-        onChange={(value) => update("applicationType", value)}
-      />
-      <SelectField
-        label="Allow Changing Date"
-        value={form.allowChangingDate}
-        placeholder="Select Type"
-        options={changingDateOptions}
-        onChange={(value) => update("allowChangingDate", value)}
-      />
-      <CheckField
-        label="Add Entry on Manifest"
-        checked={form.addEntryOnManifest}
-        onChange={(value) => update("addEntryOnManifest", value)}
-      />
-      <CheckField
-        label="Allow Login With OTP"
-        checked={form.allowLoginWithOtp}
-        onChange={(value) => update("allowLoginWithOtp", value)}
-      />
-      <CheckField
-        label="Global Manifest"
-        checked={form.globalManifest}
-        onChange={(value) => update("globalManifest", value)}
-      />
-      <CheckField
-        label="Allow changing AWB No."
-        checked={form.allowChangingAwbNo}
-        onChange={(value) => update("allowChangingAwbNo", value)}
-      />
-      <CheckField
-        label="Mobile App Lens"
-        checked={form.mobileAppLens}
-        onChange={(value) => update("mobileAppLens", value)}
-      />
-      <ToggleField
-        label="Manifest Branch"
-        value={form.manifestBranch}
-        options={["Yes", "No"]}
-        onChange={(value) => update("manifestBranch", value as "Yes" | "No")}
-      />
-      <ToggleField
-        label="Weight Type"
-        value={form.weightType}
-        options={["Kgs", "Lbs"]}
-        onChange={(value) => update("weightType", value as "Kgs" | "Lbs")}
-      />
-    </div>
-  );
-}
-
-function TextField({
-  label,
-  value,
-  onChange,
-  type = "text",
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-xs font-medium text-foreground">
+    <label className="flex flex-col gap-1 text-xs font-medium">
       {label}
-      <Input
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-9"
-      />
+      {children}
     </label>
   );
 }
 
-function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: string[];
-  placeholder?: string;
-}) {
+function Text({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
   return (
-    <label className="flex flex-col gap-1 text-xs font-medium text-foreground">
-      {label}
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-9">
-          <SelectValue placeholder={placeholder ?? label} />
-        </SelectTrigger>
+    <Field label={label}>
+      <Input aria-label={label} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+    </Field>
+  );
+}
+
+function LookupField({ label, value, options, onChange }: { label: string; value: string; options: Lookup[]; onChange: (value: string) => void }) {
+  return (
+    <Field label={label}>
+      <Select value={value || "none"} onValueChange={(next) => onChange(next === "none" ? "" : next)}>
+        <SelectTrigger aria-label={label}><SelectValue placeholder={`Select ${label}`} /></SelectTrigger>
         <SelectContent>
+          <SelectItem value="none">None</SelectItem>
           {options.map((option) => (
-            <SelectItem key={option} value={option}>
-              {option}
-            </SelectItem>
+            <SelectItem key={option.id} value={option.id}>{option.code ? `${option.code} — ${option.name}` : option.name}</SelectItem>
           ))}
         </SelectContent>
       </Select>
+    </Field>
+  );
+}
+
+function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+  const id = label.replace(/\s+/g, "-").toLowerCase();
+  return (
+    <label htmlFor={id} className="flex items-center gap-2 text-sm">
+      <Checkbox id={id} checked={checked} onCheckedChange={(value) => onChange(value === true)} />
+      {label}
     </label>
-  );
-}
-
-function CheckField({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <label className="flex h-9 items-end gap-2 pb-2 text-xs text-foreground">
-      <Checkbox checked={checked} onCheckedChange={(value) => onChange(Boolean(value))} />
-      <span>{label}</span>
-    </label>
-  );
-}
-
-function ToggleField({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
-      <span>{label}</span>
-      <div className="inline-flex w-fit overflow-hidden rounded-md border bg-background">
-        {options.map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => onChange(option)}
-            className={`h-7 px-3 text-xs ${value === option ? "bg-green-600 text-white" : "text-muted-foreground hover:bg-muted"}`}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant={active ? "default" : "outline"}
-      className={`h-8 px-4 ${active ? "bg-green-600 text-white hover:bg-green-700" : ""}`}
-      onClick={onClick}
-    >
-      {children}
-    </Button>
-  );
-}
-
-function SummaryChip({ label, count }: { label: string; count: number }) {
-  return (
-    <span className="inline-flex h-7 items-center gap-2 rounded-md border bg-background px-3 text-xs text-muted-foreground">
-      <span>{label}</span>
-      <span className="rounded-full bg-slate-600 px-2 py-0.5 text-[10px] font-semibold text-white">
-        {count}
-      </span>
-    </span>
   );
 }

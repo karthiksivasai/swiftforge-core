@@ -86,8 +86,16 @@ export async function listActiveSessions(): Promise<SessionRow[]> {
 }
 
 export async function forceLogoff(sessionId: string): Promise<void> {
-  const { error } = await supabase.rpc("revoke_session", { p_session_id: sessionId });
-  if (error) throw error;
+  const { authorizedFetch } = await import("@/lib/security/authorized-fetch");
+  const response = await authorizedFetch("/api/auth/force-logout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error || "Force logoff failed");
+  }
 }
 
 export async function listUsers(): Promise<UserRow[]> {

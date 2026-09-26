@@ -19,6 +19,7 @@ export type BaggingListRow = {
   total_bags: number;
   status: string;
   created_at: string;
+  service_center: string;
 };
 
 export type BaggingAwbLineDto = {
@@ -64,6 +65,7 @@ export type BaggingHeaderDto = {
   isForwarding: boolean;
   manifestType: "High Value" | "Low Value" | "Transhipment" | "";
   transferToUk: boolean;
+  rowVersion?: number;
   searchAwbBagNo?: string;
   awbLines?: BaggingAwbLineDto[];
 };
@@ -100,6 +102,9 @@ export async function listBaggings(params?: {
   productCode?: string;
   vendorCode?: string;
   search?: string;
+  fromDate?: string;
+  toDate?: string;
+  status?: string;
   limit?: number;
   offset?: number;
 }): Promise<BaggingListRow[]> {
@@ -107,12 +112,50 @@ export async function listBaggings(params?: {
     p_product_code: params?.productCode || null,
     p_vendor_code: params?.vendorCode || null,
     p_search: params?.search || null,
-    p_limit: params?.limit || 100,
+    p_from_date: params?.fromDate || null,
+    p_to_date: params?.toDate || null,
+    p_status: params?.status || null,
+    p_limit: params?.limit || 500,
     p_offset: params?.offset || 0,
   });
 
   if (error) throw error;
   return (data || []) as BaggingListRow[];
+}
+
+export async function countBaggings(params?: {
+  productCode?: string;
+  vendorCode?: string;
+  search?: string;
+  fromDate?: string;
+  toDate?: string;
+  status?: string;
+}): Promise<number> {
+  const { data, error } = await supabase.rpc("count_baggings", {
+    p_product_code: params?.productCode || null,
+    p_vendor_code: params?.vendorCode || null,
+    p_search: params?.search || null,
+    p_from_date: params?.fromDate || null,
+    p_to_date: params?.toDate || null,
+    p_status: params?.status || null,
+  });
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+
+export type BaggingEventRow = {
+  id: string;
+  event_type: string;
+  event_text: string;
+  created_at: string;
+};
+
+export async function listBaggingEvents(baggingId: string): Promise<BaggingEventRow[]> {
+  const { data, error } = await supabase.rpc("list_bagging_events", {
+    p_bagging_id: baggingId,
+  });
+  if (error) throw error;
+  return (data || []) as BaggingEventRow[];
 }
 
 /**
@@ -180,11 +223,8 @@ export async function fetchShipmentForBagging(
     p_awb_no: clean,
   });
 
-  if (error) {
-    console.warn("fetchShipmentForBagging error:", error);
-    return null;
-  }
-  return data as ShipmentBaggingLookup | null;
+  if (error) throw new Error(error.message);
+  return (data as ShipmentBaggingLookup | null) ?? null;
 }
 
 /**

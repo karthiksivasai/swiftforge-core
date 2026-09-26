@@ -3,6 +3,7 @@ import {
   Outlet,
   Link,
   createRootRouteWithContext,
+  useNavigate,
   useRouter,
   useRouterState,
   HeadContent,
@@ -17,7 +18,8 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { AppHeader } from "@/components/app-header";
 import { TenantProvider } from "@/lib/tenant";
 import { ThemeProvider } from "@/lib/theme";
-import { AuthProvider } from "@/lib/auth";
+import { AuthProvider, useAuth } from "@/lib/auth";
+import { isPublicAppPath } from "@/lib/security/public-paths";
 import { BranchProvider } from "@/lib/branch-context";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -153,10 +155,33 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+function AuthGate({ children }: { children: ReactNode }) {
+  const { loading, isAuthenticated } = useAuth();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const isPublic = isPublicAppPath(pathname);
+
+  useEffect(() => {
+    if (!loading && !isAuthenticated && !isPublic) {
+      void navigate({ to: "/login" });
+    }
+  }, [isAuthenticated, isPublic, loading, navigate]);
+
+  if (!isPublic && (loading || !isAuthenticated)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+        Checking session…
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isBareRoute = pathname === "/login" || pathname.startsWith("/public/");
+  const isBareRoute = isPublicAppPath(pathname);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -165,6 +190,7 @@ function RootComponent() {
           <AuthProvider>
             <BranchProvider>
               <TooltipProvider delayDuration={0}>
+                <AuthGate>
                 {isBareRoute ? (
                   <>
                     <Outlet />
@@ -183,6 +209,7 @@ function RootComponent() {
                     </SidebarInset>
                   </SidebarProvider>
                 )}
+                </AuthGate>
               </TooltipProvider>
             </BranchProvider>
           </AuthProvider>
