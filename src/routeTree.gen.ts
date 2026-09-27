@@ -41,6 +41,9 @@ import { Route as ReportsArReportRouteImport } from './routes/reports.ar-report'
 import { Route as ReportsSplatRouteImport } from './routes/reports.$'
 import { Route as PublicTrackRouteImport } from './routes/public.track'
 import { Route as MasterSplatRouteImport } from './routes/master.$'
+import { Route as DocumentsInvoicePrintRouteImport } from './routes/documents.invoice-print'
+import { Route as DocumentsInvoiceGenerationRouteImport } from './routes/documents.invoice-generation'
+import { Route as DocumentsInvoiceFinaliseRouteImport } from './routes/documents.invoice-finalise'
 import { Route as ApiUsersRouteImport } from './routes/api/users'
 import { Route as ApiPincodesRouteImport } from './routes/api/pincodes'
 import { Route as RunNo_EntryRunNo_EntryRouteImport } from './routes/RunNo_Entry.RunNo_Entry'
@@ -283,6 +286,23 @@ const MasterSplatRoute = MasterSplatRouteImport.update({
   path: '/master/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocumentsInvoicePrintRoute = DocumentsInvoicePrintRouteImport.update({
+  id: '/documents/invoice-print',
+  path: '/documents/invoice-print',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocumentsInvoiceGenerationRoute =
+  DocumentsInvoiceGenerationRouteImport.update({
+    id: '/documents/invoice-generation',
+    path: '/documents/invoice-generation',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DocumentsInvoiceFinaliseRoute =
+  DocumentsInvoiceFinaliseRouteImport.update({
+    id: '/documents/invoice-finalise',
+    path: '/documents/invoice-finalise',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiUsersRoute = ApiUsersRouteImport.update({
   id: '/api/users',
   path: '/api/users',
@@ -715,6 +735,9 @@ export interface FileRoutesByFullPath {
   '/RunNo_Entry/RunNo_Entry': typeof RunNo_EntryRunNo_EntryRoute
   '/api/pincodes': typeof ApiPincodesRoute
   '/api/users': typeof ApiUsersRoute
+  '/documents/invoice-finalise': typeof DocumentsInvoiceFinaliseRoute
+  '/documents/invoice-generation': typeof DocumentsInvoiceGenerationRoute
+  '/documents/invoice-print': typeof DocumentsInvoicePrintRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
@@ -825,6 +848,9 @@ export interface FileRoutesByTo {
   '/RunNo_Entry/RunNo_Entry': typeof RunNo_EntryRunNo_EntryRoute
   '/api/pincodes': typeof ApiPincodesRoute
   '/api/users': typeof ApiUsersRoute
+  '/documents/invoice-finalise': typeof DocumentsInvoiceFinaliseRoute
+  '/documents/invoice-generation': typeof DocumentsInvoiceGenerationRoute
+  '/documents/invoice-print': typeof DocumentsInvoicePrintRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
@@ -936,6 +962,9 @@ export interface FileRoutesById {
   '/RunNo_Entry/RunNo_Entry': typeof RunNo_EntryRunNo_EntryRoute
   '/api/pincodes': typeof ApiPincodesRoute
   '/api/users': typeof ApiUsersRoute
+  '/documents/invoice-finalise': typeof DocumentsInvoiceFinaliseRoute
+  '/documents/invoice-generation': typeof DocumentsInvoiceGenerationRoute
+  '/documents/invoice-print': typeof DocumentsInvoicePrintRoute
   '/master/$': typeof MasterSplatRoute
   '/public/track': typeof PublicTrackRoute
   '/reports/$': typeof ReportsSplatRoute
@@ -1048,6 +1077,9 @@ export interface FileRouteTypes {
     | '/RunNo_Entry/RunNo_Entry'
     | '/api/pincodes'
     | '/api/users'
+    | '/documents/invoice-finalise'
+    | '/documents/invoice-generation'
+    | '/documents/invoice-print'
     | '/master/$'
     | '/public/track'
     | '/reports/$'
@@ -1158,6 +1190,9 @@ export interface FileRouteTypes {
     | '/RunNo_Entry/RunNo_Entry'
     | '/api/pincodes'
     | '/api/users'
+    | '/documents/invoice-finalise'
+    | '/documents/invoice-generation'
+    | '/documents/invoice-print'
     | '/master/$'
     | '/public/track'
     | '/reports/$'
@@ -1268,6 +1303,9 @@ export interface FileRouteTypes {
     | '/RunNo_Entry/RunNo_Entry'
     | '/api/pincodes'
     | '/api/users'
+    | '/documents/invoice-finalise'
+    | '/documents/invoice-generation'
+    | '/documents/invoice-print'
     | '/master/$'
     | '/public/track'
     | '/reports/$'
@@ -1379,6 +1417,9 @@ export interface RootRouteChildren {
   RunNo_EntryRunNo_EntryRoute: typeof RunNo_EntryRunNo_EntryRoute
   ApiPincodesRoute: typeof ApiPincodesRoute
   ApiUsersRoute: typeof ApiUsersRoute
+  DocumentsInvoiceFinaliseRoute: typeof DocumentsInvoiceFinaliseRoute
+  DocumentsInvoiceGenerationRoute: typeof DocumentsInvoiceGenerationRoute
+  DocumentsInvoicePrintRoute: typeof DocumentsInvoicePrintRoute
   MasterSplatRoute: typeof MasterSplatRoute
   PublicTrackRoute: typeof PublicTrackRoute
   ReportsSplatRoute: typeof ReportsSplatRoute
@@ -1703,6 +1744,27 @@ declare module '@tanstack/react-router' {
       path: '/master/$'
       fullPath: '/master/$'
       preLoaderRoute: typeof MasterSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/documents/invoice-print': {
+      id: '/documents/invoice-print'
+      path: '/documents/invoice-print'
+      fullPath: '/documents/invoice-print'
+      preLoaderRoute: typeof DocumentsInvoicePrintRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/documents/invoice-generation': {
+      id: '/documents/invoice-generation'
+      path: '/documents/invoice-generation'
+      fullPath: '/documents/invoice-generation'
+      preLoaderRoute: typeof DocumentsInvoiceGenerationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/documents/invoice-finalise': {
+      id: '/documents/invoice-finalise'
+      path: '/documents/invoice-finalise'
+      fullPath: '/documents/invoice-finalise'
+      preLoaderRoute: typeof DocumentsInvoiceFinaliseRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/users': {
@@ -2251,6 +2313,9 @@ const rootRouteChildren: RootRouteChildren = {
   RunNo_EntryRunNo_EntryRoute: RunNo_EntryRunNo_EntryRoute,
   ApiPincodesRoute: ApiPincodesRoute,
   ApiUsersRoute: ApiUsersRoute,
+  DocumentsInvoiceFinaliseRoute: DocumentsInvoiceFinaliseRoute,
+  DocumentsInvoiceGenerationRoute: DocumentsInvoiceGenerationRoute,
+  DocumentsInvoicePrintRoute: DocumentsInvoicePrintRoute,
   MasterSplatRoute: MasterSplatRoute,
   PublicTrackRoute: PublicTrackRoute,
   ReportsSplatRoute: ReportsSplatRoute,
