@@ -92,7 +92,6 @@ export function CustomerHelpDialog({
               id={searchId}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name or code…"
               className="h-8 text-[13px]"
               autoFocus
               onKeyDown={(e) => {

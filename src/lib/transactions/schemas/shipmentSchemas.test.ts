@@ -80,3 +80,29 @@ describe("formatBookingValidationError", () => {
     expect(formatBookingValidationError(new Error("Permission denied"))).toBe("Permission denied");
   });
 });
+
+describe("translateDbError AWB duplicate", () => {
+  it("keeps the server message when the AWB number is already used", async () => {
+    const { translateDbError } = await import("@/lib/masters/core/baseCrud");
+    const err = translateDbError({
+      name: "PostgrestError",
+      code: "23505",
+      message: "AWB 000025 is already used by another shipment",
+      details: "",
+      hint: "",
+    });
+    expect(err.message).toBe("AWB 000025 is already used by another shipment");
+  });
+
+  it("names the AWB when the unique index is the shipment number", async () => {
+    const { translateDbError } = await import("@/lib/masters/core/baseCrud");
+    const err = translateDbError({
+      name: "PostgrestError",
+      code: "23505",
+      message: 'duplicate key value violates unique constraint "shipments_tenant_awb_uq"',
+      details: "Key (tenant_id, awb_no)=(x, 000025) already exists.",
+      hint: "",
+    });
+    expect(err.message).toBe("This AWB number is already used by another shipment.");
+  });
+});

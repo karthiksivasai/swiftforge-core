@@ -514,7 +514,6 @@ const EXPORT_REASONS = [
 ] as const;
 
 const PROFORMA_FORMATS = ["B2B", "B2C", "C2C"] as const;
-const PROFORMA_DROPDOWN_SELECT = "Select";
 
 const PROFORMA_CURRENCIES = [
   "INR",
@@ -2701,10 +2700,13 @@ function AwbEntryPage() {
           }
           toast.success(`UPS AWB Booking Successful! (AWB: ${upsResult.awbNo || upsResult.refNo})`);
         }
-        const { fields, pieces, charges } = uiFormToShipmentPayload({
-          ...payload,
-          pickupId: editing?.pickupId ?? payload.pickupId,
-        });
+        const { fields, pieces, charges } = uiFormToShipmentPayload(
+          {
+            ...payload,
+            pickupId: editing?.pickupId ?? payload.pickupId,
+          },
+          { manualAwbNo: awbMode === "MANUAL" ? payload.awbNo : null },
+        );
         const saved = await saveShipment({
           id: editing?.id ?? null,
           rowVersion: editing?.rowVersion ?? null,
@@ -3024,10 +3026,13 @@ function AwbEntryPage() {
           }
           toast.success(`UPS AWB Booking Successful! (AWB: ${upsResult.awbNo || upsResult.refNo})`);
         }
-        const { fields, pieces, charges } = uiFormToShipmentPayload({
-          ...payload,
-          pickupId: editing?.pickupId ?? payload.pickupId,
-        });
+        const { fields, pieces, charges } = uiFormToShipmentPayload(
+          {
+            ...payload,
+            pickupId: editing?.pickupId ?? payload.pickupId,
+          },
+          { manualAwbNo: awbMode === "MANUAL" ? payload.awbNo : null },
+        );
         const saved = await saveShipment({
           id: editing?.id ?? null,
           rowVersion: editing?.rowVersion ?? null,
@@ -4109,7 +4114,6 @@ function AwbEntryPage() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleFormToolbarSearch();
                     }}
-                    placeholder="Search"
                     className="h-8 w-36 text-xs"
                   />
                   <Button
@@ -4213,7 +4217,7 @@ function AwbEntryPage() {
                           <div className="relative flex items-center w-full">
                             <ErpNavInput
                               order={AWB_NAV.AWB_NO}
-                              value={awbMode === "AUTO" && !form.awbNo && !editing ? "Auto" : form.awbNo}
+                              value={form.awbNo}
                               disabled={awbMode === "AUTO" || !!editing || isReadOnly || clientSelected}
                               onValueChange={(v) => setForm((f) => ({ ...f, awbNo: v }))}
                               onBlur={async () => {
@@ -4233,7 +4237,6 @@ function AwbEntryPage() {
                                   }
                                 }
                               }}
-                              placeholder={awbMode === "AUTO" ? "Auto" : "Enter Manual AWB"}
                               className="h-8 pr-12 px-1.5 text-[13px]"
                             />
                             <button
@@ -4283,7 +4286,6 @@ function AwbEntryPage() {
                               bookTime: v.replace(/\D/g, "").slice(0, 4),
                             }))
                           }
-                          placeholder="HHmm"
                           className="h-8 px-1.5 text-[13px]"
                         />
                       </FieldWrapper>
@@ -4385,7 +4387,6 @@ function AwbEntryPage() {
                         value={form.customerChargesTotal}
                         readOnly
                         className="h-8 bg-muted/30 px-1.5 text-[13px]"
-                        placeholder="Total Amount"
                       />
                     </div>
                     <div className="flex items-end gap-1.5">
@@ -4403,7 +4404,6 @@ function AwbEntryPage() {
                         value={form.vendorChargesTotal}
                         readOnly
                         className="h-8 bg-muted/30 px-1.5 text-[13px]"
-                        placeholder="Total Amount"
                       />
                     </div>
                     <div className="flex items-end">
@@ -4758,7 +4758,6 @@ function AwbEntryPage() {
                                 itemTotal: d.itemAmount || "0",
                               }))
                             }
-                            placeholder="Select"
                             items={CHARGE_DESCRIPTIONS}
                             triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                           />
@@ -5090,14 +5089,9 @@ function AwbEntryPage() {
                       <FieldWrapper borderLabel label="Term Of Invoice">
                         <ErpNavSelect
                           order={AWB_NAV.PROFORMA_TERM_OF_INVOICE}
-                          value={form.proforma.termOfInvoice || PROFORMA_DROPDOWN_SELECT}
-                          onValueChange={(v) =>
-                            patchProforma({
-                              termOfInvoice: v === PROFORMA_DROPDOWN_SELECT ? "" : v,
-                            })
-                          }
-                          placeholder={PROFORMA_DROPDOWN_SELECT}
-                          items={[PROFORMA_DROPDOWN_SELECT, ...TERM_OF_INVOICE]}
+                          value={form.proforma.termOfInvoice || undefined}
+                          onValueChange={(v) => patchProforma({ termOfInvoice: v })}
+                          items={TERM_OF_INVOICE}
                           triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                         />
                       </FieldWrapper>
@@ -5145,14 +5139,9 @@ function AwbEntryPage() {
                       <FieldWrapper borderLabel label="Format">
                         <ErpNavSelect
                           order={AWB_NAV.PROFORMA_FORMAT}
-                          value={form.proforma.format || PROFORMA_DROPDOWN_SELECT}
-                          onValueChange={(v) =>
-                            patchProforma({
-                              format: v === PROFORMA_DROPDOWN_SELECT ? "" : v,
-                            })
-                          }
-                          placeholder={PROFORMA_DROPDOWN_SELECT}
-                          items={[PROFORMA_DROPDOWN_SELECT, ...PROFORMA_FORMATS]}
+                          value={form.proforma.format || undefined}
+                          onValueChange={(v) => patchProforma({ format: v })}
+                          items={PROFORMA_FORMATS}
                           triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                         />
                       </FieldWrapper>
@@ -5224,11 +5213,6 @@ function AwbEntryPage() {
                           onValueChange={(v) => patchProformaDraft({ boxNo: v })}
                           items={proformaBoxNumbers}
                           disabled={proformaBoxNumbers.length === 0}
-                          placeholder={
-                            proformaBoxNumbers.length === 0
-                              ? "Add pieces in AWB tab"
-                              : "Select"
-                          }
                           triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                         />
                       </FieldWrapper>
@@ -5564,7 +5548,6 @@ function AwbEntryPage() {
                             value={vendorChargeDraft.description || undefined}
                             onValueChange={(v) => patchVendorChargeDraft({ description: v })}
                             beforeOpen={ensureVendorChargePrerequisites}
-                            placeholder="Select"
                             items={VENDOR_CHARGE_DESCRIPTIONS}
                             triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                           />
@@ -5780,7 +5763,6 @@ function AwbEntryPage() {
                       order={AWB_NAV.KYC_SEARCH_INPUT}
                       value={kycSearchInput}
                       onValueChange={setKycSearchInput}
-                      placeholder="Search"
                       className="h-9 w-40"
                     />
                     <Button
@@ -5902,7 +5884,6 @@ function AwbEntryPage() {
                   <Input
                     autoFocus
                     value={newUnitInput}
-                    placeholder="e.g. BOX"
                     onChange={(e) => setNewUnitInput(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
@@ -5998,7 +5979,6 @@ function AwbEntryPage() {
                   <Input
                     value={masterAwb}
                     onChange={(e) => setMasterAwb(e.target.value)}
-                    placeholder="Master AWBNo"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") void handleEntrySearch();
                     }}
@@ -6102,7 +6082,6 @@ function AwbEntryPage() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleSearch();
                   }}
-                  placeholder="Search"
                   className="h-9 w-full min-w-[10rem] sm:w-48"
                 />
                 <Button
@@ -6170,21 +6149,21 @@ function AwbEntryPage() {
                   <TableRow className="bg-muted/20 hover:bg-muted/20">
                     {(
                       [
-                        ["awbNo", "AWB No", awbCol.awbNoFilter],
-                        ["bookDate", "Book Date", awbCol.bookDate],
-                        ["shipperName", "Shipper Name", awbCol.shipperName],
-                        ["customerCode", "Customer Code", awbCol.customerCode],
-                        ["customerName", "Customer Name", awbCol.customerName],
-                        ["consigneeName", "Consignee Name", awbCol.consigneeName],
-                        ["destination", "Destination", awbCol.destination],
-                        ["product", "Product", awbCol.product],
-                        ["vendor", "Vendor", awbCol.vendor],
-                        ["actualWeight", "Actual Weight", awbCol.actualWeight],
-                        ["chargeWeight", "Charge Weight", awbCol.chargeWeight],
-                        ["pieces", "Pieces", awbCol.pieces],
-                        ["deliveryVendor", "Delivery Vendor", awbCol.deliveryVendor],
+                        ["awbNo", awbCol.awbNoFilter],
+                        ["bookDate", awbCol.bookDate],
+                        ["shipperName", awbCol.shipperName],
+                        ["customerCode", awbCol.customerCode],
+                        ["customerName", awbCol.customerName],
+                        ["consigneeName", awbCol.consigneeName],
+                        ["destination", awbCol.destination],
+                        ["product", awbCol.product],
+                        ["vendor", awbCol.vendor],
+                        ["actualWeight", awbCol.actualWeight],
+                        ["chargeWeight", awbCol.chargeWeight],
+                        ["pieces", awbCol.pieces],
+                        ["deliveryVendor", awbCol.deliveryVendor],
                       ] as const
-                    ).map(([key, placeholder, colClass]) => (
+                    ).map(([key, colClass]) => (
                       <TableHead key={key} className={cn("py-2", colClass)}>
                         <Input
                           value={colFilters[key]}
@@ -6192,7 +6171,6 @@ function AwbEntryPage() {
                             setColFilters((f) => ({ ...f, [key]: e.target.value }));
                             setPage(1);
                           }}
-                          placeholder={placeholder}
                           className={awbCol.filter}
                         />
                       </TableHead>
@@ -6603,6 +6581,7 @@ function PartySection({
             <PincodeAutocomplete
               navOrder={nav.pincode}
               className={inputClass}
+              placeholder=""
               value={party.pincode}
               countryCode="IN"
               onValueChange={(v) => onChange({ pincode: v })}
@@ -6696,7 +6675,6 @@ function PartySection({
               onValueChange={(v) => onChange({ documentType: v })}
               items={DOCUMENT_TYPES}
               nextOrder={nav.docNo}
-              placeholder="Select"
               triggerClassName={inputClass}
             />
           </FieldWrapper>
@@ -6988,7 +6966,7 @@ function ShipmentDetailsFields({
               {...erpNavOrder(AWB_NAV.PAYMENT_TYPE)}
               className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
             >
-              <SelectValue placeholder="Select" />
+              <SelectValue />
             </SelectTrigger>
             <SelectContent {...paymentTypeSelectContentProps}>
               {PAYMENT_TYPES.map((p) => (
@@ -7245,6 +7223,9 @@ function LookupPairInput({
       emptySearchMessage={emptySearchMessage}
       noResultsMessage={noResultsMessage}
       displayVariant={displayVariant}
+      namePlaceholder=""
+      codePlaceholder=""
+      searchPlaceholder=""
     />
   );
 }

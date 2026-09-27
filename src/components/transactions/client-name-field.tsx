@@ -86,6 +86,9 @@ export function ClientNameField({
         onCommit={onCommit}
         displayVariant="client"
         emptySearchMessage="Please enter a client name."
+        namePlaceholder=""
+        codePlaceholder=""
+        searchPlaceholder=""
         onBrowseSearch={() => setHelpOpen(true)}
         endAdornment={pencil}
       />

@@ -90,7 +90,6 @@ export function VendorOtpDialog({
           <Input
             value={otp}
             onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 8))}
-            placeholder="______"
             inputMode="numeric"
             autoFocus
             disabled={busy}

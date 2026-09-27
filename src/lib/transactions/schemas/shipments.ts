@@ -65,6 +65,7 @@ export const shipmentFieldsSchema = z.object({
   pickup_id: uuidRef(),
   book_date: z.string().trim().min(1, "Book date is required"),
   book_time: optText(16),
+  awb_no: optText(64),
   reference_no: optText(64),
   airline: optText(64),
   service: optText(64),

@@ -145,6 +145,9 @@ export function SearchableLookupPair({
   noResultsMessage: _noResultsMessage = AWB_LOOKUP_NO_RESULTS,
   onBrowseSearch: onBrowseSearchProp,
   endAdornment,
+  namePlaceholder = "Name",
+  codePlaceholder = "Code",
+  searchPlaceholder = "Search by code or name…",
 }: {
   value: LookupPairValue;
   onChange: (v: LookupPairValue) => void;
@@ -169,6 +172,9 @@ export function SearchableLookupPair({
   onBrowseSearch?: () => void;
   /** Extra control after the search button (e.g. edit pencil). */
   endAdornment?: ReactNode;
+  namePlaceholder?: string;
+  codePlaceholder?: string;
+  searchPlaceholder?: string;
 }) {
   void _emptySearchMessage;
   void _noResultsMessage;
@@ -514,7 +520,7 @@ export function SearchableLookupPair({
       }}
       onKeyDown={onKeyDown}
       className={cn("min-w-0 flex-1", inputH, flatInput)}
-      placeholder="Name"
+      placeholder={namePlaceholder}
       role="combobox"
       aria-expanded={showDropdown}
       aria-controls={listId}
@@ -563,7 +569,7 @@ export function SearchableLookupPair({
         flatInput,
         splitCode && "cursor-default bg-muted/30 text-foreground",
       )}
-      placeholder="Code"
+      placeholder={codePlaceholder}
       role={splitCode ? undefined : "combobox"}
       aria-expanded={splitCode ? undefined : showDropdown}
       aria-controls={splitCode ? undefined : listId}
@@ -732,7 +738,7 @@ export function SearchableLookupPair({
                 setPopupQuery(e.target.value);
                 setManualPopupRows(null);
               }}
-              placeholder="Search by code or name…"
+              placeholder={searchPlaceholder}
               className="mb-2"
             />
             <div className="max-h-72 overflow-auto rounded border">

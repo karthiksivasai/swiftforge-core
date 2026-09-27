@@ -439,7 +439,6 @@ export function VendorServiceLookup({
                   "min-w-0 flex-1",
                   compact ? "h-8 border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0" : "h-9 border-0 bg-transparent shadow-none focus-visible:ring-0",
                 )}
-                placeholder={hasVendor ? "Service" : "Select vendor first"}
                 autoComplete="off"
                 role="combobox"
                 aria-expanded={showInlineDropdown}
@@ -462,7 +461,6 @@ export function VendorServiceLookup({
                     "w-full cursor-default bg-muted/30 text-foreground",
                     compact ? "h-8 border-0 px-1 text-[13px] shadow-none focus-visible:ring-0" : "h-9 border-0 shadow-none focus-visible:ring-0",
                   )}
-                  placeholder="Code"
                   autoComplete="off"
                   tabIndex={-1}
                   {...(navOrder != null ? navSkipProps : {})}
@@ -507,7 +505,6 @@ export function VendorServiceLookup({
               }}
               onKeyDown={onKeyDown}
               className={cn("min-w-0 flex-1", compact ? "h-8 px-1.5 text-[13px]" : "h-9")}
-              placeholder={hasVendor ? "Service" : "Select vendor first"}
               autoComplete="off"
               role="combobox"
               aria-expanded={inlineOpen}
@@ -529,7 +526,6 @@ export function VendorServiceLookup({
               }}
               onKeyDown={onKeyDown}
               className={cn(compact ? "h-8 w-14 px-1 text-[13px]" : "h-9 w-20")}
-              placeholder="Code"
               autoComplete="off"
               role="combobox"
               aria-expanded={inlineOpen}
@@ -612,7 +608,6 @@ export function VendorServiceLookup({
           <Input
             value={popupQuery}
             onChange={(e) => setPopupQuery(e.target.value)}
-            placeholder="Search mapped services…"
             className="mb-2"
             autoFocus
           />

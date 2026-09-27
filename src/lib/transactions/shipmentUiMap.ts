@@ -197,7 +197,10 @@ function partyFromJson(
   };
 }
 
-export function uiFormToShipmentPayload(form: AwbLiveForm): {
+export function uiFormToShipmentPayload(
+  form: AwbLiveForm,
+  opts?: { manualAwbNo?: string | null },
+): {
   fields: ShipmentFields;
   pieces: ShipmentPieceInput[];
   charges: ShipmentChargeInput[];
@@ -229,6 +232,7 @@ export function uiFormToShipmentPayload(form: AwbLiveForm): {
     pickup_id: form.pickupId || null,
     book_date: form.bookDate,
     book_time: form.bookTime.trim() || null,
+    awb_no: opts?.manualAwbNo?.trim() || null,
     reference_no: form.referenceNo.trim() || null,
     airline: form.airline.trim() || null,
     service: form.service.code.trim() || form.service.name.trim() || null,

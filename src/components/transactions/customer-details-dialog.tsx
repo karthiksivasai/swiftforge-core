@@ -321,7 +321,7 @@ export function CustomerDetailsDialog({
                   onValueChange={(v) => patch({ documentType: v === NONE ? "" : v })}
                 >
                   <SelectTrigger id="cust-doc-type" className="h-8 text-[13px]">
-                    <SelectValue placeholder="Select" />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NONE}>Select</SelectItem>
