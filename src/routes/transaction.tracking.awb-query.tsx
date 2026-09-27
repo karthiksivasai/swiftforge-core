@@ -28,7 +28,12 @@ import { type LookupKey, type LookupOption } from "@/lib/master-lookups";
 import { useAuth } from "@/lib/auth";
 import { toErrorMessage } from "@/lib/masters/screen";
 import { getShipmentTracking } from "@/lib/transactions/resources/tracking";
-import { searchAwbShipments, fetchAwbSubTables } from "@/lib/transactions/resources/awbQuery";
+import {
+  searchAwbShipments,
+  fetchAwbSubTables,
+  lookupAwbLabels,
+  type SubTablesResult,
+} from "@/lib/transactions/resources/awbQuery";
 import { mapTrackingToAwbQuery } from "@/lib/transactions/trackingUiMap";
 import { getCarrierAdapter } from "@/lib/integrations/adapter";
 import {
@@ -364,190 +369,27 @@ const emptyFilter = (): FilterForm => ({
   rto: false,
 });
 
-const buildSeedRecord = (awbNo: string): AwbQueryRecord => ({
-  awbNo,
-  lastAwbNo: "30403927",
-  podUser: "SURYAA",
-  userId: "SURYAA",
-  customerDetails: "TPC ADDANKI\nCode: TPCADDA\nHYDERABAD, TELANGANA\nPhone: 9848012345",
-  shipperDetails: "ELURI RAJESH\nPlot 12, Industrial Area\nHYDERABAD — 500032",
-  consigneeDetails: "ELURI SIVARAMAKRISHNA\n42 Collins Street\nMELBOURNE, AUSTRALIA — 3000",
-  podStatus: "In Transit",
-  podStatusDate: "04/07/2026",
-  podStatusTime: "1430",
-  podReceiverName: "",
-  podRemark: "",
-  podReceiveDate: "",
-  vendorName: "DTDC AUSTRALIA",
-  deliveryVendor: "DTAU",
-  forwardingAwb: `FWD${awbNo}`,
-  deliveryAwb: `DLV${awbNo}`,
-  returnAwbNo: "",
-  flightNo: "QF-840",
-  airlines: "QANTAS",
-  mastAwbNo: "80738142580",
-  cdNo: "CD-24002",
-  obcName: "DTDC AUSTRALIA",
-  shipmentDetails: {
-    date: "04/07/2026",
-    dispatchDate: "04/07/2026",
-    origin: "HYD",
-    destination: "AU",
-    productType: "SPX",
-    product: "International",
-    vendor: "DTAU",
-    service: "EXPRESS",
-    shipValue: "7185.00",
-    pcs: "1",
-    weight: "36.000",
-    vWgt: "36.000",
-    content: "Documents",
-    instruction: "Handle with care",
-    cod: "0.00",
-    manifestNo: "0044",
-    invoiceNo: "INV-2026-441",
-    payment: "Credit",
-    inscanWeight: "36.000",
-    inscanRemark: "",
-    refNo: `REF${awbNo}`,
-    masterAwbNo: "80738142580",
-    commercial: "Yes",
-    oda: "No",
-    shipmentType: "Export",
-    pincodeType: "Metro",
-    customerInvoice: "INV-2026-441",
-    csbType: "CSB 4",
-    drsNo: "",
-    vehicleNo: "",
-    remark: "",
-    fieldExecutive: "",
-  },
-  progress: [
-    {
-      userId: "SURYAA",
-      date: "04/07/2026",
-      time: "1015",
-      serviceCenter: "HYD",
-      statusDetails: "AWB Booked",
-    },
-    {
-      userId: "SURYAA",
-      date: "04/07/2026",
-      time: "1130",
-      serviceCenter: "HYD",
-      statusDetails: "Shipment Picked Up",
-    },
-    {
-      userId: "OPS01",
-      date: "04/07/2026",
-      time: "1430",
-      serviceCenter: "HYD",
-      statusDetails: "Departed From Facility",
-    },
-  ],
-  comments: [
-    { userId: "SURYAA", date: "04/07/2026", time: "1016", comment: "Booking confirmed", file: "" },
-  ],
-  shipmentLog: [
-    { userId: "SURYAA", date: "04/07/2026", time: "1015", message: "AWB entry created" },
-    { userId: "OPS01", date: "04/07/2026", time: "1430", message: "Manifest 0044 assigned" },
-  ],
-  volumetric: [
-    {
-      awbNo,
-      agentAwbNo: "",
-      actualWeight: "36.000",
-      pieces: "1",
-      length: "40",
-      width: "30",
-      height: "20",
-      volumetricWeight: "36.000",
-      chargeWeight: "36.000",
-    },
-  ],
-  proforma: [
-    {
-      boxNo: "1",
-      packageNo: "1",
-      description: "Documents",
-      hsnCode: "4911",
-      quantity: "1",
-      unit: "PCS",
-      rate: "7185.00",
-      amount: "7185.00",
-      weight: "36.000",
-    },
-  ],
-  inscan: [
-    {
-      awbNo,
-      vendorNo: "DTAU",
-      weight: "36.000",
-      length: "40",
-      breadth: "30",
-      height: "20",
-      volWeight: "36.000",
-    },
-  ],
-  manifest: [
-    { awbNo, maniNo: "0044", maniDate: "04/07/2026", bag: "1", weight: "36.000", pcs: "1" },
-  ],
-  manifestInscan: [
-    {
-      awbNo,
-      maniNo: "0044",
-      location: "HYD",
-      recDate: "04/07/2026",
-      inscanLocation: "HYD HUB",
-      remark: "",
-      recWeight: "36.000",
-    },
-  ],
-  statusDetails: [
-    { user: "SURYAA", date: "04/07/2026", time: "1015", status: "Booked", remarks: "AWB created" },
-    {
-      user: "OPS01",
-      date: "04/07/2026",
-      time: "1430",
-      status: "In Transit",
-      remarks: "Manifest assigned",
-    },
-  ],
+const emptySubTables = (): SubTablesResult => ({
+  volumetric: [],
+  inscan: [],
+  manifest: [],
+  manifestInscan: [],
+  proforma: [],
+  vendorName: "",
+  deliveryVendor: "",
+  mastAwbNo: "",
+  productType: "",
+  csbType: "",
+  inscanWeight: "",
+  inscanRemark: "",
+  customerDetails: "",
+  podUser: "",
+  podStatusTime: "",
+  cdNo: "",
+  obcName: "",
+  dispatchDate: "",
+  details: {},
 });
-
-const SEED_AWB_NUMBERS = [
-  "30403918",
-  "30403919",
-  "30403920",
-  "30403921",
-  "30403922",
-  "30403923",
-  "30403924",
-  "30403925",
-  "30403926",
-  "30403927",
-];
-
-const seedFilterRows = (): FilterResultRow[] =>
-  SEED_AWB_NUMBERS.map((awbNo, index) => ({
-    id: crypto.randomUUID(),
-    masterAwbNo: "80738142580",
-    awbNo,
-    bookingDate: "04/07/2026",
-    runNo: String(index + 1),
-    airline: index % 2 === 0 ? "QF" : "AI",
-    shipper: "ELURI RAJESH",
-    consignee: "ELURI SIVARAMAKRISHNA",
-    city: index % 2 === 0 ? "MELBOURNE" : "NEW YORK",
-    destination: index % 2 === 0 ? "AU" : "US",
-    pieces: "1",
-    chargeWeight: "36.000",
-    totalAmount: "7185.00",
-    forwarder: "DTAU",
-    deliveryDate: "",
-    paymentType: "Credit",
-    manifestType: "Outgoing",
-  }));
 
 export const Route = createFileRoute("/transaction/tracking/awb-query")({
   head: () => ({
@@ -568,24 +410,18 @@ function AwbQueryPage() {
   const [filterForm, setFilterForm] = useState<FilterForm>(emptyFilter());
   const [filterResults, setFilterResults] = useState<FilterResultRow[]>([]);
   const [filterSearched, setFilterSearched] = useState(false);
+  const [filterTotal, setFilterTotal] = useState(0);
   const [filterPage, setFilterPage] = useState(1);
 
   const patchFilter = (patch: Partial<FilterForm>) => setFilterForm((f) => ({ ...f, ...patch }));
 
-  const runAwbQuery = async (awb?: string) => {
+  const runAwbQuery = async (awb?: string, options?: { quiet?: boolean }) => {
     const q = (awb ?? awbInput).trim();
     if (!q) return toast.error("AWB No. is required");
 
     if (!authed) {
-      if (!SEED_AWB_NUMBERS.includes(q)) {
-        setQueryResult(null);
-        return toast.error(`No record found for AWB ${q}`);
-      }
-      const record = buildSeedRecord(q);
-      setQueryResult(record);
-      setLastAwbNo(q);
-      setAwbInput(q);
-      return toast.success(`Loaded AWB ${q} (demo)`);
+      setQueryResult(null);
+      return toast.error("Sign in to query an AWB");
     }
 
     try {
@@ -620,53 +456,88 @@ function AwbQueryPage() {
           /* carrier columns optional if migration not applied yet */
         }
       }
-      let subTables = { volumetric: [], inscan: [], manifest: [], manifestInscan: [] };
+      let subTables = emptySubTables();
       try {
         subTables = await fetchAwbSubTables(mapped.awbNo, mapped.shipmentId);
       } catch (subErr) {
         console.warn("Failed to load some sub-tables:", subErr);
       }
+      const shipmentDetails = { ...mapped.shipmentDetails };
+      for (const [key, value] of Object.entries(subTables.details)) {
+        if (value) shipmentDetails[key] = value;
+      }
+      const labels = await lookupAwbLabels({
+        userIds: [
+          ...mapped.progress.map((line) => line.userId),
+          ...mapped.comments.map((line) => line.userId),
+          ...mapped.shipmentLog.map((line) => line.userId),
+          ...mapped.statusDetails.map((line) => line.user),
+        ],
+        branchIds: mapped.progress.map((line) => line.branchId),
+        fileIds: mapped.comments.map((line) => line.file),
+      });
+      const staffName = (id: string) => labels.users[id] || "";
+      const progress = mapped.progress.map((line) => ({
+        userId: staffName(line.userId),
+        date: line.date,
+        time: line.time,
+        serviceCenter: line.serviceCenter || labels.branches[line.branchId] || "",
+        statusDetails: line.statusDetails,
+      }));
+      const comments = mapped.comments.map((line) => ({
+        ...line,
+        userId: staffName(line.userId),
+        file: labels.files[line.file] || "",
+      }));
+      const shipmentLog = mapped.shipmentLog.map((line) => ({
+        ...line,
+        userId: staffName(line.userId),
+      }));
+      const statusDetails = mapped.statusDetails.map((line) => ({
+        ...line,
+        user: staffName(line.user),
+      }));
 
       setQueryResult({
         awbNo: mapped.awbNo,
         lastAwbNo: mapped.lastAwbNo,
-        podUser: mapped.podUser,
+        podUser: subTables.podUser || mapped.podUser,
         userId: mapped.userId,
-        customerDetails: mapped.customerDetails,
+        customerDetails: subTables.customerDetails || mapped.customerDetails,
         shipperDetails: mapped.shipperDetails,
         consigneeDetails: mapped.consigneeDetails,
         podStatus: mapped.podStatus,
         podStatusDate: mapped.podStatusDate,
-        podStatusTime: mapped.podStatusTime,
+        podStatusTime: mapped.podStatusTime || subTables.podStatusTime,
         podReceiverName: mapped.podReceiverName,
         podRemark: mapped.podRemark,
         podReceiveDate: mapped.podReceiveDate,
-        vendorName: mapped.vendorName,
-        deliveryVendor: mapped.deliveryVendor,
+        vendorName: subTables.vendorName || mapped.vendorName,
+        deliveryVendor: subTables.deliveryVendor || mapped.deliveryVendor,
         forwardingAwb: mapped.forwardingAwb,
         deliveryAwb: mapped.deliveryAwb,
         returnAwbNo: mapped.returnAwbNo,
         flightNo: mapped.flightNo,
         airlines: mapped.airlines,
-        mastAwbNo: mapped.mastAwbNo,
-        cdNo: mapped.cdNo,
-        obcName: mapped.obcName,
-        shipmentDetails: mapped.shipmentDetails,
-        progress: mapped.progress,
-        comments: mapped.comments,
-        shipmentLog: mapped.shipmentLog,
+        mastAwbNo: subTables.mastAwbNo || mapped.mastAwbNo,
+        cdNo: subTables.cdNo || mapped.cdNo,
+        obcName: subTables.obcName || mapped.obcName,
+        shipmentDetails,
+        progress,
+        comments,
+        shipmentLog,
         volumetric: subTables.volumetric,
-        proforma: [],
+        proforma: subTables.proforma,
         inscan: subTables.inscan,
         manifest: subTables.manifest,
         manifestInscan: subTables.manifestInscan,
-        statusDetails: mapped.statusDetails,
+        statusDetails,
         shipmentId: mapped.shipmentId,
         ...carrierMeta,
       });
       setLastAwbNo(q);
       setAwbInput(q);
-      toast.success(`Loaded AWB ${q}`);
+      if (!options?.quiet) toast.success(`Loaded AWB ${q}`);
     } catch (err) {
       toast.error(toErrorMessage(err));
     }
@@ -677,16 +548,37 @@ function AwbQueryPage() {
     void runAwbQuery(lastAwbNo);
   };
 
+  const handleOk = () => {
+    if (!queryResult?.awbNo) return toast.error("Load an AWB first");
+    void runAwbQuery(queryResult.awbNo, { quiet: true });
+  };
+
+  const openStoredLocation = (label: string, details: string) => {
+    const query = details
+      .split("\n")
+      .map((line) => line.replace(/^PIN:\s*/i, "").trim())
+      .filter(Boolean)
+      .join(", ");
+    if (!query) return toast.error(`No ${label} address is stored on this AWB`);
+    window.open(
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
+
   const resolveQueryCarrier = () =>
     queryResult?.carrierProviderCode ||
     normalizeVendorToCarrierCode(queryResult?.vendorName) ||
-    "FEDEX";
+    null;
 
   const handleQueryCarrierTrack = async () => {
     if (!queryResult?.shipmentId) return toast.error("Load an AWB first");
-    if (!authed) return toast.success("Tracking refreshed (demo)");
+    if (!authed) return toast.error("Sign in to query an AWB");
+    const carrier = resolveQueryCarrier();
+    if (!carrier) return toast.error("No carrier is stored on this AWB");
     try {
-      const result = await getCarrierAdapter(resolveQueryCarrier()).track({
+      const result = await getCarrierAdapter(carrier).track({
         shipmentId: queryResult.shipmentId,
         rowVersion: queryResult.rowVersion ?? 1,
       });
@@ -700,9 +592,11 @@ function AwbQueryPage() {
 
   const handleQueryCarrierLabel = async () => {
     if (!queryResult?.shipmentId) return toast.error("Load an AWB first");
-    if (!authed) return toast.success("Label metadata ready (demo)");
+    if (!authed) return toast.error("Sign in to query an AWB");
+    const carrier = resolveQueryCarrier();
+    if (!carrier) return toast.error("No carrier is stored on this AWB");
     try {
-      const result = await getCarrierAdapter(resolveQueryCarrier()).label({
+      const result = await getCarrierAdapter(carrier).label({
         shipmentId: queryResult.shipmentId,
         rowVersion: queryResult.rowVersion ?? 1,
       });
@@ -723,15 +617,30 @@ function AwbQueryPage() {
 
     setFilterSearching(true);
     try {
-      const outcome = await searchAwbShipments(filterForm);
-      if (outcome.error) {
-        toast.error(outcome.error);
-        return;
+      const pageSize = 500;
+      const rows: FilterResultRow[] = [];
+      let total = 0;
+      let offset = 0;
+      for (;;) {
+        const outcome = await searchAwbShipments(filterForm, pageSize, offset);
+        if (outcome.error) {
+          toast.error(outcome.error);
+          return;
+        }
+        total = outcome.totalCount;
+        rows.push(...outcome.rows);
+        offset += outcome.rows.length;
+        if (outcome.rows.length === 0 || rows.length >= total || rows.length >= 10000) break;
       }
-      setFilterResults(outcome.rows);
+      setFilterResults(rows);
+      setFilterTotal(total);
       setFilterSearched(true);
       setFilterPage(1);
-      toast.success(`Found ${outcome.rows.length} record(s)`);
+      toast.success(
+        total > rows.length
+          ? `Showing ${rows.length} of ${total} record(s)`
+          : `Found ${total} record(s)`,
+      );
     } catch (err) {
       toast.error(toErrorMessage(err));
     } finally {
@@ -742,6 +651,7 @@ function AwbQueryPage() {
   const handleFilterReset = () => {
     setFilterForm(emptyFilter());
     setFilterResults([]);
+    setFilterTotal(0);
     setFilterSearched(false);
     setFilterPage(1);
     toast.success("Filters reset");
@@ -759,8 +669,8 @@ function AwbQueryPage() {
   const metaLabels = useMemo(
     () => ({
       lastAwbNo: queryResult?.lastAwbNo || lastAwbNo || "—",
-      podUser: queryResult?.podUser || "SURYAA",
-      userId: queryResult?.userId || "SURYAA",
+      podUser: queryResult?.podUser || "—",
+      userId: queryResult?.userId || "—",
     }),
     [queryResult, lastAwbNo],
   );
@@ -773,7 +683,7 @@ function AwbQueryPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">AWB Query</h1>
         <p className="text-sm text-muted-foreground">
           Search AWB records and view shipping, additional, and filter details.
-          {authed ? " Connected to live backend." : " Demo mode — sign in for live tracking."}
+          {authed ? " Connected to live backend." : ""}
         </p>
       </div>
 
@@ -871,33 +781,31 @@ function AwbQueryPage() {
                   </div>
                 </FormSection>
               ) : null}
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr_1fr_auto]">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(14rem,0.85fr)_minmax(20rem,1.25fr)_minmax(20rem,1.25fr)_auto]">
                 <DetailPanel title="Customer Details" text={queryResult?.customerDetails ?? ""} />
                 <FormSection title="POD Details">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <ReadOnlyField label="Status" value={queryResult?.podStatus} />
-                    <ReadOnlyField label="Status Date" value={queryResult?.podStatusDate} />
-                    <ReadOnlyField label="Status Time" value={queryResult?.podStatusTime} />
-                    <ReadOnlyField label="Receiver Name" value={queryResult?.podReceiverName} />
-                    <ReadOnlyField label="Remark" value={queryResult?.podRemark} />
-                    <ReadOnlyField label="POD Receive Date" value={queryResult?.podReceiveDate} />
+                    <QueryInput label="Status" value={queryResult?.podStatus} />
+                    <QueryInput label="Status Date" value={queryResult?.podStatusDate} />
+                    <QueryInput label="Status Time" value={queryResult?.podStatusTime} />
+                    <QueryInput label="Receiver Name" value={queryResult?.podReceiverName} />
+                    <QueryInput label="Remark" value={queryResult?.podRemark} />
+                    <QueryInput label="POD Receive Date" value={queryResult?.podReceiveDate} />
                   </div>
                 </FormSection>
                 <FormSection title="Forwarding Details">
-                  <div className="space-y-2">
-                    <ReadOnlyField label="Vendor Name" value={queryResult?.vendorName} />
-                    <ReadOnlyField label="Delivery Vendor" value={queryResult?.deliveryVendor} />
-                    <ReadOnlyField label="Forwarding AWB" value={queryResult?.forwardingAwb} />
-                    <ReadOnlyField label="Delivery AWB" value={queryResult?.deliveryAwb} />
-                    <ReadOnlyField label="Return AWB No." value={queryResult?.returnAwbNo} />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <QueryInput label="Vendor Name" value={queryResult?.vendorName} />
+                    <QueryInput label="Delivery Vendor" value={queryResult?.deliveryVendor} />
+                    <QueryInput label="Forwarding AWB" value={queryResult?.forwardingAwb} />
+                    <QueryInput label="Delivery AWB" value={queryResult?.deliveryAwb} />
+                    <QueryInput label="Return AWB No." value={queryResult?.returnAwbNo} />
                   </div>
                 </FormSection>
                 <div className="flex flex-col gap-2 xl:min-w-[10rem]">
                   <Button
                     className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-                    onClick={() =>
-                      toast.info("Pickup location map will be enabled with backend wiring")
-                    }
+                    onClick={() => openStoredLocation("pickup", queryResult?.shipperDetails ?? "")}
                   >
                     <MapPin className="mr-2 h-4 w-4" />
                     Pickup Location
@@ -905,7 +813,7 @@ function AwbQueryPage() {
                   <Button
                     className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
                     onClick={() =>
-                      toast.info("Delivery location map will be enabled with backend wiring")
+                      openStoredLocation("delivery", queryResult?.consigneeDetails ?? "")
                     }
                   >
                     <MapPin className="mr-2 h-4 w-4" />
@@ -913,7 +821,7 @@ function AwbQueryPage() {
                   </Button>
                   <Button
                     className="bg-emerald-600 text-white hover:bg-emerald-600/90"
-                    onClick={() => toast.success("AWB query confirmed")}
+                    onClick={handleOk}
                   >
                     <Check className="mr-2 h-4 w-4" />
                     Ok
@@ -1454,7 +1362,7 @@ function AwbQueryPage() {
 
               <FormSection title="Additional Filter">
                 <p className="mb-3 text-sm text-muted-foreground">
-                  Total Count: {filterSearched ? filterResults.length : "—"}
+                  Total Count: {filterSearched ? filterTotal : "—"}
                 </p>
                 <div className="overflow-x-auto rounded-md border">
                   <table className="w-full min-w-[1400px] caption-bottom text-sm">
@@ -1554,6 +1462,14 @@ function DetailPanel({ title, text }: { title: string; text: string }) {
         {text || "—"}
       </pre>
     </FormSection>
+  );
+}
+
+function QueryInput({ label, value }: { label: string; value?: string }) {
+  return (
+    <FieldWrapper label={label} borderLabel>
+      <Input value={value ?? ""} readOnly />
+    </FieldWrapper>
   );
 }
 

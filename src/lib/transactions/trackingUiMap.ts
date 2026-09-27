@@ -21,12 +21,19 @@ const formatTime = (t: string | null | undefined) => {
 const partyBlock = (party: unknown, fallbackName?: string) => {
   if (party && typeof party === "object") {
     const p = party as Record<string, unknown>;
+    const name = [p.company_name, p.contact_name, p.name]
+      .map((x) => (x == null ? "" : String(x).trim()))
+      .filter(Boolean)
+      .join("\n");
+    const pin = p.pincode ?? p.pin_code;
+    const phone = p.telephone ?? p.phone ?? p.mobile;
     const lines = [
-      p.name,
+      name,
       p.address1 ?? p.address,
+      p.address2,
       [p.city, p.state, p.country].filter(Boolean).join(", "),
-      p.pin_code ? `PIN: ${p.pin_code}` : null,
-      p.phone ?? p.mobile,
+      pin ? `PIN: ${pin}` : null,
+      phone,
     ]
       .map((x) => (x == null ? "" : String(x).trim()))
       .filter(Boolean);
@@ -62,6 +69,7 @@ export type AwbQueryMapped = {
   shipmentDetails: Record<string, string>;
   progress: Array<{
     userId: string;
+    branchId: string;
     date: string;
     time: string;
     serviceCenter: string;
@@ -107,11 +115,11 @@ export function mapTrackingToAwbQuery(result: ShipmentTrackingResult): AwbQueryM
   if (!result.found || !result.shipment) return null;
   const s = result.shipment;
   const awbNo = String(result.awb_no ?? s.awb_no ?? "");
-  const pod = result.pod;
   const status = String(result.current_status ?? s.current_status ?? "");
 
   const progress = (result.tracking_events ?? []).map((ev) => ({
-    userId: String(ev.user_id ?? "SYSTEM").slice(0, 8),
+    userId: ev.user_id ? String(ev.user_id) : "",
+    branchId: ev.branch_id ? String(ev.branch_id) : "",
     date: formatDisplayDate(String(ev.event_date ?? "")),
     time: formatTime(String(ev.event_time ?? "")),
     serviceCenter: String(
@@ -123,18 +131,18 @@ export function mapTrackingToAwbQuery(result: ShipmentTrackingResult): AwbQueryM
   const comments = (result.comments ?? []).map((c) => {
     const at = String(c.commented_at ?? "");
     return {
-      userId: String(c.created_by ?? "").slice(0, 8),
+      userId: c.created_by ? String(c.created_by) : "",
       date: formatDisplayDate(at),
       time: at.includes("T") ? formatTime(at.split("T")[1]) : "",
       comment: String(c.comment ?? ""),
-      file: c.file_id ? String(c.file_id).slice(0, 8) : "",
+      file: c.file_id ? String(c.file_id) : "",
     };
   });
 
   const shipmentLog = (result.shipment_events ?? []).map((e) => {
     const at = String(e.created_at ?? "");
     return {
-      userId: String(e.created_by ?? "").slice(0, 8),
+      userId: e.created_by ? String(e.created_by) : "",
       date: formatDisplayDate(at),
       time: at.includes("T") ? formatTime(at.split("T")[1]) : "",
       message: String(e.event_text ?? e.event_type ?? ""),
@@ -144,7 +152,7 @@ export function mapTrackingToAwbQuery(result: ShipmentTrackingResult): AwbQueryM
   const holds = (result.holds ?? []).map((h) => {
     const at = String(h.at ?? "");
     return {
-      user: String(h.user_id ?? "").slice(0, 8),
+      user: h.user_id ? String(h.user_id) : "",
       date: formatDisplayDate(at),
       time: at.includes("T") ? formatTime(at.split("T")[1]) : "",
       status: String(h.action ?? ""),
@@ -155,7 +163,7 @@ export function mapTrackingToAwbQuery(result: ShipmentTrackingResult): AwbQueryM
   return {
     awbNo,
     lastAwbNo: awbNo,
-    podUser: pod ? "POD" : "",
+    podUser: "",
     userId: "",
     customerDetails: [s.customer_code, s.customer_name].filter(Boolean).map(String).join("\n"),
     shipperDetails: partyBlock(s.shipper, String(s.shipper_name ?? "")),
@@ -197,7 +205,7 @@ export function mapTrackingToAwbQuery(result: ShipmentTrackingResult): AwbQueryM
       payment: String(s.payment_type ?? ""),
       airline: String(s.airline ?? s.airline_code ?? ""),
       inscanWeight: s.inscan_weight != null ? String(s.inscan_weight) : "",
-      club: s.is_clubbed ? "Yes" : "No",
+      club: typeof s.is_clubbed === "boolean" ? (s.is_clubbed ? "Yes" : "No") : "",
       hold: result.is_hold ? "Yes" : "No",
       inscanRemark: String(s.inscan_remark ?? ""),
       refNo: String(s.reference_no ?? ""),
@@ -211,7 +219,7 @@ export function mapTrackingToAwbQuery(result: ShipmentTrackingResult): AwbQueryM
       commercial: s.is_commercial != null ? (s.is_commercial ? "Yes" : "No") : "",
       oda: s.is_oda != null ? (s.is_oda ? "Yes" : "No") : "",
       codType: String(s.cod_type ?? ""),
-      shipmentType: status,
+      shipmentType: "",
       pincodeType: String(s.pincode_type ?? ""),
       customerInvoice: String(s.customer_invoice ?? ""),
       fieldExecutive: String(s.field_executive ?? ""),
