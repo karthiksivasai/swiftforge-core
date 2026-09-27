@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 
@@ -6,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { FieldWrapper, MasterBreadcrumb } from "@/components/master-table-kit";
+import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
 import {
   findShipmentByAwb,
   isAlreadyMisrouted,
@@ -54,19 +57,36 @@ export const Route = createFileRoute("/transaction/miss-route-scan")({
 });
 
 function MissRouteScanPage() {
+  const { isAuthenticated, profile } = useAuth();
   const [records, setRecords] = useState<MissRouteScanRecord[]>([]);
   const [sessionCount, setSessionCount] = useState(0);
   const [awbNo, setAwbNo] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const branchQuery = useQuery({
+    queryKey: ["userBranch", profile?.home_branch_id],
+    queryFn: async () => {
+      if (!profile?.home_branch_id) return null;
+      const { data, error } = await supabase
+        .from("branches")
+        .select("id, code")
+        .eq("id", profile.home_branch_id)
+        .maybeSingle();
+      if (error || !data?.code) return null;
+      return data as { id: string; code: string };
+    },
+    enabled: Boolean(isAuthenticated && profile?.home_branch_id),
+  });
+
   const displayScanDate = todayIso();
   const displayScanTime = nowScanTime();
-  const serviceCenter = "HYD";
+  const serviceCenter = branchQuery.data?.code ?? "";
 
   const handleSave = async () => {
     if (saving) return;
 
     const awb = awbNo.trim();
+    if (!serviceCenter) return toast.error("Service Center is required");
     if (!awb) return toast.error("AWB No is required");
 
     setSaving(true);
@@ -104,7 +124,7 @@ function MissRouteScanPage() {
         scanDate: displayScanDate,
         scanTime: displayScanTime,
         serviceCenter,
-        awbNo: awb,
+        awbNo: outcome.awb_no || awb,
         event: MISS_ROUTE_EVENT,
       };
 
@@ -173,6 +193,7 @@ function MissRouteScanPage() {
 
             <Button
               onClick={handleSave}
+              disabled={saving || !serviceCenter}
               className="min-w-24 bg-emerald-600 text-white hover:bg-emerald-600/90"
             >
               Save

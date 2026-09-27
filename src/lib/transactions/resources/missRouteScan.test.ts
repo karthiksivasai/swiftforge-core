@@ -16,6 +16,18 @@ describe("Miss Route Scan Backend Resource & Validation Logic", () => {
     expect(isMisrouted).toBe(false);
   });
 
+  it("rejects recordMissRoute when the service center is empty", async () => {
+    const res = await recordMissRoute({
+      awbNo: "AWB1001",
+      scanDate: "2026-08-20",
+      scanTime: "2100",
+      serviceCenter: "",
+      event: "Shipment Mis routed",
+    });
+    expect(res.success).toBe(false);
+    expect(res.error).toBe("Service Center is required");
+  });
+
   it("rejects recordMissRoute when AWB is empty", async () => {
     const res = await recordMissRoute({
       awbNo: "",
