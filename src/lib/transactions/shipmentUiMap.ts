@@ -41,6 +41,7 @@ type PiecesLine = {
   height: string;
   volWeight: string;
   chargeWeight: string;
+  division?: string;
 };
 
 type ChargeLine = {
@@ -95,6 +96,9 @@ export type AwbLiveForm = {
   balanceAmount: string;
   cashReceiptDate: string;
   lock: boolean;
+  expectedDeliveryDate?: string;
+  notifyEmail?: boolean;
+  notifySms?: boolean;
   forwardingNo: string;
   deliveryNo: string;
   flightNo: string;
@@ -270,6 +274,9 @@ export function uiFormToShipmentPayload(
       forwarding: form.forwarding ?? {},
       kyc: form.kyc ?? {},
       masterAwbNo: form.masterAwbNo?.trim() || "",
+      expectedDeliveryDate: form.expectedDeliveryDate?.trim() || "",
+      notifyEmail: form.notifyEmail === true,
+      notifySms: form.notifySms === true,
     },
   };
 
@@ -280,7 +287,7 @@ export function uiFormToShipmentPayload(
     length: l.length || null,
     breadth: l.breadth || null,
     height: l.height || null,
-    divisor: null,
+    divisor: l.division?.trim() || null,
     vol_weight: l.volWeight || null,
     charge_weight: l.chargeWeight || null,
   }));
@@ -436,6 +443,7 @@ export function dbShipmentToFormPatch(
       height: p.height != null ? String(p.height) : "",
       volWeight: String(p.vol_weight ?? ""),
       chargeWeight: String(p.charge_weight ?? ""),
+      division: p.divisor != null ? String(p.divisor) : "",
     })),
     chargeLines: children.charges
       .filter((c) => String(c.side ?? "CUSTOMER").toUpperCase() !== "VENDOR")
@@ -455,6 +463,9 @@ export function dbShipmentToFormPatch(
         chargesType: c.charges_type,
       })),
     masterAwbNo: String(extras.masterAwbNo ?? ""),
+    expectedDeliveryDate: String(extras.expectedDeliveryDate ?? ""),
+    notifyEmail: extras.notifyEmail === true,
+    notifySms: extras.notifySms === true,
     proforma: extras.proforma,
     forwarding: {
       ...forwardingExtra,

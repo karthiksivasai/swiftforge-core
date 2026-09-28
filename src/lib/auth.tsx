@@ -91,8 +91,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [permissions, setPermissions] = useState<Record<string, PermissionActions>>({});
   const appSessionId = useRef<string | null>(null);
+  const ignoreAuthEvent = useRef(false);
 
-  const loadContext = useCallback(async (activeSession: Session | null) => {
+  const loadContext = useCallback(async (activeSession: Session | null, options?: { fresh?: boolean }) => {
     setSession(activeSession);
     if (!activeSession) {
       setProfile(null);
@@ -101,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const sessionId =
       typeof window !== "undefined" ? window.localStorage.getItem(CMS_SESSION_STORAGE_KEY) : null;
-    if (sessionId) {
+    if (!options?.fresh && sessionId) {
       const { data: active, error: sessionError } = await supabase.rpc("my_session_is_active", {
         p_session_id: sessionId,
       });
@@ -152,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (ignoreAuthEvent.current) return;
       void loadContext(nextSession ?? null);
     });
 
@@ -171,19 +173,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!responseOk || !body.access_token || !body.refresh_token) {
         throw new Error(body.error || "Invalid username or password");
       }
-      const { error } = await supabase.auth.setSession({
-        access_token: body.access_token,
-        refresh_token: body.refresh_token,
-      });
-      if (error) throw error;
       if (typeof body.session_id === "string") {
         appSessionId.current = body.session_id;
         if (typeof window !== "undefined") {
           window.localStorage.setItem(CMS_SESSION_STORAGE_KEY, body.session_id);
         }
       }
-      const { data } = await supabase.auth.getSession();
-      await loadContext(data.session ?? null);
+      ignoreAuthEvent.current = true;
+      try {
+        const { data, error } = await supabase.auth.setSession({
+          access_token: body.access_token,
+          refresh_token: body.refresh_token,
+        });
+        if (error) throw error;
+        void loadContext(data.session ?? null, { fresh: true });
+      } finally {
+        ignoreAuthEvent.current = false;
+      }
     },
     [loadContext],
   );
