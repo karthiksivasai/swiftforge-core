@@ -179,7 +179,7 @@ export async function loginLocked(tenantId: string, username: string): Promise<b
     .select("id", { count: "exact", head: true })
     .eq("tenant_id", tenantId)
     .eq("event", "LOGIN_FAILED")
-    .ilike("username", username)
+    .eq("username", username)
     .gte("created_at", since);
   return (count ?? 0) >= LOCKOUT_LIMIT;
 }
