@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { RefreshCw, Plus, Search, Pencil, Trash2 } from "lucide-react";
+import { RefreshCw, Plus, Search, Pencil, Trash2, Download, Upload, FileSpreadsheet, FileUp } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -28,14 +28,21 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   FieldWrapper,
   IconButton,
   MasterBreadcrumb,
   PAGE_SIZE,
   TablePager,
 } from "@/components/master-table-kit";
-import { DataIoToolbar } from "@/components/data-io-toolbar";
-import { MasterLookupDialog } from "@/components/master-lookup-dialog";
+import { exportTable, parseTabularFile } from "@/lib/io/tableIo";
+
 import type { LookupOption } from "@/lib/master-lookups";
 
 import { useAuth } from "@/lib/auth";
@@ -49,7 +56,7 @@ import {
 } from "@/lib/masters/resources/airlines";
 import { airlineCreateSchema, airlineUpdateSchema } from "@/lib/masters/schemas/airlines";
 import { useMasterList, toErrorMessage, formatImportToast } from "@/lib/masters/screen";
-import { LookupCombobox } from "@/components/masters/lookup-combobox";
+import { SearchableLookupPair } from "@/components/masters/searchable-lookup-pair";
 
 type LookupPair = { code: string; name: string };
 
@@ -128,6 +135,8 @@ function AirlinePage() {
   const [form, setForm] = useState<AirlineForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<AirlineRow | null>(null);
   const [saving, setSaving] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
 
   const rows: AirlineRow[] = authed
     ? (live.rows as (AirlineDbRow & Record<string, unknown>)[]).map(rowToView)
@@ -189,6 +198,17 @@ function AirlinePage() {
   };
 
   const handleSave = async () => {
+    if (!form.airlineName.trim()) return toast.error("Airline Name is required");
+    if (!form.product.code?.trim() && !form.product.name?.trim() && !form.productId)
+      return toast.error("Product is required");
+
+    const isDuplicate = rows.some(
+      (r) =>
+        r.airlineName.toLowerCase() === form.airlineName.trim().toLowerCase() &&
+        r.id !== editing?.id,
+    );
+    if (isDuplicate) return toast.error("Airline Name already exists");
+
     if (authed) {
       const raw = {
         name: form.airlineName.trim().toUpperCase(),
@@ -203,11 +223,11 @@ function AirlinePage() {
             rowVersion: editing.row_version ?? 0,
             patch,
           });
-          toast.success("Airline updated");
+          toast.success("Airline saved successfully");
         } else {
           const values = airlineCreateSchema.parse(raw);
           await rc.create.mutateAsync(values);
-          toast.success("Airline added");
+          toast.success("Airline saved successfully");
         }
         closeForm();
       } catch (err) {
@@ -219,10 +239,6 @@ function AirlinePage() {
     }
 
     // Demo mode: preserve the original lightweight validation + UX.
-    if (!form.airlineName.trim()) return toast.error("Airline Name is required");
-    if (!form.product.code.trim() && !form.product.name.trim())
-      return toast.error("Product is required");
-
     const payload = {
       airlineName: form.airlineName.trim().toUpperCase(),
       productCode: form.product.code.trim(),
@@ -232,10 +248,10 @@ function AirlinePage() {
       setDemoRows((prev) =>
         prev.map((r) => (r.id === editing.id ? { ...editing, ...payload } : r)),
       );
-      toast.success("Airline updated");
+      toast.success("Airline saved successfully");
     } else {
       setDemoRows((prev) => [{ id: crypto.randomUUID(), productId: "", ...payload }, ...prev]);
-      toast.success("Airline added");
+      toast.success("Airline saved successfully");
     }
     closeForm();
   };
@@ -246,13 +262,13 @@ function AirlinePage() {
     if (authed) {
       try {
         await rc.remove.mutateAsync({ id: row.id, rowVersion: row.row_version ?? 0 });
-        toast.success(`Deleted ${row.airlineName}`);
+        toast.success("Airline deleted successfully");
       } catch (err) {
         toast.error(toErrorMessage(err, "Could not delete airline"));
       }
     } else {
       setDemoRows((prev) => prev.filter((r) => r.id !== row.id));
-      toast.success(`Deleted ${row.airlineName}`);
+      toast.success("Airline deleted successfully");
     }
     setDeleteTarget(null);
   };
@@ -294,6 +310,62 @@ function AirlinePage() {
     }
   };
 
+  const doImport = async () => {
+    if (!importFile) return;
+    try {
+      const parsed = await parseTabularFile(importFile);
+      if (parsed.rows.length === 0) {
+        toast.error("File is empty");
+        return;
+      }
+      await handleImportRows(parsed.rows);
+      setImportOpen(false);
+      setImportFile(null);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      await exportTable({
+        format: "excel",
+        filename: "airlines",
+        title: "Airlines",
+        columns: [
+          { key: "airlineName", header: "Airlines Name" },
+          { key: "productCode", header: "Product Code" },
+          { key: "productName", header: "Product Name" },
+        ],
+        rows: rows.map((r) => ({
+          airlineName: r.airlineName,
+          productCode: r.productCode,
+          productName: r.productName,
+        })),
+      });
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Export failed"));
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      await exportTable({
+        format: "excel",
+        filename: "airlines_template",
+        title: "Import Airlines from Excel",
+        columns: [
+          { key: "airlineName", header: "Airlines Name" },
+          { key: "productCode", header: "Product Code" },
+          { key: "productName", header: "Product Name" },
+        ],
+        rows: [],
+      });
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to download template"));
+    }
+  };
+
   const handleRefresh = () => {
     setSearch("");
     setColFilters({ airlineName: "", product: "" });
@@ -322,26 +394,20 @@ function AirlinePage() {
                 />
               </FieldWrapper>
               <FieldWrapper label="Product" required>
-                {authed ? (
-                  <LookupCombobox
-                    lookupKey="product"
-                    value={form.productId}
-                    valueLabel={form.product.code || form.product.name}
-                    onChange={(id, item) =>
-                      setForm((f) => ({
-                        ...f,
-                        productId: id,
-                        product: { code: item?.code ?? "", name: item?.name ?? "" },
-                      }))
-                    }
-                    placeholder="Select Product"
-                  />
-                ) : (
-                  <ProductLookupInput
-                    value={form.product}
-                    onChange={(v) => setForm((f) => ({ ...f, product: v }))}
-                  />
-                )}
+                <SearchableLookupPair
+                  lookup="product"
+                  splitCode
+                  namePlaceholder=""
+                  codePlaceholder=""
+                  value={{ id: form.productId, code: form.product.code, name: form.product.name }}
+                  onChange={(v) =>
+                    setForm((f) => ({
+                      ...f,
+                      productId: v.id || "",
+                      product: { code: v.code, name: v.name },
+                    }))
+                  }
+                />
               </FieldWrapper>
             </div>
 
@@ -354,6 +420,42 @@ function AirlinePage() {
                 {saving ? "Saving…" : "Save"}
               </Button>
               <Button variant="destructive" onClick={closeForm}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : importOpen ? (
+        <Card className="overflow-hidden border p-0">
+          <div className="p-4 md:p-6">
+            <Badge className="mb-4 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
+              Import Airlines from Excel
+            </Badge>
+
+            <div className="flex flex-col gap-4 py-4">
+              <p className="text-sm text-muted-foreground">
+                Data should be in same format as per Excel.
+              </p>
+              <div>
+                <Button variant="link" className="p-0 h-auto" onClick={handleDownloadTemplate}>
+                  Download Excel File Format
+                </Button>
+              </div>
+              <div className="grid w-full max-w-sm items-center gap-1.5">
+                <Input 
+                  id="excel-file" 
+                  type="file" 
+                  accept=".xlsx, .xls"
+                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-between">
+              <Button className="bg-emerald-600 text-white hover:bg-emerald-600/90" onClick={doImport}>
+                Import
+              </Button>
+              <Button variant="destructive" onClick={() => { setImportOpen(false); setImportFile(null); }}>
                 Cancel
               </Button>
             </div>
@@ -372,27 +474,14 @@ function AirlinePage() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
               <TooltipProvider delayDuration={200}>
                 <div className="flex items-center gap-1.5">
-                  <DataIoToolbar
-                    export={{
-                      filename: "airlines",
-                      title: "Airlines",
-                      columns: [
-                        { key: "airlineName", header: "Airlines Name" },
-                        { key: "productCode", header: "Product Code" },
-                        { key: "productName", header: "Product Name" },
-                      ],
-                      getRows: () =>
-                        rows.map((r) => ({
-                          airlineName: r.airlineName,
-                          productCode: r.productCode,
-                          productName: r.productName,
-                        })),
-                    }}
-                    import={canAdd ? { onRows: handleImportRows } : null}
-                  />
-                  <IconButton label="Refresh" onClick={handleRefresh}>
-                    <RefreshCw className="h-4 w-4" />
+                  <IconButton label="Export" onClick={handleExport} className="h-8 w-8 text-emerald-600 hover:text-emerald-700">
+                    <FileSpreadsheet className="h-4 w-4" />
                   </IconButton>
+                  {canAdd ? (
+                    <IconButton label="Import" onClick={() => setImportOpen(true)} className="h-8 w-8 text-blue-600 hover:text-blue-700">
+                      <FileUp className="h-4 w-4" />
+                    </IconButton>
+                  ) : null}
                 </div>
               </TooltipProvider>
               <div className="flex items-center gap-2">
@@ -406,9 +495,8 @@ function AirlinePage() {
                   className="h-9 w-56"
                 />
                 {canAdd ? (
-                  <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                  <Button size="icon" onClick={openAdd} className="h-8 w-8">
                     <Plus className="h-4 w-4" />
-                    Add
                   </Button>
                 ) : null}
               </div>
@@ -513,7 +601,7 @@ function AirlinePage() {
       <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete airline?</AlertDialogTitle>
+            <AlertDialogTitle>Are you sure you want to delete this Airline?</AlertDialogTitle>
             <AlertDialogDescription>
               This will remove{" "}
               <span className="font-medium text-foreground">{deleteTarget?.airlineName}</span>.
@@ -534,47 +622,3 @@ function AirlinePage() {
   );
 }
 
-function ProductLookupInput({
-  value,
-  onChange,
-}: {
-  value: LookupPair;
-  onChange: (v: LookupPair) => void;
-}) {
-  const [lookupOpen, setLookupOpen] = useState(false);
-
-  return (
-    <>
-      <div className="flex gap-1">
-        <Input
-          value={value.code}
-          onChange={(e) => onChange({ ...value, code: e.target.value })}
-          className="w-28"
-          placeholder="Code"
-        />
-        <Input
-          value={value.name}
-          onChange={(e) => onChange({ ...value, name: e.target.value })}
-          className="flex-1"
-          placeholder="Name"
-        />
-        <Button
-          size="icon"
-          variant="outline"
-          className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-          aria-label="Search"
-          onClick={() => setLookupOpen(true)}
-        >
-          <Search className="h-4 w-4" />
-        </Button>
-      </div>
-      <MasterLookupDialog
-        open={lookupOpen}
-        onOpenChange={setLookupOpen}
-        lookup="product"
-        returnField="code"
-        onSelect={(_v, option: LookupOption) => onChange({ code: option.code, name: option.name })}
-      />
-    </>
-  );
-}
