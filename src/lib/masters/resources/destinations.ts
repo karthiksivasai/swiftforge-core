@@ -69,6 +69,29 @@ export const destinationsResource: MasterResource<
 };
 
 /** CourierWala / UI export headers → import column keys. */
+/** Country name saved on a destination master, or the stored country code when no country is linked. */
+export async function destinationCountryName(destinationId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("destinations")
+    .select("country_id, country_code")
+    .eq("id", destinationId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error || !data) return null;
+  if (data.country_id) {
+    const { data: country } = await supabase
+      .from("countries")
+      .select("name")
+      .eq("id", data.country_id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    const name = country?.name?.trim();
+    if (name) return name;
+  }
+  const code = (data.country_code ?? "").trim();
+  return code || null;
+}
+
 export const DESTINATION_IMPORT_HEADER_ALIASES: Readonly<Record<string, readonly string[]>> = {
   dest_type: ["Destination Type", "Type", "Dest Type"],
   code: ["Destination Code", "Dest Code"],

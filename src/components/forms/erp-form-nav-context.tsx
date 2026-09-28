@@ -32,6 +32,7 @@ import {
   focusNextAfterOrder,
   focusNextErpField,
   focusPrevBeforeOrder,
+  focusAdjacentTabStop,
   focusPrevErpField,
   isDateInputNavField,
   peekNextErpField,
@@ -242,6 +243,13 @@ export function ErpFormNavProvider({
         tryAdvance(target, "next");
         return;
       }
+
+      if (e.key === "Tab") {
+        if (focusAdjacentTabStop(target, e.shiftKey ? "prev" : "next")) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
     };
 
     container.addEventListener("keydown", onKeyDown, true);
@@ -352,6 +360,8 @@ export function ErpNavSelect({
 export function ErpNavInput({
   order,
   onValueChange,
+  readOnly,
+  tabIndex,
   ...props
 }: Omit<React.ComponentProps<typeof Input>, "onChange"> & {
   order: number;
@@ -360,6 +370,8 @@ export function ErpNavInput({
   return (
     <Input
       {...props}
+      readOnly={readOnly}
+      tabIndex={readOnly ? -1 : tabIndex}
       {...erpNavOrder(order)}
       onChange={(e) => onValueChange?.(e.target.value)}
     />

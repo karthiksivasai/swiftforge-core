@@ -446,52 +446,31 @@ export function VendorServiceLookup({
                 {...navOrderProps}
               />
             </div>
-            <div className="lookup-code flex w-[5.75rem] shrink-0 items-stretch gap-1">
-              <div
-                className={cn(
-                  "overflow-hidden rounded border border-input bg-background",
-                  compact ? "h-8 w-14" : "h-9 w-20",
-                )}
-              >
-                <Input
-                  value={value.code}
-                  disabled={inputDisabled}
-                  readOnly
-                  className={cn(
-                    "w-full cursor-default bg-muted/30 text-foreground",
-                    compact ? "h-8 border-0 px-1 text-[13px] shadow-none focus-visible:ring-0" : "h-9 border-0 shadow-none focus-visible:ring-0",
-                  )}
-                  autoComplete="off"
-                  tabIndex={-1}
-                  {...(navOrder != null ? navSkipProps : {})}
-                />
-              </div>
-              <Button
-                size="icon"
-                variant="outline"
-                type="button"
-                disabled={inputDisabled}
-                className={cn(
-                  "shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground",
-                  compact ? "h-8 w-8" : "h-9 w-9",
-                )}
-                aria-label="Search services"
-                {...searchBtnProps}
-                onMouseDown={(e) => {
-                  if (inputDisabled) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  triggerSearch();
-                }}
-                {...(navOrder != null ? navSkipProps : {})}
-              >
-                {manualSearching ? (
-                  <Loader2 className={compact ? "h-3.5 w-3.5 animate-spin" : "h-4 w-4 animate-spin"} />
-                ) : (
-                  <Search className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
-                )}
-              </Button>
-            </div>
+            <Button
+              size="icon"
+              variant="outline"
+              type="button"
+              disabled={inputDisabled}
+              className={cn(
+                "shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground",
+                compact ? "h-8 w-8" : "h-9 w-9",
+              )}
+              aria-label="Search services"
+              {...searchBtnProps}
+              onMouseDown={(e) => {
+                if (inputDisabled) return;
+                e.preventDefault();
+                e.stopPropagation();
+                triggerSearch();
+              }}
+              {...(navOrder != null ? navSkipProps : {})}
+            >
+              {manualSearching ? (
+                <Loader2 className={compact ? "h-3.5 w-3.5 animate-spin" : "h-4 w-4 animate-spin"} />
+              ) : (
+                <Search className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
+              )}
+            </Button>
           </div>
         ) : (
           <div className="flex gap-1">

@@ -47,7 +47,7 @@ export function isErpNavFocusable(el: HTMLElement): boolean {
   if (el instanceof HTMLInputElement) {
     if (el.type === "hidden") return false;
     if (el.disabled) return false;
-    if (el.readOnly && el.type !== "file") return true;
+    if (el.readOnly && el.type !== "file") return false;
     return true;
   }
 
@@ -230,8 +230,9 @@ export function focusPrevErpField(
 
 export function focusErpFieldByOrder(container: HTMLElement, order: number): HTMLElement | null {
   const el = container.querySelector<HTMLElement>(`[${ERP_NAV_ORDER}="${order}"]`);
-  if (!el || !isErpNavFocusable(el)) return null;
-  return focusNavField(el);
+  if (!el) return null;
+  if (isErpNavFocusable(el)) return focusNavField(el);
+  return focusNextAfterOrder(container, order);
 }
 
 function isRadixSelectTrigger(target: HTMLElement): boolean {
@@ -287,9 +288,92 @@ export function shouldEnterAdvanceFocus(target: HTMLElement): boolean {
   return participatesInDataEntryNav(target);
 }
 
-/** Shift+Enter uses the same gating as Enter. Tab keeps native browser behaviour. */
+/** Shift+Enter uses the same gating as Enter. */
 export function shouldShiftEnterAdvanceFocus(target: HTMLElement): boolean {
   return shouldEnterAdvanceFocus(target);
+}
+
+const TAB_STOP_SELECTOR = "a[href], button, input, select, textarea, [tabindex]";
+
+function isReadOnlyTabStop(el: HTMLElement): boolean {
+  if (el instanceof HTMLTextAreaElement) return el.readOnly;
+  if (el instanceof HTMLInputElement) return el.readOnly && el.type !== "file";
+  return false;
+}
+
+function isTabStop(el: HTMLElement): boolean {
+  if (!isVisible(el)) return false;
+  if (el.tabIndex < 0) return false;
+  if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") return false;
+  if (el instanceof HTMLInputElement && (el.disabled || el.type === "hidden")) return false;
+  if (el instanceof HTMLButtonElement && el.disabled) return false;
+  if (el instanceof HTMLSelectElement && el.disabled) return false;
+  if (el instanceof HTMLTextAreaElement && el.disabled) return false;
+  return true;
+}
+
+function tabSequence(root: ParentNode): HTMLElement[] {
+  const positive: HTMLElement[] = [];
+  const normal: HTMLElement[] = [];
+  for (const el of root.querySelectorAll<HTMLElement>(TAB_STOP_SELECTOR)) {
+    if (!isTabStop(el)) continue;
+    if (el.tabIndex > 0) positive.push(el);
+    else normal.push(el);
+  }
+  positive.sort((a, b) => a.tabIndex - b.tabIndex);
+  return [...positive, ...normal];
+}
+
+function resolveTabStop(from: HTMLElement, sequence: HTMLElement[]): HTMLElement | null {
+  if (sequence.includes(from)) return from;
+  const host = from.closest<HTMLElement>(TAB_STOP_SELECTOR);
+  if (host && sequence.includes(host)) return host;
+  return null;
+}
+
+/**
+ * Move focus past read-only inputs. Returns false when the next native stop is editable,
+ * so the browser can keep its normal Tab behaviour. Open dialogs and dropdowns are left alone.
+ */
+export function focusAdjacentTabStop(from: HTMLElement, direction: "next" | "prev"): boolean {
+  if (isInsideOpenDialog(from)) return false;
+  if (isRadixSelectOpen(from) || isInlineComboboxOpen(from)) return false;
+  const sequence = tabSequence(document.body);
+  const current = resolveTabStop(from, sequence);
+  if (!current) return false;
+
+  const dir = direction === "next" ? 1 : -1;
+  let index = sequence.indexOf(current) + dir;
+  let skippedReadOnly = false;
+  while (index >= 0 && index < sequence.length) {
+    const el = sequence[index];
+    if (!el) break;
+    if (isReadOnlyTabStop(el)) {
+      skippedReadOnly = true;
+      index += dir;
+      continue;
+    }
+    if (!skippedReadOnly) return false;
+    el.focus();
+    if (
+      el instanceof HTMLInputElement &&
+      el.type !== "file" &&
+      el.type !== "checkbox" &&
+      el.type !== "radio" &&
+      el.type !== "button"
+    ) {
+      try {
+        el.select();
+      } catch {
+        /* ignore */
+      }
+    }
+    return true;
+  }
+
+  if (!skippedReadOnly) return false;
+  from.blur();
+  return true;
 }
 
 export function scheduleErpFocusAdvance(fn: () => void) {

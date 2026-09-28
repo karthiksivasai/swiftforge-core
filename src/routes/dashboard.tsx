@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowUpRight, FileBarChart } from "lucide-react";
 
 import { DashboardSummarySection } from "@/components/dashboard/dashboard-summary-section";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDashboardKpis } from "@/lib/dashboard/useDashboardKpis";
 import { useCan } from "@/lib/use-can";
 import { useTenant } from "@/lib/tenant";
+import { openFreshAwbEntryPage } from "@/lib/transactions/awbDraftStorage";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -30,6 +31,7 @@ const QUICK_LINKS = [
 
 function DashboardPage() {
   const tenant = useTenant();
+  const navigate = useNavigate();
   const showOperations = useCan("txn.opertation-dashboard", "list") || useCan("txn.opertation-dashboard", "search");
   const showSales = useCan("txn.sales-dashboard", "list") || useCan("txn.sales-dashboard", "search");
   const canAwb = useCan("txn.awb-entry", "list");
@@ -117,6 +119,11 @@ function DashboardPage() {
               <Link
                 key={q.to}
                 to={q.to as Parameters<typeof Link>[0]["to"]}
+                onClick={(event) => {
+                  if (q.to !== "/transaction/awb-entry") return;
+                  event.preventDefault();
+                  void openFreshAwbEntryPage(navigate);
+                }}
                 className="flex items-center justify-between rounded-md px-2 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
               >
                 <span>{q.label}</span>

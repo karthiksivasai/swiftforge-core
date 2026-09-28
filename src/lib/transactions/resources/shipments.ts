@@ -243,6 +243,39 @@ export async function getShipmentById(id: string): Promise<ShipmentRow | null> {
   return (data as unknown as ShipmentRow) ?? null;
 }
 
+/** Digits shorter than the 6-digit series are also tried zero-padded (27 → 000027). */
+export function awbNoLookupCandidates(raw: string): string[] {
+  const safe = raw.trim().replace(/[%,()]/g, " ");
+  if (!safe) return [];
+  if (/^\d+$/.test(safe) && safe.length < 6) {
+    const padded = safe.padStart(6, "0");
+    return padded === safe ? [safe] : [padded, safe];
+  }
+  return [safe];
+}
+
+export type ShipmentAwbBrief = {
+  id: string;
+  awb_no: string;
+  row_version: number;
+  current_status: string;
+};
+
+const AWB_BRIEF_COLUMNS = "id, awb_no, row_version, current_status";
+
+/** Highest live AWB number, shown as Last AWB No on the entry form. */
+export async function getLatestShipmentAwb(): Promise<ShipmentAwbBrief | null> {
+  const { data, error } = await supabase
+    .from("shipments")
+    .select(AWB_BRIEF_COLUMNS)
+    .is("deleted_at", null)
+    .order("awb_no", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw translateDbError(error);
+  return (data as ShipmentAwbBrief | null) ?? null;
+}
+
 /** Resolve a previous booking by AWB / forwarding / delivery / reference no. */
 export async function findShipmentBySearch(args: {
   query: string;
@@ -252,18 +285,21 @@ export async function findShipmentBySearch(args: {
   if (!q) return null;
   const field = args.field ?? "awb_no";
   const safe = q.replace(/[%,()]/g, " ");
+  const exactKeys = field === "awb_no" ? awbNoLookupCandidates(q) : [safe];
 
   // Prefer exact match first (CourierWala-style AWB lookup).
-  const exact = await supabase
-    .from("shipments")
-    .select(SHIPMENT_COLUMNS)
-    .is("deleted_at", null)
-    .eq(field, safe)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (exact.error) throw translateDbError(exact.error);
-  if (exact.data) return exact.data as unknown as ShipmentRow;
+  for (const key of exactKeys) {
+    const exact = await supabase
+      .from("shipments")
+      .select(SHIPMENT_COLUMNS)
+      .is("deleted_at", null)
+      .eq(field, key)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (exact.error) throw translateDbError(exact.error);
+    if (exact.data) return exact.data as unknown as ShipmentRow;
+  }
 
   const { data, error } = await supabase
     .from("shipments")

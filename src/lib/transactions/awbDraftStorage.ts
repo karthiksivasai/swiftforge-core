@@ -6,6 +6,8 @@ import { supabase } from "@/integrations/supabase/client";
 
 export const AWB_DRAFT_VERSION = 1 as const;
 export const AWB_DRAFT_STORAGE_PREFIX = "cms.awb-entry.draft.v1";
+/** Same-tab snapshot so a browser refresh reopens the AWB form instead of the list. */
+export const AWB_OPEN_FORM_SESSION_KEY = "cms.awb-entry.open-form.v1";
 export const AWB_DRAFT_AUTOSAVE_MS = 700;
 
 export type AwbDraftLookupPair = { id?: string; code: string; name: string };
@@ -22,6 +24,7 @@ export type AwbEntryDraftPayload = {
     status?: string;
   } | null;
   activeTab: string;
+  awbMode?: "AUTO" | "MANUAL";
   piecesDraft: unknown;
   chargeDraft: unknown;
   proformaDraft: unknown;
@@ -98,6 +101,81 @@ export function writeLocalAwbDraft(draft: AwbEntryDraftPayload): void {
   } catch {
     /* quota / private mode — ignore */
   }
+}
+
+export function readOpenAwbForm(): AwbEntryDraftPayload | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(AWB_OPEN_FORM_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AwbEntryDraftPayload;
+    if (!parsed || parsed.version !== AWB_DRAFT_VERSION || !parsed.form) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function writeOpenAwbForm(draft: AwbEntryDraftPayload): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(AWB_OPEN_FORM_SESSION_KEY, JSON.stringify(draft));
+  } catch {
+    /* quota / private mode — ignore */
+  }
+}
+
+export function clearOpenAwbForm(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(AWB_OPEN_FORM_SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Set by the AWB Entry menu click so the open form resets even when the route does not remount. */
+let freshAwbEntryRequested = false;
+
+export function requestFreshAwbEntry(): void {
+  freshAwbEntryRequested = true;
+}
+
+export function isFreshAwbEntryRequested(): boolean {
+  return freshAwbEntryRequested;
+}
+
+export function clearFreshAwbEntryRequest(): void {
+  freshAwbEntryRequested = false;
+}
+
+type AwbEntryNavigate = (options: {
+  to: "/transaction/awb-entry";
+  search: { view?: "form"; fresh?: string };
+  replace?: boolean;
+}) => Promise<unknown> | unknown;
+
+/** Open a new AWB form with the list kept underneath, so browser Back returns to the list. */
+export async function openFreshAwbEntryPage(navigate: AwbEntryNavigate): Promise<void> {
+  requestFreshAwbEntry();
+  const fresh = String(Date.now());
+  const onAwb = window.location.pathname === "/transaction/awb-entry";
+  const onForm = onAwb && new URLSearchParams(window.location.search).get("view") === "form";
+  if (onForm) {
+    await navigate({
+      to: "/transaction/awb-entry",
+      search: { view: "form", fresh },
+      replace: true,
+    });
+    return;
+  }
+  if (!onAwb) {
+    await navigate({ to: "/transaction/awb-entry", search: {} });
+  }
+  await navigate({
+    to: "/transaction/awb-entry",
+    search: { view: "form", fresh },
+  });
 }
 
 export function clearLocalAwbDraft(userKey: string): void {

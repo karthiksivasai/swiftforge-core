@@ -5,8 +5,8 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Courier ERP — Notion-like warm neutral design system.
- * Light default with dark mode support. All colors in oklch.
+ * Courier ERP — bright, high-contrast light theme with dark mode support.
+ * All colors in oklch. Primary buttons and input chrome are unchanged.
  */
 
 @theme inline {
@@ -58,25 +58,25 @@
 :root {
   --radius: 0.625rem;
 
-  /* Warm off-white paper */
-  --background: oklch(0.985 0.006 85);
-  --foreground: oklch(0.24 0.012 60);
+  /* Solid white canvas */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.16 0.02 265);
 
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.24 0.012 60);
+  --card-foreground: oklch(0.16 0.02 265);
 
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.24 0.012 60);
+  --popover-foreground: oklch(0.16 0.02 265);
 
   /* Ink primary (warm charcoal) */
   --primary: oklch(0.28 0.014 60);
   --primary-foreground: oklch(0.98 0.006 85);
 
   --secondary: oklch(0.955 0.01 80);
-  --secondary-foreground: oklch(0.28 0.014 60);
+  --secondary-foreground: oklch(0.16 0.02 265);
 
   --muted: oklch(0.955 0.01 80);
-  --muted-foreground: oklch(0.52 0.014 65);
+  --muted-foreground: oklch(0.3 0.025 265);
 
   /* Sage accent */
   --accent: oklch(0.94 0.018 145);
@@ -179,6 +179,33 @@
 .erp-form-nav {
   --awb-focus-border: #000000;
   --awb-error-border: var(--destructive);
+  --awb-readonly-bg: #e9ecef;
+}
+
+/* Read-only values, including lookup code boxes, use the gray mask. */
+.erp-form-nav input:read-only:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"]) {
+  background-color: var(--awb-readonly-bg);
+  cursor: default;
+}
+
+.erp-form-nav .erp-field-shell:has(input:read-only):not(:has(button, select, input:not(:read-only))) {
+  background-color: var(--awb-readonly-bg);
+}
+
+/* Read-only fields keep the normal outline. The thick focus border is for fields you can edit. */
+.erp-form-nav .erp-field-shell:has(input:read-only):not(:has(button, select, input:not(:read-only))):focus-within {
+  border-color: var(--input);
+  box-shadow: none;
+}
+
+.erp-form-nav input:read-only:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"]):is(:focus, :focus-visible) {
+  border-color: var(--input);
+  box-shadow: none;
+}
+
+.erp-form-nav :is(.erp-field-shell, .lookup-name, .lookup-code) input:read-only:is(:focus, :focus-visible) {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .erp-form-nav :is(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible) {
@@ -190,7 +217,7 @@
 .erp-form-nav .erp-field-shell:focus-within,
 .erp-form-nav .erp-field-shell:has(button[role="combobox"][data-state="open"]),
 .erp-form-nav .lookup-name:focus-within,
-.erp-form-nav .lookup-code > div:first-child:focus-within {
+.erp-form-nav .lookup-code>div:first-child:focus-within {
   border-color: var(--awb-focus-border);
   border-style: solid;
   box-shadow: inset 0 0 0 1px var(--awb-focus-border);
@@ -198,20 +225,27 @@
   --tw-ring-offset-shadow: 0 0 #0000;
 }
 
-.erp-form-nav
-  :where(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible):not(
-    [type="checkbox"],
-    [type="radio"],
-    [type="hidden"]
-  ) {
+.erp-form-nav .lookup-code > div:first-child,
+.erp-form-nav .lookup-code > div:first-child:focus-within {
+  background-color: var(--awb-readonly-bg);
+  border-color: var(--input);
+  box-shadow: none;
+}
+
+.erp-form-nav .erp-field-shell:focus-within:has(input:read-only) {
+  border-color: var(--input);
+  box-shadow: none;
+}
+
+.erp-form-nav :where(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible):not([type="checkbox"],
+  [type="radio"],
+  [type="hidden"]) {
   border-color: var(--awb-focus-border);
   border-style: solid;
   box-shadow: inset 0 0 0 1px var(--awb-focus-border);
 }
 
-.erp-form-nav
-  :is(.erp-field-shell, .lookup-name, .lookup-code)
-  :where(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible) {
+.erp-form-nav :is(.erp-field-shell, .lookup-name, .lookup-code) :where(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible) {
   border-color: transparent;
   box-shadow: none;
 }
@@ -222,18 +256,14 @@
 .erp-form-nav .erp-field-shell[data-invalid="true"]:has(button[role="combobox"][data-state="open"]),
 .erp-form-nav [data-invalid="true"] .lookup-name,
 .erp-form-nav [data-invalid="true"] .lookup-name:focus-within,
-.erp-form-nav [data-invalid="true"] .lookup-code > div:first-child,
-.erp-form-nav [data-invalid="true"] .lookup-code > div:first-child:focus-within,
+.erp-form-nav [data-invalid="true"] .lookup-code>div:first-child,
+.erp-form-nav [data-invalid="true"] .lookup-code>div:first-child:focus-within,
 .erp-form-nav :where(input, textarea, select, button[role="combobox"])[aria-invalid="true"],
-.erp-form-nav
-  :where(input, textarea, select, button[role="combobox"])[aria-invalid="true"]:is(
-    :focus,
-    :focus-visible
-  ) {
+.erp-form-nav :where(input, textarea, select, button[role="combobox"])[aria-invalid="true"]:is( :focus,
+  :focus-visible) {
   border-color: var(--awb-error-border);
   border-style: solid;
   box-shadow: inset 0 0 0 1px var(--awb-error-border);
   --tw-ring-shadow: 0 0 #0000;
   --tw-ring-offset-shadow: 0 0 #0000;
 }
-
