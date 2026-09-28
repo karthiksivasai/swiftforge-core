@@ -1,5 +1,5 @@
 import { createFileRoute, useBlocker } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Download,
@@ -93,17 +93,23 @@ import {
   loadClientProfile,
   type ClientProfile,
 } from "@/lib/transactions/resources/clientProfile";
+import { destinationCountryName } from "@/lib/masters/resources/destinations";
 import { listVendorServices } from "@/lib/transactions/resources/vendorServices";
 import {
   AWB_DRAFT_AUTOSAVE_MS,
   AWB_DRAFT_VERSION,
   clearAwbDraft,
+  clearFreshAwbEntryRequest,
+  clearOpenAwbForm,
   draftUserKey,
   formatDraftSavedAt,
   isAwbDraftWorthKeeping,
+  isFreshAwbEntryRequested,
   loadAwbDraft,
   persistAwbDraft,
   readLocalAwbDraft,
+  readOpenAwbForm,
+  writeOpenAwbForm,
   type AwbEntryDraftPayload,
 } from "@/lib/transactions/awbDraftStorage";
 import {
@@ -111,6 +117,7 @@ import {
   confirmBooking,
   fetchShipmentChildren,
   findShipmentBySearch,
+  getLatestShipmentAwb,
   getShipmentById,
   listShipments,
   saveShipment,
@@ -514,7 +521,6 @@ const EXPORT_REASONS = [
 ] as const;
 
 const PROFORMA_FORMATS = ["B2B", "B2C", "C2C"] as const;
-const PROFORMA_DROPDOWN_SELECT = "Select";
 
 const PROFORMA_CURRENCIES = [
   "INR",
@@ -749,6 +755,15 @@ const defaultAwbFormSetup = (): AwbFormSetupSettings => ({
 });
 
 const ENTRY_TYPES = ["Duplicate Entry"] as const;
+
+const AWB_LOOKUP_FIELDS = [
+  { value: "awb_no", label: "AWB No", missing: "No AWB found" },
+  { value: "forwarding_awb", label: "Forwarding No", missing: "No shipment found for this forwarding number" },
+  { value: "delivery_awb", label: "Delivery No", missing: "No shipment found for this delivery number" },
+  { value: "reference_no", label: "Reference No", missing: "No shipment found for this reference number" },
+] as const;
+
+type AwbLookupField = (typeof AWB_LOOKUP_FIELDS)[number]["value"];
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
 
@@ -1485,6 +1500,10 @@ const awbCol = {
 } as const;
 
 export const Route = createFileRoute("/transaction/awb-entry")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    view: search.view === "form" ? ("form" as const) : undefined,
+    fresh: typeof search.fresh === "string" && search.fresh ? search.fresh : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "AWB Entry — Transaction — Courier ERP" },
@@ -1495,6 +1514,8 @@ export const Route = createFileRoute("/transaction/awb-entry")({
 });
 
 function AwbEntryPage() {
+  const { fresh, view } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const { isAuthenticated: authed, profile } = useAuth();
   const { activeBranchName, activeBranchId } = useActiveBranch();
   const queryClient = useQueryClient();
@@ -1507,7 +1528,7 @@ function AwbEntryPage() {
   const [appliedSearch, setAppliedSearch] = useState<{ field: SearchField; query: string } | null>(
     null,
   );
-  const [showForm, setShowForm] = useState(false);
+  const showForm = view === "form";
   const [editing, setEditing] = useState<AwbRow | null>(null);
   const [form, setForm] = useState<AwbFullForm>(emptyForm());
   const [ratingSummary, setRatingSummary] = useState<RatingSummary | null>(null);
@@ -1540,6 +1561,7 @@ function AwbEntryPage() {
     useState<AwbFormSetupSettings>(defaultAwbFormSetup);
   const [formSetupDraft, setFormSetupDraft] = useState<AwbFormSetupSettings>(defaultAwbFormSetup);
   const [formToolbarSearch, setFormToolbarSearch] = useState("");
+  const [toolbarSearchField, setToolbarSearchField] = useState<AwbLookupField>("awb_no");
   const [lastSavedForm, setLastSavedForm] = useState<AwbFullForm | null>(null);
   const [entryOpen, setEntryOpen] = useState(false);
   const [entryType, setEntryType] = useState<string>(ENTRY_TYPES[0]);
@@ -1617,15 +1639,27 @@ function AwbEntryPage() {
     showForm && !isReadOnly && isAwbDraftWorthKeeping(form);
 
   const navBlocker = useBlocker({
-    shouldBlockFn: () => {
-      if (allowLeaveRef.current) {
+    shouldBlockFn: ({ next }) => {
+      if (allowLeaveRef.current || isFreshAwbEntryRequested()) {
         allowLeaveRef.current = false;
         return false;
       }
+      const nextView =
+        next.search && typeof next.search === "object" && "view" in next.search
+          ? (next.search as { view?: string }).view
+          : undefined;
+      // Browser Back from the form returns to the AWB list. Do not hold that navigation.
+      if (next.pathname === "/transaction/awb-entry" && nextView !== "form") return false;
       return showForm && !isReadOnly && isAwbDraftWorthKeeping(form);
     },
     enableBeforeUnload: hasUnfinishedDraft,
     withResolver: true,
+  });
+
+  const latestAwbQuery = useQuery({
+    queryKey: ["shipments", "latest-awb"],
+    queryFn: getLatestShipmentAwb,
+    enabled: authed && showForm,
   });
 
   const liveQuery = useQuery({
@@ -1653,47 +1687,52 @@ function AwbEntryPage() {
 
   const rows: AwbRow[] = authed
     ? (liveQuery.data?.rows ?? []).map((r) => {
-        const list = dbShipmentToListRow(r);
-        return {
-          ...emptyForm(),
-          id: list.id,
-          rowVersion: list.rowVersion,
-          status: list.status,
-          awbNo: list.awbNo,
-          bookDate: list.bookDate,
-          bookTime: list.bookTime,
-          referenceNo: list.referenceNo,
-          clientName: { code: list.customerCode, name: list.customerName },
-          shipper: { ...emptyParty(), companyName: { code: "", name: list.shipperName } },
-          consignee: {
-            ...emptyParty(),
-            companyName: { code: "", name: list.consigneeName },
-            origin: { code: "", name: list.destination },
+      const list = dbShipmentToListRow(r);
+      return {
+        ...emptyForm(),
+        id: list.id,
+        rowVersion: list.rowVersion,
+        status: list.status,
+        awbNo: list.awbNo,
+        bookDate: list.bookDate,
+        bookTime: list.bookTime,
+        referenceNo: list.referenceNo,
+        clientName: { code: list.customerCode, name: list.customerName },
+        shipper: { ...emptyParty(), companyName: { code: "", name: list.shipperName } },
+        consignee: {
+          ...emptyParty(),
+          companyName: { code: "", name: list.consigneeName },
+          origin: { code: "", name: list.destination },
+        },
+        product: { code: list.product, name: list.product },
+        vendor: { code: list.vendor, name: list.vendor },
+        pieces: list.pieces,
+        actualWeight: list.actualWeight,
+        chargeWeight: list.chargeWeight,
+        forwardingNo: list.forwardingNo,
+        deliveryNo: list.deliveryNo,
+        forwarding: {
+          ...emptyForwarding(),
+          deliveryAwb: list.deliveryNo,
+          forwardingAwb: list.forwardingNo,
+          deliveryVendor: {
+            code: list.deliveryVendor,
+            name: list.deliveryVendor,
           },
-          product: { code: list.product, name: list.product },
-          vendor: { code: list.vendor, name: list.vendor },
-          pieces: list.pieces,
-          actualWeight: list.actualWeight,
-          chargeWeight: list.chargeWeight,
-          forwardingNo: list.forwardingNo,
-          deliveryNo: list.deliveryNo,
-          forwarding: {
-            ...emptyForwarding(),
-            deliveryAwb: list.deliveryNo,
-            forwardingAwb: list.forwardingNo,
-            deliveryVendor: {
-              code: list.deliveryVendor,
-              name: list.deliveryVendor,
-            },
-          },
-          carrierProviderCode: list.carrierProviderCode,
-          carrierBookingRef: list.carrierBookingRef,
-          carrierTrackingNo: list.carrierTrackingNo,
-          carrierBookingStatus: list.carrierBookingStatus,
-          carrierLabelFileId: list.carrierLabelFileId,
-        };
-      })
+        },
+        carrierProviderCode: list.carrierProviderCode,
+        carrierBookingRef: list.carrierBookingRef,
+        carrierTrackingNo: list.carrierTrackingNo,
+        carrierBookingStatus: list.carrierBookingStatus,
+        carrierLabelFileId: list.carrierLabelFileId,
+      };
+    })
     : demoRows;
+
+  const latestAwbNo = authed
+    ? (latestAwbQuery.data?.awb_no ?? "")
+    : ([...rows].sort((a, b) => a.awbNo.localeCompare(b.awbNo, undefined, { numeric: true })).at(-1)
+      ?.awbNo ?? "");
 
   const refreshLive = async () => {
     await queryClient.invalidateQueries({ queryKey: ["shipments"] });
@@ -1978,9 +2017,9 @@ function AwbEntryPage() {
           ...(s.destinationRepeat ? { origin: { ...prev.consignee.origin } } : {}),
           ...(s.consigneeNameRepeat
             ? {
-                companyName: { ...prev.consignee.companyName },
-                contactName: prev.consignee.contactName,
-              }
+              companyName: { ...prev.consignee.companyName },
+              contactName: prev.consignee.contactName,
+            }
             : {}),
         },
       };
@@ -1992,25 +2031,37 @@ function AwbEntryPage() {
     return next;
   };
 
-  const handleFormToolbarSearch = async () => {
-    const q = formToolbarSearch.trim();
+  const openShipmentBrief = async (
+    found: { id: string; row_version: number; current_status?: string | null; awb_no?: string | null },
+    fallbackAwb = "",
+  ) => {
+    const awbNo = found.awb_no ?? fallbackAwb;
+    await openEdit({
+      ...emptyForm(),
+      id: found.id,
+      rowVersion: found.row_version,
+      status: found.current_status ?? "DRAFT",
+      awbNo,
+    } as AwbRow);
+    setFormToolbarSearch("");
+    toast.success(`Opened AWB ${awbNo}`);
+  };
+
+  const handleFormToolbarSearch = async (awbNo?: string) => {
+    const q = (awbNo ?? formToolbarSearch).trim();
     if (!q) return;
+    const field: AwbLookupField = awbNo ? "awb_no" : toolbarSearchField;
+    const missing =
+      AWB_LOOKUP_FIELDS.find((item) => item.value === field)?.missing ?? "No AWB found";
     if (authed) {
       try {
         setSaving(true);
-        const found = await findShipmentBySearch({ query: q, field: "awb_no" });
+        const found = await findShipmentBySearch({ query: q, field });
         if (!found) {
-          toast.error("No AWB entry found");
+          toast.error(missing);
           return;
         }
-        await openEdit({
-          ...emptyForm(),
-          id: found.id,
-          rowVersion: found.row_version,
-          status: found.current_status ?? "DRAFT",
-          awbNo: found.awb_no ?? q,
-        } as AwbRow);
-        toast.success(`Opened AWB ${found.awb_no ?? q}`);
+        await openShipmentBrief(found, q);
       } catch (e) {
         toast.error(toErrorMessage(e, "Search failed"));
       } finally {
@@ -2018,9 +2069,23 @@ function AwbEntryPage() {
       }
       return;
     }
-    const match = rows.find((r) => r.awbNo.toLowerCase().includes(q.toLowerCase()));
-    if (match) openEdit(match);
-    else toast.error("No AWB entry found");
+    const needle = q.toLowerCase();
+    const match = rows.find((row) => {
+      const value =
+        field === "forwarding_awb"
+          ? row.forwardingNo
+          : field === "delivery_awb"
+            ? row.deliveryNo
+            : field === "reference_no"
+              ? row.referenceNo
+              : row.awbNo;
+      return value.toLowerCase().includes(needle);
+    });
+    if (match) {
+      void openEdit(match);
+      setFormToolbarSearch("");
+      toast.success(`Opened AWB ${match.awbNo}`);
+    } else toast.error(missing);
   };
 
   const openEntry = () => {
@@ -2052,7 +2117,6 @@ function AwbEntryPage() {
     setVendorBookingBusy(false);
     setVendorPanelKey((k) => k + 1);
     setActiveTab("awb");
-    setShowForm(true);
   };
 
   const handleEntrySearch = async () => {
@@ -2128,6 +2192,7 @@ function AwbEntryPage() {
       ? { id: editing.id, rowVersion: editing.rowVersion, status: editing.status }
       : null,
     activeTab,
+    awbMode,
     piecesDraft,
     chargeDraft,
     proformaDraft,
@@ -2152,6 +2217,9 @@ function AwbEntryPage() {
       setEditing(null);
     }
     setActiveTab(draft.activeTab || "awb");
+    if (draft.awbMode === "MANUAL" || draft.awbMode === "AUTO") {
+      setAwbMode(draft.awbMode);
+    }
     setPiecesDraft((draft.piecesDraft as PiecesDraft) ?? emptyPiecesDraft());
     setChargeDraft((draft.chargeDraft as ChargeDraft) ?? emptyChargeDraft());
     setProformaDraft((draft.proformaDraft as ProformaDraft) ?? emptyProformaDraft());
@@ -2172,7 +2240,6 @@ function AwbEntryPage() {
     });
     setDraftSavedAt(draft.savedAt);
     setDraftUiStatus("saved");
-    setShowForm(true);
   };
 
   const clearDraftState = async () => {
@@ -2181,6 +2248,122 @@ function AwbEntryPage() {
     setDraftUiStatus("idle");
     setDraftSavedAt(null);
   };
+
+  const openFormSnapRef = useRef<AwbEntryDraftPayload | null>(null);
+  openFormSnapRef.current = showForm ? buildCurrentDraft() : null;
+  const skippedOpenFormClearRef = useRef(false);
+  const freshHandledRef = useRef<string | undefined>(undefined);
+  const didInitialNavRef = useRef(false);
+
+  const beginNewAwbEntry = () => {
+    allowLeaveRef.current = true;
+    clearFreshAwbEntryRequest();
+    const nextForm = applyFormSetupRepeats(emptyForm());
+    const nextPieces = emptyPiecesDraft();
+    const nextCharge = emptyChargeDraft();
+    const nextProforma = emptyProformaDraft();
+    const nextVendorCharge = emptyVendorChargeDraft();
+    const blankSnapshot: AwbEntryDraftPayload = {
+      version: AWB_DRAFT_VERSION,
+      savedAt: new Date().toISOString(),
+      userKey,
+      form: nextForm,
+      editing: null,
+      activeTab: "awb",
+      awbMode: "AUTO",
+      piecesDraft: nextPieces,
+      chargeDraft: nextCharge,
+      proformaDraft: nextProforma,
+      vendorChargeDraft: nextVendorCharge,
+    };
+    writeOpenAwbForm(blankSnapshot);
+    openFormSnapRef.current = blankSnapshot;
+    setRestoreDraft(null);
+    setEditing(null);
+    setAwbMode("AUTO");
+    setForm(nextForm);
+    setFormToolbarSearch("");
+    setToolbarSearchField("awb_no");
+    setRatingSummary(null);
+    setPiecesDraft(nextPieces);
+    setChargeDraft(nextCharge);
+    setProformaDraft(nextProforma);
+    setVendorChargeDraft(nextVendorCharge);
+    setKycSearchInput("");
+    setBookingErrors([]);
+    setActiveTab("awb");
+    setDraftUiStatus("idle");
+    setDraftSavedAt(null);
+    setLoadedClientProfile(null);
+    setClientLoading(false);
+    setVendorMeta({});
+    setVendorOtpOpen(false);
+    setVendorOtpError(null);
+    setVendorSandboxOtp(null);
+    setVendorBookingBusy(false);
+    setVendorPanelKey((key) => key + 1);
+  };
+
+  const pushFormPage = () => {
+    if (view === "form") return;
+    allowLeaveRef.current = true;
+    void navigate({ search: { view: "form" } });
+  };
+
+  useLayoutEffect(() => {
+    if (fresh || isFreshAwbEntryRequested()) {
+      didInitialNavRef.current = true;
+      if (freshHandledRef.current !== fresh) {
+        freshHandledRef.current = fresh;
+        beginNewAwbEntry();
+      }
+      return;
+    }
+    if (didInitialNavRef.current) return;
+    didInitialNavRef.current = true;
+    if (view !== "form") return;
+    const navigation = performance.getEntriesByType("navigation")[0] as
+      | PerformanceNavigationTiming
+      | undefined;
+    // Opening Add pushes a new history entry and must not reload the last shipment.
+    // A browser refresh of the form address still restores the fields on screen.
+    if (navigation && navigation.type !== "reload") return;
+    const snap = readOpenAwbForm();
+    if (!snap) return;
+    skippedOpenFormClearRef.current = true;
+    applyDraftPayload(snap);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fresh, view]);
+
+  useEffect(() => {
+    if (!fresh) return;
+    void navigate({ search: { view: "form" }, replace: true });
+  }, [fresh, navigate]);
+
+  useEffect(() => {
+    const flush = () => {
+      const snap = openFormSnapRef.current;
+      if (snap) writeOpenAwbForm(snap);
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, []);
+
+  useEffect(() => {
+    if (skippedOpenFormClearRef.current) {
+      skippedOpenFormClearRef.current = false;
+      return;
+    }
+    if (!showForm) {
+      clearOpenAwbForm();
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const snap = openFormSnapRef.current;
+      if (snap) writeOpenAwbForm(snap);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [showForm, form, piecesDraft, chargeDraft, proformaDraft, vendorChargeDraft, activeTab, awbMode, editing]);
 
   useEffect(() => {
     if (draftHydratedRef.current) return;
@@ -2348,25 +2531,8 @@ function AwbEntryPage() {
       setRestoreDraft(existing);
       return;
     }
-    setEditing(null);
-    setForm(applyFormSetupRepeats(emptyForm()));
-    setRatingSummary(null);
-    setPiecesDraft(emptyPiecesDraft());
-    setChargeDraft(emptyChargeDraft());
-    setProformaDraft(emptyProformaDraft());
-    setVendorChargeDraft(emptyVendorChargeDraft());
-    setKycSearchInput("");
-    setBookingErrors([]);
-    setActiveTab("awb");
-    setDraftUiStatus("idle");
-    setDraftSavedAt(null);
-    setLoadedClientProfile(null);
-    setClientLoading(false);
-    setVendorMeta({});
-    setVendorOtpOpen(false);
-    setVendorOtpError(null);
-    setVendorBookingBusy(false);
-    setShowForm(true);
+    beginNewAwbEntry();
+    pushFormPage();
   };
 
   const openEdit = async (row: AwbRow) => {
@@ -2432,7 +2598,7 @@ function AwbEntryPage() {
         setKycSearchInput("");
         setBookingErrors([]);
         setActiveTab("awb");
-        setShowForm(true);
+        pushFormPage();
         try {
           const ctx = await getVendorShippingContext(row.id);
           if (ctx.shippingApiEnabled || ctx.shipment.vendor_api_status) {
@@ -2489,11 +2655,10 @@ function AwbEntryPage() {
     setKycSearchInput("");
     setBookingErrors([]);
     setActiveTab("awb");
-    setShowForm(true);
+    pushFormPage();
   };
 
   const closeForm = () => {
-    setShowForm(false);
     setEditing(null);
     setForm(emptyForm());
     setRatingSummary(null);
@@ -2509,6 +2674,8 @@ function AwbEntryPage() {
     setVendorOtpOpen(false);
     setVendorOtpError(null);
     setVendorBookingBusy(false);
+    allowLeaveRef.current = true;
+    if (view === "form") window.history.back();
   };
 
   const requestCloseForm = () => {
@@ -2647,7 +2814,7 @@ function AwbEntryPage() {
           if (wfResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
             toast.warning(
               wfResult.message ||
-                "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
+              "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
             );
           } else if (!wfResult.success) {
             const err = wfResult.message || wfResult.apiError || "World-First AWB Booking Failed";
@@ -2682,7 +2849,7 @@ function AwbEntryPage() {
           if (upsResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
             toast.warning(
               upsResult.message ||
-                "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
+              "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
             );
           } else if (!upsResult.success) {
             const err = upsResult.message || upsResult.apiError || "UPS AWB Booking Failed";
@@ -2701,10 +2868,13 @@ function AwbEntryPage() {
           }
           toast.success(`UPS AWB Booking Successful! (AWB: ${upsResult.awbNo || upsResult.refNo})`);
         }
-        const { fields, pieces, charges } = uiFormToShipmentPayload({
-          ...payload,
-          pickupId: editing?.pickupId ?? payload.pickupId,
-        });
+        const { fields, pieces, charges } = uiFormToShipmentPayload(
+          {
+            ...payload,
+            pickupId: editing?.pickupId ?? payload.pickupId,
+          },
+          { manualAwbNo: awbMode === "MANUAL" ? payload.awbNo : null },
+        );
         const saved = await saveShipment({
           id: editing?.id ?? null,
           rowVersion: editing?.rowVersion ?? null,
@@ -2970,7 +3140,7 @@ function AwbEntryPage() {
           if (wfResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
             toast.warning(
               wfResult.message ||
-                "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
+              "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
             );
           } else if (!wfResult.success) {
             const err = wfResult.message || wfResult.apiError || "World-First AWB Booking Failed";
@@ -3005,7 +3175,7 @@ function AwbEntryPage() {
           if (upsResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
             toast.warning(
               upsResult.message ||
-                "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
+              "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
             );
           } else if (!upsResult.success) {
             const err = upsResult.message || upsResult.apiError || "UPS AWB Booking Failed";
@@ -3024,10 +3194,13 @@ function AwbEntryPage() {
           }
           toast.success(`UPS AWB Booking Successful! (AWB: ${upsResult.awbNo || upsResult.refNo})`);
         }
-        const { fields, pieces, charges } = uiFormToShipmentPayload({
-          ...payload,
-          pickupId: editing?.pickupId ?? payload.pickupId,
-        });
+        const { fields, pieces, charges } = uiFormToShipmentPayload(
+          {
+            ...payload,
+            pickupId: editing?.pickupId ?? payload.pickupId,
+          },
+          { manualAwbNo: awbMode === "MANUAL" ? payload.awbNo : null },
+        );
         const saved = await saveShipment({
           id: editing?.id ?? null,
           rowVersion: editing?.rowVersion ?? null,
@@ -3180,7 +3353,7 @@ function AwbEntryPage() {
             } else {
               toast.warning(
                 outcome.result.message ||
-                  "Vendor booking failed. Shipment has been saved locally. Retry later.",
+                "Vendor booking failed. Shipment has been saved locally. Retry later.",
               );
             }
           } catch (ve) {
@@ -3267,18 +3440,18 @@ function AwbEntryPage() {
     setEditing((prev) =>
       prev
         ? {
-            ...prev,
-            rowVersion: Number(data.row_version ?? prev.rowVersion ?? 1),
-            carrierProviderCode: data.provider_code
-              ? String(data.provider_code)
-              : prev.carrierProviderCode,
-            carrierBookingRef: data.booking_ref ? String(data.booking_ref) : prev.carrierBookingRef,
-            carrierTrackingNo: data.tracking_no ? String(data.tracking_no) : prev.carrierTrackingNo,
-            carrierBookingStatus: data.carrier_booking_status
-              ? String(data.carrier_booking_status)
-              : prev.carrierBookingStatus,
-            carrierLabelFileId: data.file_id ? String(data.file_id) : prev.carrierLabelFileId,
-          }
+          ...prev,
+          rowVersion: Number(data.row_version ?? prev.rowVersion ?? 1),
+          carrierProviderCode: data.provider_code
+            ? String(data.provider_code)
+            : prev.carrierProviderCode,
+          carrierBookingRef: data.booking_ref ? String(data.booking_ref) : prev.carrierBookingRef,
+          carrierTrackingNo: data.tracking_no ? String(data.tracking_no) : prev.carrierTrackingNo,
+          carrierBookingStatus: data.carrier_booking_status
+            ? String(data.carrier_booking_status)
+            : prev.carrierBookingStatus,
+          carrierLabelFileId: data.file_id ? String(data.file_id) : prev.carrierLabelFileId,
+        }
         : prev,
     );
   };
@@ -3289,12 +3462,12 @@ function AwbEntryPage() {
       setEditing((prev) =>
         prev
           ? {
-              ...prev,
-              carrierProviderCode: resolveCarrierCode(),
-              carrierBookingRef: `DEMO-${Date.now()}`,
-              carrierTrackingNo: `TRK-${editing.awbNo || "DEMO"}`,
-              carrierBookingStatus: "BOOKED",
-            }
+            ...prev,
+            carrierProviderCode: resolveCarrierCode(),
+            carrierBookingRef: `DEMO-${Date.now()}`,
+            carrierTrackingNo: `TRK-${editing.awbNo || "DEMO"}`,
+            carrierBookingStatus: "BOOKED",
+          }
           : prev,
       );
       toast.success("Booked with carrier (demo)");
@@ -3426,10 +3599,10 @@ function AwbEntryPage() {
 
   const canCarrierActions = Boolean(
     editing?.id &&
-      formStatus &&
-      formStatus !== "DRAFT" &&
-      formStatus !== "CANCELLED" &&
-      formStatus !== "VOID",
+    formStatus &&
+    formStatus !== "DRAFT" &&
+    formStatus !== "CANCELLED" &&
+    formStatus !== "VOID",
   );
   const vendorShippingActive = Boolean(
     vendorMeta.status && vendorMeta.status !== "NONE",
@@ -3440,7 +3613,7 @@ function AwbEntryPage() {
   );
   const canRetryVendorBooking = Boolean(
     editing?.id &&
-      (vendorMeta.status === "VENDOR_PENDING" || vendorMeta.status === "FAILED"),
+    (vendorMeta.status === "VENDOR_PENDING" || vendorMeta.status === "FAILED"),
   );
 
   const ensureInternalDocument = async (
@@ -4098,24 +4271,48 @@ function AwbEntryPage() {
                   <IconButton label="Clone Entry" onClick={openEntry}>
                     <Copy className="h-4 w-4" />
                   </IconButton>
-                  <Select value="awbNo" disabled>
-                    <SelectTrigger className="h-8 w-[8.5rem] text-xs">
-                      <SelectValue>AWB No</SelectValue>
+                  <span className="whitespace-nowrap text-xs text-muted-foreground">
+                    Last AWB No.{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-foreground hover:underline disabled:no-underline disabled:opacity-60"
+                      disabled={!latestAwbNo || saving}
+                      onClick={() => void handleFormToolbarSearch(latestAwbNo)}
+                    >
+                      {latestAwbNo || "—"}
+                    </button>
+                  </span>
+                  <Select
+                    value={toolbarSearchField}
+                    onValueChange={(value) => setToolbarSearchField(value as AwbLookupField)}
+                  >
+                    <SelectTrigger className="h-8 w-[9.75rem] text-xs" aria-label="Search by">
+                      <SelectValue />
                     </SelectTrigger>
+                    <SelectContent>
+                      {AWB_LOOKUP_FIELDS.map((item) => (
+                        <SelectItem key={item.value} value={item.value} className="text-xs">
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                   <Input
                     value={formToolbarSearch}
                     onChange={(e) => setFormToolbarSearch(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") handleFormToolbarSearch();
+                      if (e.key === "Enter") void handleFormToolbarSearch();
                     }}
-                    placeholder="Search"
+                    aria-label={
+                      AWB_LOOKUP_FIELDS.find((item) => item.value === toolbarSearchField)?.label ??
+                      "AWB No"
+                    }
                     className="h-8 w-36 text-xs"
                   />
                   <Button
                     size="icon"
                     className="h-8 w-8 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-                    onClick={handleFormToolbarSearch}
+                    onClick={() => void handleFormToolbarSearch()}
                     aria-label="Search AWB"
                   >
                     <Search className="h-3.5 w-3.5" />
@@ -4131,1761 +4328,1743 @@ function AwbEntryPage() {
                 validateBeforeAdvance={validateAwbNavAdvance}
                 onAdvanceBlocked={handleAwbNavAdvanceBlocked}
               >
-            <TabsContent value="awb" className="mt-0">
-              <fieldset disabled={isReadOnly} className="min-w-0 border-0 p-0 disabled:opacity-90">
-                {(() => {
-                  const displayAwbUserId =
-                    awbStatusQuery.data?.awbUserId ||
-                    (profile?.username ? profile.username.toUpperCase() : profile?.full_name?.toUpperCase()) ||
-                    "—";
+                <TabsContent value="awb" className="mt-0">
+                  <fieldset disabled={isReadOnly} className="min-w-0 border-0 p-0 disabled:opacity-90">
+                    {(() => {
+                      const displayAwbUserId =
+                        awbStatusQuery.data?.awbUserId ||
+                        (profile?.username ? profile.username.toUpperCase() : profile?.full_name?.toUpperCase()) ||
+                        "—";
 
-                  const displayPodUserId =
-                    awbStatusQuery.data?.podUserId ||
-                    (profile as unknown as { pod_user_id?: string })?.pod_user_id ||
-                    "—";
+                      const displayPodUserId =
+                        awbStatusQuery.data?.podUserId ||
+                        (profile as unknown as { pod_user_id?: string })?.pod_user_id ||
+                        "—";
 
-                  const displayLimit = awbStatusQuery.data?.limit ?? branchStockQuery.data?.limit ?? null;
-                  const displayUsed = awbStatusQuery.data?.used ?? branchStockQuery.data?.used ?? null;
-                  const displayBalance =
-                    displayLimit !== null && displayUsed !== null
-                      ? displayLimit - displayUsed
-                      : (branchStockQuery.data?.balance ?? null);
+                      const displayLimit = awbStatusQuery.data?.limit ?? branchStockQuery.data?.limit ?? null;
+                      const displayUsed = awbStatusQuery.data?.used ?? branchStockQuery.data?.used ?? null;
+                      const displayBalance =
+                        displayLimit !== null && displayUsed !== null
+                          ? displayLimit - displayUsed
+                          : (branchStockQuery.data?.balance ?? null);
 
-                  const displayManifestNo = awbStatusQuery.data?.manifestNo ?? form.manifestNo ?? "0";
-                  const displayManifestDate = awbStatusQuery.data?.manifestDate || form.manifestDate || "";
-                  const displayInvoiceNo = awbStatusQuery.data?.invoiceNo || form.invoiceNo || "";
-                  const displayDebitNoteNo = awbStatusQuery.data?.debitNoteNo ?? form.debitNoteNo ?? "0";
-                  const displayCreditNoteNo = awbStatusQuery.data?.creditNoteNo ?? form.creditNoteNo ?? "0";
-                  const displayFlightNo = awbStatusQuery.data?.flightNo || form.flightNo || "";
+                      const displayManifestNo = awbStatusQuery.data?.manifestNo ?? form.manifestNo ?? "0";
+                      const displayManifestDate = awbStatusQuery.data?.manifestDate || form.manifestDate || "";
+                      const displayInvoiceNo = awbStatusQuery.data?.invoiceNo || form.invoiceNo || "";
+                      const displayDebitNoteNo = awbStatusQuery.data?.debitNoteNo ?? form.debitNoteNo ?? "0";
+                      const displayCreditNoteNo = awbStatusQuery.data?.creditNoteNo ?? form.creditNoteNo ?? "0";
+                      const displayFlightNo = awbStatusQuery.data?.flightNo || form.flightNo || "";
 
-                  return (
-                    <div
-                      className={cn(
-                        "flex flex-wrap gap-x-3 gap-y-0.5 border-b bg-muted/10 px-2.5 py-0.5 text-[12px] leading-tight text-muted-foreground transition-opacity",
-                        awbStatusQuery.isFetching && "animate-pulse opacity-80",
-                      )}
-                    >
-                      <span>
-                        AWB UserID:{" "}
-                        <span className="font-medium text-foreground">{displayAwbUserId}</span>
-                      </span>
-                      <span>
-                        POD UserID:{" "}
-                        <span className="font-medium text-foreground">{displayPodUserId}</span>
-                      </span>
-                      <span>
-                        AWB Stock:{" "}
-                        <span
+                      return (
+                        <div
                           className={cn(
-                            "font-medium",
-                            displayBalance !== null && displayBalance <= 0
-                              ? "text-destructive font-semibold"
-                              : "text-foreground",
+                            "flex flex-wrap gap-x-3 gap-y-0.5 border-b bg-muted/10 px-2.5 py-0.5 text-[12px] leading-tight text-muted-foreground transition-opacity",
+                            awbStatusQuery.isFetching && "animate-pulse opacity-80",
                           )}
                         >
-                          Limit ({displayLimit !== null ? displayLimit : "—"}) · Used ({displayUsed !== null ? displayUsed : "—"}) · Bal (
-                          {displayBalance !== null ? displayBalance : "—"})
-                        </span>
-                      </span>
-                      <span>Manifest No ({displayManifestNo})</span>
-                      <span>
-                        Manifest Date: {displayManifestDate ? formatDisplayDate(displayManifestDate) : "—"}
-                      </span>
-                      <span>Invoice No: {displayInvoiceNo || "—"}</span>
-                      <span>Debit Note No ({displayDebitNoteNo})</span>
-                      <span>Credit Note No ({displayCreditNoteNo})</span>
-                      <span>Flight No: {displayFlightNo || "—"}</span>
-                      {form.masterAwbNo ? (
-                        <span>
-                          Master AWB:{" "}
-                          <span className="font-medium text-foreground">{form.masterAwbNo}</span>
-                        </span>
-                      ) : null}
-                    </div>
-                  );
-                })()}
-
-                <div className="p-2 md:p-2.5">
-                  <div className="mb-2 rounded border border-border bg-card p-2 pt-2.5">
-                    <div className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-2 lg:grid-cols-12 lg:gap-x-2">
-                      <div className="flex flex-col lg:col-span-2">
-                        <FieldWrapper borderLabel label={`AWB No. [${awbMode}]`}>
-                          <div className="relative flex items-center w-full">
-                            <ErpNavInput
-                              order={AWB_NAV.AWB_NO}
-                              value={awbMode === "AUTO" && !form.awbNo && !editing ? "Auto" : form.awbNo}
-                              disabled={awbMode === "AUTO" || !!editing || isReadOnly || clientSelected}
-                              onValueChange={(v) => setForm((f) => ({ ...f, awbNo: v }))}
-                              onBlur={async () => {
-                                if (awbMode === "MANUAL" && form.awbNo.trim() && authed) {
-                                  try {
-                                    const res = await validateManualAwb({
-                                      branchId: profile?.home_branch_id || undefined,
-                                      awbNo: form.awbNo,
-                                    });
-                                    if (!res.valid) {
-                                      toast.error(res.message || "Invalid manual AWB number");
-                                    } else {
-                                      toast.success(res.message);
-                                    }
-                                  } catch (err) {
-                                    toast.error(`AWB validation error: ${toErrorMessage(err)}`);
-                                  }
-                                }
-                              }}
-                              placeholder={awbMode === "AUTO" ? "Auto" : "Enter Manual AWB"}
-                              className="h-8 pr-12 px-1.5 text-[13px]"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (editing || isReadOnly) return;
-                                const nextMode = awbMode === "AUTO" ? "MANUAL" : "AUTO";
-                                setAwbMode(nextMode);
-                                toast.info(
-                                  nextMode === "MANUAL"
-                                    ? "Switched to MANUAL AWB mode"
-                                    : "Switched to AUTO AWB mode",
-                                );
-                                if (nextMode === "AUTO") {
-                                  setForm((f) => ({ ...f, awbNo: "" }));
-                                }
-                              }}
-                              disabled={!!editing || isReadOnly}
+                          <span>
+                            AWB UserID:{" "}
+                            <span className="font-medium text-foreground">{displayAwbUserId}</span>
+                          </span>
+                          <span>
+                            POD UserID:{" "}
+                            <span className="font-medium text-foreground">{displayPodUserId}</span>
+                          </span>
+                          <span>
+                            AWB Stock:{" "}
+                            <span
                               className={cn(
-                                "absolute right-1 px-1 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-colors border",
-                                awbMode === "AUTO"
-                                  ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300"
-                                  : "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300",
+                                "font-medium",
+                                displayBalance !== null && displayBalance <= 0
+                                  ? "text-destructive font-semibold"
+                                  : "text-foreground",
                               )}
-                              title="Toggle Auto/Manual AWB mode (Alt+~)"
                             >
-                              {awbMode}
-                            </button>
-                          </div>
-                        </FieldWrapper>
-                      </div>
-                      <FieldWrapper borderLabel label="Book Date" className="lg:col-span-2">
-                        <ErpNavDateInput
-                          order={AWB_NAV.BOOK_DATE}
-                          value={form.bookDate}
-                          onValueChange={(v) => setForm((f) => ({ ...f, bookDate: v }))}
-                          className="h-8 px-1.5 text-[13px]"
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Time" className="lg:col-span-1">
-                        <ErpNavInput
-                          order={AWB_NAV.TIME}
-                          value={form.bookTime}
-                          onValueChange={(v) =>
-                            setForm((f) => ({
-                              ...f,
-                              bookTime: v.replace(/\D/g, "").slice(0, 4),
-                            }))
-                          }
-                          placeholder="HHmm"
-                          className="h-8 px-1.5 text-[13px]"
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Reference No." className="lg:col-span-2">
-                        <ErpNavInput
-                          order={AWB_NAV.REFERENCE}
-                          value={form.referenceNo}
-                          onValueChange={(v) => setForm((f) => ({ ...f, referenceNo: v }))}
-                          className="h-8 px-1.5 text-[13px]"
-                        />
-                      </FieldWrapper>
-                      <div className="min-w-0 lg:col-span-3">
-                        <FieldWrapper
-                          borderLabel
-                          lookupSplit
-                          label="Client Name"
-                          required
-                          invalid={navInvalidOrders.has(AWB_NAV.CLIENT)}
-                        >
-                          <ClientNameField
-                            value={form.clientName}
-                            onDraftChange={handleClientNameDraft}
-                            onSelect={(v) => void handleClientSelect(v)}
-                            disabled={clientLoading}
-                          />
-                        </FieldWrapper>
-                        {clientLoading ? (
-                          <p className="mt-0.5 text-[10px] text-muted-foreground">Loading client profile…</p>
-                        ) : loadedClientProfile?.paymentType ? (
-                          <p className="mt-0.5 text-[10px] text-muted-foreground">
-                            Payment Type from Client Master: {loadedClientProfile.paymentType}
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-
-                </div>
-              </fieldset>
-
-              {isSaved && editing?.id ? (
-                <div className="px-2 md:px-2.5">
-                  <ShipmentDocumentQuickLinks
-                    shipmentId={editing.id}
-                    refreshKey={vendorPanelKey}
-                    onOpenCenter={() => {
-                      document
-                        .getElementById("shipment-documents-center")
-                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }}
-                    onEnsureDocument={ensureInternalDocument}
-                  />
-                </div>
-              ) : null}
-
-              <fieldset disabled={isReadOnly} className="min-w-0 border-0 p-0 disabled:opacity-90">
-                <div className="p-2 md:p-2.5">
-                  <div className="mt-0.5 grid grid-cols-1 items-start gap-2 pt-2 md:grid-cols-2 xl:grid-cols-3 xl:gap-2.5">
-                    <PartySection
-                      title="Shipper Details"
-                      party={form.shipper}
-                      onChange={(p) => patchParty("shipper", p)}
-                      originLookup="destination"
-                      originRequired
-                      invalidNavOrders={navInvalidOrders}
-                      onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
-                    />
-                    <PartySection
-                      title="Consignee Details"
-                      party={form.consignee}
-                      onChange={(p) => patchParty("consignee", p)}
-                      originLookup="internationalDestination"
-                      originRequired={consigneeFieldsRequired}
-                      companyRequired={consigneeFieldsRequired}
-                      invalidNavOrders={navInvalidOrders}
-                      onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
-                    />
-                    <ServicesSection
-                      form={form}
-                      setForm={setForm}
-                      airlineRequired={!formSetupSettings.airlineNotRequired}
-                      invalidNavOrders={navInvalidOrders}
-                    />
-                  </div>
-
-                  <div className="mt-1 grid grid-cols-1 gap-1.5 md:grid-cols-3">
-                    <div className="flex items-end gap-1.5">
-                      <Button
-                        size="sm"
-                        className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
-                        {...erpNavSkip()}
-                        onClick={() => {
-                          void handleCheckRateCombination();
-                        }}
-                      >
-                        Customer Charges
-                      </Button>
-                      <Input
-                        value={form.customerChargesTotal}
-                        readOnly
-                        className="h-8 bg-muted/30 px-1.5 text-[13px]"
-                        placeholder="Total Amount"
-                      />
-                    </div>
-                    <div className="flex items-end gap-1.5">
-                      <Button
-                        size="sm"
-                        className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
-                        {...erpNavSkip()}
-                        onClick={() =>
-                          toast.info("Vendor charges will be enabled with backend wiring")
-                        }
-                      >
-                        Vendor Charges
-                      </Button>
-                      <Input
-                        value={form.vendorChargesTotal}
-                        readOnly
-                        className="h-8 bg-muted/30 px-1.5 text-[13px]"
-                        placeholder="Total Amount"
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <Button
-                        size="sm"
-                        className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
-                        {...erpNavSkip()}
-                        onClick={() =>
-                          toast.info("Rate compare will be enabled with backend wiring")
-                        }
-                      >
-                        Rate Compare
-                      </Button>
-                    </div>
-                  </div>
-
-                  <Collapsible open={piecesOpen} onOpenChange={setPiecesOpen} className="mt-4">
-                    <CollapsibleTrigger
-                      className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
-                      {...erpNavSkip()}
-                    >
-                      Click here to enter Pieces details Or Press [Alt + u]
-                      <ChevronDown
-                        className={cn("h-4 w-4 transition-transform", piecesOpen && "rotate-180")}
-                      />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="border border-t-0 bg-card">
-                      <div className="relative mx-3 mt-3 rounded border border-border bg-card p-3 pt-5">
-                        <span className="absolute left-2.5 top-0 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[13px] font-semibold leading-none text-sidebar-foreground">
-                          Import MTS
-                        </span>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                          <Button
-                            type="button"
-                            variant="link"
-                            size="sm"
-                            className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
-                            {...erpNavSkip()}
-                            onClick={() =>
-                              toast.info("Excel format download will be enabled with backend wiring")
-                            }
-                          >
-                            <FileSpreadsheet className="h-4 w-4 shrink-0" />
-                            Download Excel File Format
-                          </Button>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm text-foreground">Select File</span>
-                            <Input type="file" className="h-8 max-w-[220px] text-[13px]" {...erpNavSkip()} />
-                            <Button
-                              type="button"
-                              size="sm"
-                              className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
-                              {...erpNavSkip()}
-                              onClick={() =>
-                                toast.info("Import MTS will be enabled with backend wiring")
-                              }
-                            >
-                              Upload
-                            </Button>
-                          </div>
+                              Limit ({displayLimit !== null ? displayLimit : "—"}) · Used ({displayUsed !== null ? displayUsed : "—"}) · Bal (
+                              {displayBalance !== null ? displayBalance : "—"})
+                            </span>
+                          </span>
+                          <span>Manifest No ({displayManifestNo})</span>
+                          <span>
+                            Manifest Date: {displayManifestDate ? formatDisplayDate(displayManifestDate) : "—"}
+                          </span>
+                          <span>Invoice No: {displayInvoiceNo || "—"}</span>
+                          <span>Debit Note No ({displayDebitNoteNo})</span>
+                          <span>Credit Note No ({displayCreditNoteNo})</span>
+                          <span>Flight No: {displayFlightNo || "—"}</span>
+                          {form.masterAwbNo ? (
+                            <span>
+                              Master AWB:{" "}
+                              <span className="font-medium text-foreground">{form.masterAwbNo}</span>
+                            </span>
+                          ) : null}
                         </div>
-                      </div>
+                      );
+                    })()}
 
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(7.5rem,1.2fr)_minmax(5.25rem,0.85fr)_minmax(4.75rem,0.8fr)_repeat(3,minmax(3.75rem,0.72fr))_minmax(4.5rem,0.78fr)_minmax(11.5rem,1.35fr)_minmax(5.25rem,0.85fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                        <FieldWrapper borderLabel label="Measurement Unit">
-                          <ErpNavSelect
-                            order={AWB_NAV.PIECES_MEASUREMENT_UNIT}
-                            value={piecesDraft.measurementUnit}
-                            onValueChange={(v) => patchPiecesDraft({ measurementUnit: v })}
-                            items={MEASUREMENT_UNITS}
-                            triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Actl Weight/PCS">
-                          <ErpNavInput
-                            order={AWB_NAV.PIECES_ACTUAL_WEIGHT_PCS}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={piecesDraft.actualWeightPerPc}
-                            onValueChange={(v) => patchPiecesDraft({ actualWeightPerPc: v })}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="No. Of Pieces">
-                          <ErpNavInput
-                            order={AWB_NAV.PIECES_NO_OF_PIECES}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={piecesDraft.noOfPieces}
-                            onValueChange={(v) => patchPiecesDraft({ noOfPieces: v })}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Length">
-                          <ErpNavInput
-                            order={AWB_NAV.PIECES_LENGTH}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={piecesDraft.length}
-                            onValueChange={(v) => patchPiecesDraft({ length: v })}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Width">
-                          <ErpNavInput
-                            order={AWB_NAV.PIECES_WIDTH}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={piecesDraft.width}
-                            onValueChange={(v) => patchPiecesDraft({ width: v })}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Height">
-                          <ErpNavInput
-                            order={AWB_NAV.PIECES_HEIGHT}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={piecesDraft.height}
-                            onValueChange={(v) => patchPiecesDraft({ height: v })}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Division">
-                          <ErpNavInput
-                            order={AWB_NAV.PIECES_DIVISION}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={piecesDraft.division}
-                            onValueChange={(v) => patchPiecesDraft({ division: v })}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper
-                          borderLabel
-                          label="Vol Weight (Discount - 0 %)"
-                          className="sm:col-span-2 md:col-span-2 lg:col-span-2 xl:col-span-1"
-                        >
-                          <Input
-                            value={piecesDraft.volWeight}
-                            readOnly
-                            {...erpNavOrder(AWB_NAV.PIECES_VOL_WEIGHT)}
-                            className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Chrg Weight">
-                          <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
-                            <Input
-                              value={piecesDraft.chargeWeight}
-                              readOnly
-                              {...erpNavOrder(AWB_NAV.PIECES_CHARGE_WEIGHT)}
-                              className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" && e.shiftKey) {
-                                  e.preventDefault();
-                                  const container = awbFormNavRef.current;
-                                  if (container) {
-                                    focusPrevBeforeOrder(container, AWB_NAV.PIECES_CHARGE_WEIGHT);
-                                  }
-                                  return;
-                                }
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  commitPiecesLine();
-                                }
-                              }}
-                            />
-                          </div>
-                        </FieldWrapper>
-                        <div className="col-span-2 flex items-end justify-end sm:col-span-1 lg:col-span-1 xl:col-span-1">
-                          <Button
-                            type="button"
-                            className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
-                            {...erpNavSkip()}
-                            onClick={addPiecesLine}
-                          >
-                            <Plus className="mr-1 h-4 w-4" />
-                            Add
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="overflow-x-auto border-t">
-                        <table className="w-full min-w-[720px] text-sm">
-                          <TableHeader>
-                            <TableRow className="bg-sidebar hover:bg-sidebar">
-                              {[
-                                "Child AWB",
-                                "Actl Weight/PCS",
-                                "Pieces",
-                                "Length",
-                                "Breadth",
-                                "Height",
-                                "Volumetric Weight",
-                                "Charge Weight",
-                                "Action",
-                              ].map((h) => (
-                                <TableHead key={h} className="text-sidebar-foreground">
-                                  {h}
-                                </TableHead>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {form.piecesLines.length === 0 ? (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={9}
-                                  className="h-16 text-center text-muted-foreground"
+                    <div className="p-2 md:p-2.5">
+                      <div className="mb-2 rounded border border-border bg-card p-2 pt-2.5">
+                        <div className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-2 lg:grid-cols-12 lg:gap-x-2">
+                          <div className="flex flex-col lg:col-span-2">
+                            <FieldWrapper borderLabel label={`AWB No. [${awbMode}]`}>
+                              <div className="relative flex items-center w-full">
+                                <ErpNavInput
+                                  order={AWB_NAV.AWB_NO}
+                                  value={form.awbNo}
+                                  disabled={awbMode === "AUTO" || !!editing || isReadOnly || clientSelected}
+                                  onValueChange={(v) => setForm((f) => ({ ...f, awbNo: v }))}
+                                  onBlur={async () => {
+                                    if (awbMode === "MANUAL" && form.awbNo.trim() && authed) {
+                                      try {
+                                        const res = await validateManualAwb({
+                                          branchId: profile?.home_branch_id || undefined,
+                                          awbNo: form.awbNo,
+                                        });
+                                        if (!res.valid) {
+                                          toast.error(res.message || "Invalid manual AWB number");
+                                        } else {
+                                          toast.success(res.message);
+                                        }
+                                      } catch (err) {
+                                        toast.error(`AWB validation error: ${toErrorMessage(err)}`);
+                                      }
+                                    }
+                                  }}
+                                  className="h-8 pr-12 px-1.5 text-[13px]"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (editing || isReadOnly) return;
+                                    const nextMode = awbMode === "AUTO" ? "MANUAL" : "AUTO";
+                                    setAwbMode(nextMode);
+                                    toast.info(
+                                      nextMode === "MANUAL"
+                                        ? "Switched to MANUAL AWB mode"
+                                        : "Switched to AUTO AWB mode",
+                                    );
+                                    if (nextMode === "AUTO") {
+                                      setForm((f) => ({ ...f, awbNo: "" }));
+                                    }
+                                  }}
+                                  disabled={!!editing || isReadOnly}
+                                  className={cn(
+                                    "absolute right-1 px-1 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-colors border",
+                                    awbMode === "AUTO"
+                                      ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300"
+                                      : "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300",
+                                  )}
+                                  title="Toggle Auto/Manual AWB mode (Alt+~)"
                                 >
-                                  No piece lines added
-                                </TableCell>
-                              </TableRow>
-                            ) : (
-                              form.piecesLines.map((l) => (
-                                <TableRow key={l.id}>
-                                  <TableCell>{l.childAwb || "—"}</TableCell>
-                                  <TableCell>{l.actualWeightPerPc}</TableCell>
-                                  <TableCell>{l.pieces}</TableCell>
-                                  <TableCell>{l.length}</TableCell>
-                                  <TableCell>{l.breadth}</TableCell>
-                                  <TableCell>{l.height}</TableCell>
-                                  <TableCell>{l.volWeight}</TableCell>
-                                  <TableCell>{l.chargeWeight}</TableCell>
-                                  <TableCell>
-                                    <Button
-                                      size="icon"
-                                      variant="ghost"
-                                      className="h-8 w-8 text-destructive"
-                                      onClick={() => removePiecesLine(l.id)}
-                                      aria-label="Delete piece line"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              ))
-                            )}
-                          </TableBody>
-                        </table>
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-
-                  <Collapsible open={chargesOpen} onOpenChange={setChargesOpen} className="mt-4">
-                    <CollapsibleTrigger
-                      className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
-                      {...erpNavSkip()}
-                    >
-                      Click here to enter Charge details Or Press [Alt + c]
-                      <ChevronDown
-                        className={cn("h-4 w-4 transition-transform", chargesOpen && "rotate-180")}
-                      />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="border border-t-0 bg-card">
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-4 xl:grid-cols-8 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                        {(
-                          [
-                            ["Contract Charges", chargeSummary.contractCharges],
-                            ["Other Charges", chargeSummary.otherCharges],
-                            ["Sub Total", chargeSummary.subTotal],
-                            ["Total Fuel", chargeSummary.totalFuel],
-                            ["IGST", chargeSummary.igst],
-                            ["CGST", chargeSummary.cgst],
-                            ["SGST", chargeSummary.sgst],
-                            ["Total Amount", chargeSummary.totalAmount],
-                          ] as const
-                        ).map(([label, val]) => (
-                          <FieldWrapper key={label} borderLabel label={label}>
-                            <Input
-                              value={val}
-                              readOnly
-                              className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  {awbMode}
+                                </button>
+                              </div>
+                            </FieldWrapper>
+                          </div>
+                          <FieldWrapper borderLabel label="Book Date" className="lg:col-span-2">
+                            <ErpNavDateInput
+                              order={AWB_NAV.BOOK_DATE}
+                              value={form.bookDate}
+                              onValueChange={(v) => setForm((f) => ({ ...f, bookDate: v }))}
+                              className="h-8 px-1.5 text-[13px]"
                             />
                           </FieldWrapper>
-                        ))}
-                      </div>
-                      <div className="flex flex-wrap gap-2 border-b px-3 py-2.5">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8 border-emerald-600 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                          {...erpNavSkip()}
-                          disabled={saving || isReadOnly}
-                          onClick={() => {
-                            void handleCheckRateCombination();
-                          }}
-                        >
-                          Check Rate Combination
-                        </Button>
-                        {authed && editing?.id ? (
-                          <>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8"
-                              {...erpNavSkip()}
-                              disabled={saving || isReadOnly}
-                              onClick={() => {
-                                void (async () => {
-                                  try {
-                                    const breakdown = await calculateShipmentRating(editing.id!);
-                                    applyServerRating(breakdown);
-                                    await refreshLive();
-                                    toast.success(
-                                      `Rated — total ${ratingToSummary(breakdown).totalAmount}`,
-                                    );
-                                  } catch (e) {
-                                    toast.error(toErrorMessage(e));
-                                  }
-                                })();
-                              }}
+                          <FieldWrapper borderLabel label="Time" className="lg:col-span-1">
+                            <ErpNavInput
+                              order={AWB_NAV.TIME}
+                              value={form.bookTime}
+                              onValueChange={(v) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  bookTime: v.replace(/\D/g, "").slice(0, 4),
+                                }))
+                              }
+                              className="h-8 px-1.5 text-[13px]"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Reference No." className="lg:col-span-2">
+                            <ErpNavInput
+                              order={AWB_NAV.REFERENCE}
+                              value={form.referenceNo}
+                              onValueChange={(v) => setForm((f) => ({ ...f, referenceNo: v }))}
+                              className="h-8 px-1.5 text-[13px]"
+                            />
+                          </FieldWrapper>
+                          <div className="min-w-0 lg:col-span-3">
+                            <FieldWrapper
+                              borderLabel
+                              lookupSplit
+                              label="Client Name"
+                              required
+                              invalid={navInvalidOrders.has(AWB_NAV.CLIENT)}
                             >
-                              Calculate rating
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8"
-                              {...erpNavSkip()}
-                              disabled={saving || isReadOnly}
-                              onClick={() => {
-                                void (async () => {
-                                  try {
-                                    const breakdown = await recalculateShipmentRating({
-                                      id: editing.id!,
-                                      row_version: editing.rowVersion ?? 1,
-                                    });
-                                    applyServerRating(breakdown);
-                                    await refreshLive();
-                                    toast.success(
-                                      `Recalculated — total ${ratingToSummary(breakdown).totalAmount}`,
-                                    );
-                                  } catch (e) {
-                                    toast.error(toErrorMessage(e));
-                                  }
-                                })();
-                              }}
-                            >
-                              Recalculate
-                            </Button>
-                          </>
-                        ) : null}
-                        {ratingSummary ? (
-                          <span className="self-center text-xs text-muted-foreground">
-                            Server rating: freight {ratingSummary.freight} · fuel{" "}
-                            {ratingSummary.fuel} · tax {ratingSummary.tax} · total{" "}
-                            {ratingSummary.totalAmount}
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                        <FieldWrapper borderLabel label="Description" required>
-                          <ErpNavSelect
-                            order={AWB_NAV.CHARGE_DESCRIPTION}
-                            value={chargeDraft.description || undefined}
-                            onValueChange={(v) =>
-                              setChargeDraft((d) => ({
-                                ...d,
-                                description: v,
-                                itemTotal: d.itemAmount || "0",
-                              }))
-                            }
-                            placeholder="Select"
-                            items={CHARGE_DESCRIPTIONS}
-                            triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Item Amount" required>
-                          <ErpNavInput
-                            order={AWB_NAV.CHARGE_ITEM_AMOUNT}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={chargeDraft.itemAmount}
-                            onValueChange={(v) =>
-                              setChargeDraft((d) => ({
-                                ...d,
-                                itemAmount: v,
-                                itemTotal: v || "0",
-                              }))
-                            }
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Item Fuel (0%)">
-                          <div className="flex w-full min-w-0 items-stretch">
-                            <ErpNavSelect
-                              order={AWB_NAV.CHARGE_ITEM_FUEL}
-                              value={chargeDraft.itemFuel}
-                              onValueChange={(v) => setChargeDraft((d) => ({ ...d, itemFuel: v }))}
-                              items={YES_NO}
-                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                            />
-                            <Input
-                              value="0.00"
-                              readOnly
-                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            />
+                              <ClientNameField
+                                value={form.clientName}
+                                onDraftChange={handleClientNameDraft}
+                                onSelect={(v) => void handleClientSelect(v)}
+                                disabled={clientLoading}
+                              />
+                            </FieldWrapper>
+                            {clientLoading ? (
+                              <p className="mt-0.5 text-[10px] text-muted-foreground">Loading client profile…</p>
+                            ) : loadedClientProfile?.paymentType ? (
+                              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                Payment Type from Client Master: {loadedClientProfile.paymentType}
+                              </p>
+                            ) : null}
                           </div>
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Tax On Fuel">
-                          <div className="flex w-full min-w-0 items-stretch">
-                            <ErpNavSelect
-                              order={AWB_NAV.CHARGE_TAX_ON_FUEL}
-                              value={chargeDraft.taxOnFuel}
-                              onValueChange={(v) => setChargeDraft((d) => ({ ...d, taxOnFuel: v }))}
-                              items={YES_NO}
-                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                            />
-                            <Input
-                              value="0.00"
-                              readOnly
-                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            />
-                          </div>
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Tax">
-                          <div className="flex w-full min-w-0 items-stretch">
-                            <ErpNavSelect
-                              order={AWB_NAV.CHARGE_TAX}
-                              value={chargeDraft.tax}
-                              onValueChange={(v) => setChargeDraft((d) => ({ ...d, tax: v }))}
-                              items={YES_NO}
-                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                            />
-                            <Input
-                              value="0.00"
-                              readOnly
-                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            />
-                          </div>
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Item Total">
-                          <Input
-                            value={chargeDraft.itemTotal}
-                            readOnly
-                            className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          />
-                        </FieldWrapper>
-                        <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
-                          <Button
-                            type="button"
-                            className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
-                            {...erpNavOrder(AWB_NAV.CHARGE_ADD)}
-                            onClick={addChargeLine}
-                          >
-                            <Plus className="mr-1 h-4 w-4" />
-                            Add
-                          </Button>
                         </div>
                       </div>
-                      <div className="overflow-x-auto border-t">
-                        <table className="w-full min-w-[960px] text-sm">
-                          <TableHeader>
-                            <TableRow className="bg-sidebar hover:bg-sidebar">
-                              {[
-                                "Description",
-                                "Rate",
-                                "Amount",
-                                "Fuel Apply",
-                                "Fuel Amt",
-                                "TaxApply",
-                                "Tax On Fuel",
-                                "IGST",
-                                "SGST",
-                                "CGST",
-                                "Total",
-                                "Charges Type",
-                                "Action",
-                              ].map((h) => (
-                                <TableHead
-                                  key={h}
-                                  className="whitespace-nowrap text-sidebar-foreground"
-                                >
-                                  {h}
-                                </TableHead>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {form.chargeLines.length === 0 ? (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={13}
-                                  className="h-16 text-center text-muted-foreground"
-                                >
-                                  No charge lines added
-                                </TableCell>
-                              </TableRow>
-                            ) : (
-                              form.chargeLines.map((l) => (
-                                <TableRow key={l.id}>
-                                  <TableCell>{l.description}</TableCell>
-                                  <TableCell>{l.rate}</TableCell>
-                                  <TableCell>{l.amount}</TableCell>
-                                  <TableCell>{l.fuelApply}</TableCell>
-                                  <TableCell>{l.fuelAmt}</TableCell>
-                                  <TableCell>{l.taxApply}</TableCell>
-                                  <TableCell>{l.taxOnFuel}</TableCell>
-                                  <TableCell>{l.igst}</TableCell>
-                                  <TableCell>{l.sgst}</TableCell>
-                                  <TableCell>{l.cgst}</TableCell>
-                                  <TableCell>{l.total}</TableCell>
-                                  <TableCell>{l.chargesType}</TableCell>
-                                  <TableCell>
-                                    <Button
-                                      size="icon"
-                                      variant="ghost"
-                                      className="h-8 w-8 text-destructive"
-                                      onClick={() => removeChargeLine(l.id)}
-                                      aria-label="Delete charge line"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              ))
-                            )}
-                          </TableBody>
-                        </table>
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
 
-                  <FormSection title="Shipment Details" className="mt-4">
-                    <ShipmentDetailsFields
-                      form={form}
-                      setForm={setForm}
-                      paymentTypeReadOnly={paymentTypeReadOnly}
-                      clientLoading={clientLoading}
-                      isReadOnly={isReadOnly}
-                    />
-                  </FormSection>
-                </div>
-              </fieldset>
-              {editing?.id &&
-              (showShipmentDocumentsCenter || vendorShippingActive || vendorBookingBusy) ? (
-                <div className="space-y-4 border-t px-4 py-4 md:px-6">
-                  {vendorShippingActive || vendorBookingBusy ? (
-                    vendorMeta.status === "VENDOR_BOOKED" || vendorMeta.otpVerified ? (
-                      <ShipmentBookedBanner
-                        vendorAwb={vendorMeta.vendorAwb}
-                        trackingNumber={vendorMeta.trackingNumber}
-                        provider={vendorMeta.provider}
-                      />
-                    ) : (
-                      <VendorBookingStatusStrip
-                        meta={vendorMeta}
-                        bookingInProgress={vendorBookingBusy}
-                        canRetry={canRetryVendorBooking && !vendorBookingBusy}
-                        onRetry={() => void runVendorRetry()}
-                        lastResult={vendorLastResult}
-                      />
-                    )
-                  ) : null}
-                  {showShipmentDocumentsCenter ? (
-                    <div id="shipment-documents-center">
-                      <ShipmentDocumentsCard
+                    </div>
+                  </fieldset>
+
+                  {isSaved && editing?.id ? (
+                    <div className="px-2 md:px-2.5">
+                      <ShipmentDocumentQuickLinks
                         shipmentId={editing.id}
                         refreshKey={vendorPanelKey}
-                        poll={vendorShippingActive}
+                        onOpenCenter={() => {
+                          document
+                            .getElementById("shipment-documents-center")
+                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }}
                         onEnsureDocument={ensureInternalDocument}
                       />
                     </div>
                   ) : null}
-                  {vendorShippingActive || vendorBookingBusy ? (
-                    <VendorActivityTimeline shipmentId={editing.id} refreshKey={vendorPanelKey} />
-                  ) : null}
-                </div>
-              ) : null}
-              {canCarrierActions && !vendorShippingActive ? (
-                <div className="border-t px-4 py-4 md:px-6">
-                  <FormSection title="Carrier booking & tracking">
-                    <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <FieldWrapper label="Provider">
-                        <Input
-                          readOnly
-                          className="bg-muted/30"
-                          value={editing?.carrierProviderCode || resolveCarrierCode()}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper label="Booking status">
-                        <Input
-                          readOnly
-                          className="bg-muted/30"
-                          value={editing?.carrierBookingStatus || "NONE"}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper label="Booking ref">
-                        <Input
-                          readOnly
-                          className="bg-muted/30"
-                          value={editing?.carrierBookingRef || ""}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper label="Tracking no">
-                        <Input
-                          readOnly
-                          className="bg-muted/30"
-                          value={editing?.carrierTrackingNo || ""}
-                        />
-                      </FieldWrapper>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {!carrierBooked ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={saving}
-                          onClick={() => void handleCarrierBook()}
-                        >
-                          Book with carrier
-                        </Button>
-                      ) : (
-                        <>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={saving}
-                            onClick={() => void handleCarrierCancel()}
-                          >
-                            Cancel booking
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={saving}
-                            onClick={() => void handleCarrierTrack()}
-                          >
-                            Refresh tracking
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={saving}
-                            onClick={() => void handleCarrierLabel()}
-                          >
-                            Download label
-                          </Button>
-                        </>
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={saving}
-                        onClick={() => void handleCarrierServiceability()}
-                      >
-                        Check serviceability
-                      </Button>
-                      <span className="self-center text-xs text-muted-foreground">
-                        Supported: {SUPPORTED_CARRIER_CODES.join(", ")}
-                      </span>
-                    </div>
-                  </FormSection>
-                </div>
-              ) : null}
-              <div className="border-t px-4 py-4 md:px-6">
-                {bookingErrors.length > 0 ? (
-                  <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                    {bookingErrors.map((msg) => (
-                      <div key={msg}>{msg}</div>
-                    ))}
-                  </div>
-                ) : null}
-                <AwbFormFooter
-                  showPrevious={false}
-                  readOnly={isReadOnly}
-                  saving={saving}
-                  onSave={handleSave}
-                  onNext={goNextTab}
-                  onCancel={requestCloseForm}
-                />
-              </div>
-            </TabsContent>
 
-            <TabsContent value="proforma" className="mt-0">
-              <div className="p-4 md:p-6">
-                <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
-                  <FormSection title="Manifest GST Detail">
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                      <FieldWrapper borderLabel label="CSB_Type">
-                        <ErpNavSelect
-                          order={AWB_NAV.PROFORMA_CSB_TYPE}
-                          value={form.proforma.csbType}
-                          onValueChange={(v) => patchProforma({ csbType: v })}
-                          items={CSB_TYPES}
-                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                  <fieldset disabled={isReadOnly} className="min-w-0 border-0 p-0 disabled:opacity-90">
+                    <div className="p-2 md:p-2.5">
+                      <div className="mt-0.5 grid grid-cols-1 items-start gap-2 pt-2 md:grid-cols-2 xl:grid-cols-3 xl:gap-2.5">
+                        <PartySection
+                          title="Shipper Details"
+                          party={form.shipper}
+                          onChange={(p) => patchParty("shipper", p)}
+                          originLookup="destination"
+                          originRequired
+                          invalidNavOrders={navInvalidOrders}
+                          onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
                         />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Term Of Invoice">
-                        <ErpNavSelect
-                          order={AWB_NAV.PROFORMA_TERM_OF_INVOICE}
-                          value={form.proforma.termOfInvoice || PROFORMA_DROPDOWN_SELECT}
-                          onValueChange={(v) =>
-                            patchProforma({
-                              termOfInvoice: v === PROFORMA_DROPDOWN_SELECT ? "" : v,
-                            })
-                          }
-                          placeholder={PROFORMA_DROPDOWN_SELECT}
-                          items={[PROFORMA_DROPDOWN_SELECT, ...TERM_OF_INVOICE]}
-                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                        <PartySection
+                          title="Consignee Details"
+                          party={form.consignee}
+                          onChange={(p) => patchParty("consignee", p)}
+                          originLookup="internationalDestination"
+                          originRequired={consigneeFieldsRequired}
+                          companyRequired={consigneeFieldsRequired}
+                          invalidNavOrders={navInvalidOrders}
+                          onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
                         />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="GST Invoice">
-                        <ErpNavSelect
-                          order={AWB_NAV.PROFORMA_GST_INVOICE}
-                          value={form.proforma.gstInvoice ? "Yes" : "No"}
-                          onValueChange={(v) => patchProforma({ gstInvoice: v === "Yes" })}
-                          items={YES_NO}
-                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                        <ServicesSection
+                          form={form}
+                          setForm={setForm}
+                          airlineRequired={!formSetupSettings.airlineNotRequired}
+                          invalidNavOrders={navInvalidOrders}
                         />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Invoice No">
-                        <ErpNavInput
-                          order={AWB_NAV.PROFORMA_INVOICE_NO}
-                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          value={form.proforma.invoiceNo}
-                          onValueChange={(v) => patchProforma({ invoiceNo: v })}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Invoice Date">
-                        <ErpNavDateInput
-                          order={AWB_NAV.PROFORMA_INVOICE_DATE}
-                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          value={form.proforma.invoiceDate}
-                          onValueChange={(v) => patchProforma({ invoiceDate: v })}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Department No">
-                        <Input
-                          readOnly
-                          className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          value={form.proforma.departmentNo}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Export Reason">
-                        <ErpNavSelect
-                          order={AWB_NAV.PROFORMA_EXPORT_REASON}
-                          value={form.proforma.exportReason}
-                          onValueChange={(v) => patchProforma({ exportReason: v })}
-                          items={EXPORT_REASONS}
-                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Format">
-                        <ErpNavSelect
-                          order={AWB_NAV.PROFORMA_FORMAT}
-                          value={form.proforma.format || PROFORMA_DROPDOWN_SELECT}
-                          onValueChange={(v) =>
-                            patchProforma({
-                              format: v === PROFORMA_DROPDOWN_SELECT ? "" : v,
-                            })
-                          }
-                          placeholder={PROFORMA_DROPDOWN_SELECT}
-                          items={[PROFORMA_DROPDOWN_SELECT, ...PROFORMA_FORMATS]}
-                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                        />
-                      </FieldWrapper>
-                    </div>
-                  </FormSection>
+                      </div>
 
-                  <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]">
-                    <div className="relative rounded border border-border bg-card p-3 pt-5">
-                      <span className="absolute left-2.5 top-0 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[13px] font-semibold leading-none text-sidebar-foreground">
-                        Import Proforma
-                      </span>
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="sm"
-                          className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
-                          {...erpNavSkip()}
-                          onClick={() =>
-                            toast.info("Excel format download will be enabled with backend wiring")
-                          }
-                        >
-                          <FileSpreadsheet className="h-4 w-4 shrink-0" />
-                          Download Excel File Format
-                        </Button>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm text-foreground">Select File</span>
-                          <Input type="file" className="h-8 max-w-[220px] text-[13px]" {...erpNavSkip()} />
+                      <div className="mt-1 grid grid-cols-1 gap-1.5 md:grid-cols-3">
+                        <div className="flex items-end gap-1.5">
                           <Button
-                            type="button"
                             size="sm"
-                            className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
+                            className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+                            {...erpNavSkip()}
+                            onClick={() => {
+                              void handleCheckRateCombination();
+                            }}
+                          >
+                            Customer Charges
+                          </Button>
+                          <Input
+                            value={form.customerChargesTotal}
+                            readOnly
+                            className="h-8 bg-muted/30 px-1.5 text-[13px]"
+                          />
+                        </div>
+                        <div className="flex items-end gap-1.5">
+                          <Button
+                            size="sm"
+                            className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
                             {...erpNavSkip()}
                             onClick={() =>
-                              toast.info("Proforma import will be enabled with backend wiring")
+                              toast.info("Vendor charges will be enabled with backend wiring")
                             }
                           >
-                            <Upload className="h-3.5 w-3.5" />
-                            Upload
+                            Vendor Charges
+                          </Button>
+                          <Input
+                            value={form.vendorChargesTotal}
+                            readOnly
+                            className="h-8 bg-muted/30 px-1.5 text-[13px]"
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <Button
+                            size="sm"
+                            className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+                            {...erpNavSkip()}
+                            onClick={() =>
+                              toast.info("Rate compare will be enabled with backend wiring")
+                            }
+                          >
+                            Rate Compare
                           </Button>
                         </div>
                       </div>
-                    </div>
-                    <div className="min-w-[12rem]">
-                      <FormSection title="Currency">
-                        <ErpNavSelect
-                          order={AWB_NAV.PROFORMA_CURRENCY}
-                          value={form.proforma.currency}
-                          onValueChange={(v) => patchProforma({ currency: v })}
-                          items={PROFORMA_CURRENCIES}
-                          triggerClassName="h-8 text-[13px]"
-                          contentClassName="max-h-64"
+
+                      <Collapsible open={piecesOpen} onOpenChange={setPiecesOpen} className="mt-4">
+                        <CollapsibleTrigger
+                          className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
+                          {...erpNavSkip()}
+                        >
+                          Click here to enter Pieces details Or Press [Alt + u]
+                          <ChevronDown
+                            className={cn("h-4 w-4 transition-transform", piecesOpen && "rotate-180")}
+                          />
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="border border-t-0 bg-card">
+                          <div className="relative mx-3 mt-3 rounded border border-border bg-card p-3 pt-5">
+                            <span className="absolute left-2.5 top-0 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[13px] font-semibold leading-none text-sidebar-foreground">
+                              Import MTS
+                            </span>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                              <Button
+                                type="button"
+                                variant="link"
+                                size="sm"
+                                className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
+                                {...erpNavSkip()}
+                                onClick={() =>
+                                  toast.info("Excel format download will be enabled with backend wiring")
+                                }
+                              >
+                                <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                                Download Excel File Format
+                              </Button>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm text-foreground">Select File</span>
+                                <Input type="file" className="h-8 max-w-[220px] text-[13px]" {...erpNavSkip()} />
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
+                                  {...erpNavSkip()}
+                                  onClick={() =>
+                                    toast.info("Import MTS will be enabled with backend wiring")
+                                  }
+                                >
+                                  Upload
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(7.5rem,1.2fr)_minmax(5.25rem,0.85fr)_minmax(4.75rem,0.8fr)_repeat(3,minmax(3.75rem,0.72fr))_minmax(4.5rem,0.78fr)_minmax(11.5rem,1.35fr)_minmax(5.25rem,0.85fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                            <FieldWrapper borderLabel label="Measurement Unit">
+                              <ErpNavSelect
+                                order={AWB_NAV.PIECES_MEASUREMENT_UNIT}
+                                value={piecesDraft.measurementUnit}
+                                onValueChange={(v) => patchPiecesDraft({ measurementUnit: v })}
+                                items={MEASUREMENT_UNITS}
+                                triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Actl Weight/PCS">
+                              <ErpNavInput
+                                order={AWB_NAV.PIECES_ACTUAL_WEIGHT_PCS}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={piecesDraft.actualWeightPerPc}
+                                onValueChange={(v) => patchPiecesDraft({ actualWeightPerPc: v })}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="No. Of Pieces">
+                              <ErpNavInput
+                                order={AWB_NAV.PIECES_NO_OF_PIECES}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={piecesDraft.noOfPieces}
+                                onValueChange={(v) => patchPiecesDraft({ noOfPieces: v })}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Length">
+                              <ErpNavInput
+                                order={AWB_NAV.PIECES_LENGTH}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={piecesDraft.length}
+                                onValueChange={(v) => patchPiecesDraft({ length: v })}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Width">
+                              <ErpNavInput
+                                order={AWB_NAV.PIECES_WIDTH}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={piecesDraft.width}
+                                onValueChange={(v) => patchPiecesDraft({ width: v })}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Height">
+                              <ErpNavInput
+                                order={AWB_NAV.PIECES_HEIGHT}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={piecesDraft.height}
+                                onValueChange={(v) => patchPiecesDraft({ height: v })}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Division">
+                              <ErpNavInput
+                                order={AWB_NAV.PIECES_DIVISION}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={piecesDraft.division}
+                                onValueChange={(v) => patchPiecesDraft({ division: v })}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper
+                              borderLabel
+                              label="Vol Weight (Discount - 0 %)"
+                              className="sm:col-span-2 md:col-span-2 lg:col-span-2 xl:col-span-1"
+                            >
+                              <Input
+                                value={piecesDraft.volWeight}
+                                readOnly
+                                {...erpNavOrder(AWB_NAV.PIECES_VOL_WEIGHT)}
+                                className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Chrg Weight">
+                              <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
+                                <Input
+                                  value={piecesDraft.chargeWeight}
+                                  readOnly
+                                  {...erpNavOrder(AWB_NAV.PIECES_CHARGE_WEIGHT)}
+                                  className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && e.shiftKey) {
+                                      e.preventDefault();
+                                      const container = awbFormNavRef.current;
+                                      if (container) {
+                                        focusPrevBeforeOrder(container, AWB_NAV.PIECES_CHARGE_WEIGHT);
+                                      }
+                                      return;
+                                    }
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      commitPiecesLine();
+                                    }
+                                  }}
+                                />
+                              </div>
+                            </FieldWrapper>
+                            <div className="col-span-2 flex items-end justify-end sm:col-span-1 lg:col-span-1 xl:col-span-1">
+                              <Button
+                                type="button"
+                                className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                                {...erpNavSkip()}
+                                onClick={addPiecesLine}
+                              >
+                                <Plus className="mr-1 h-4 w-4" />
+                                Add
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto border-t">
+                            <table className="w-full min-w-[720px] text-sm">
+                              <TableHeader>
+                                <TableRow className="bg-sidebar hover:bg-sidebar">
+                                  {[
+                                    "Child AWB",
+                                    "Actl Weight/PCS",
+                                    "Pieces",
+                                    "Length",
+                                    "Breadth",
+                                    "Height",
+                                    "Volumetric Weight",
+                                    "Charge Weight",
+                                    "Action",
+                                  ].map((h) => (
+                                    <TableHead key={h} className="text-sidebar-foreground">
+                                      {h}
+                                    </TableHead>
+                                  ))}
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {form.piecesLines.length === 0 ? (
+                                  <TableRow>
+                                    <TableCell
+                                      colSpan={9}
+                                      className="h-16 text-center text-muted-foreground"
+                                    >
+                                      No piece lines added
+                                    </TableCell>
+                                  </TableRow>
+                                ) : (
+                                  form.piecesLines.map((l) => (
+                                    <TableRow key={l.id}>
+                                      <TableCell>{l.childAwb || "—"}</TableCell>
+                                      <TableCell>{l.actualWeightPerPc}</TableCell>
+                                      <TableCell>{l.pieces}</TableCell>
+                                      <TableCell>{l.length}</TableCell>
+                                      <TableCell>{l.breadth}</TableCell>
+                                      <TableCell>{l.height}</TableCell>
+                                      <TableCell>{l.volWeight}</TableCell>
+                                      <TableCell>{l.chargeWeight}</TableCell>
+                                      <TableCell>
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-8 w-8 text-destructive"
+                                          onClick={() => removePiecesLine(l.id)}
+                                          aria-label="Delete piece line"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))
+                                )}
+                              </TableBody>
+                            </table>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+
+                      <Collapsible open={chargesOpen} onOpenChange={setChargesOpen} className="mt-4">
+                        <CollapsibleTrigger
+                          className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
+                          {...erpNavSkip()}
+                        >
+                          Click here to enter Charge details Or Press [Alt + c]
+                          <ChevronDown
+                            className={cn("h-4 w-4 transition-transform", chargesOpen && "rotate-180")}
+                          />
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="border border-t-0 bg-card">
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-4 xl:grid-cols-8 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                            {(
+                              [
+                                ["Contract Charges", chargeSummary.contractCharges],
+                                ["Other Charges", chargeSummary.otherCharges],
+                                ["Sub Total", chargeSummary.subTotal],
+                                ["Total Fuel", chargeSummary.totalFuel],
+                                ["IGST", chargeSummary.igst],
+                                ["CGST", chargeSummary.cgst],
+                                ["SGST", chargeSummary.sgst],
+                                ["Total Amount", chargeSummary.totalAmount],
+                              ] as const
+                            ).map(([label, val]) => (
+                              <FieldWrapper key={label} borderLabel label={label}>
+                                <Input
+                                  value={val}
+                                  readOnly
+                                  className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                />
+                              </FieldWrapper>
+                            ))}
+                          </div>
+                          <div className="flex flex-wrap gap-2 border-b px-3 py-2.5">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 border-emerald-600 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              {...erpNavSkip()}
+                              disabled={saving || isReadOnly}
+                              onClick={() => {
+                                void handleCheckRateCombination();
+                              }}
+                            >
+                              Check Rate Combination
+                            </Button>
+                            {authed && editing?.id ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8"
+                                  {...erpNavSkip()}
+                                  disabled={saving || isReadOnly}
+                                  onClick={() => {
+                                    void (async () => {
+                                      try {
+                                        const breakdown = await calculateShipmentRating(editing.id!);
+                                        applyServerRating(breakdown);
+                                        await refreshLive();
+                                        toast.success(
+                                          `Rated — total ${ratingToSummary(breakdown).totalAmount}`,
+                                        );
+                                      } catch (e) {
+                                        toast.error(toErrorMessage(e));
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  Calculate rating
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8"
+                                  {...erpNavSkip()}
+                                  disabled={saving || isReadOnly}
+                                  onClick={() => {
+                                    void (async () => {
+                                      try {
+                                        const breakdown = await recalculateShipmentRating({
+                                          id: editing.id!,
+                                          row_version: editing.rowVersion ?? 1,
+                                        });
+                                        applyServerRating(breakdown);
+                                        await refreshLive();
+                                        toast.success(
+                                          `Recalculated — total ${ratingToSummary(breakdown).totalAmount}`,
+                                        );
+                                      } catch (e) {
+                                        toast.error(toErrorMessage(e));
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  Recalculate
+                                </Button>
+                              </>
+                            ) : null}
+                            {ratingSummary ? (
+                              <span className="self-center text-xs text-muted-foreground">
+                                Server rating: freight {ratingSummary.freight} · fuel{" "}
+                                {ratingSummary.fuel} · tax {ratingSummary.tax} · total{" "}
+                                {ratingSummary.totalAmount}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                            <FieldWrapper borderLabel label="Description" required>
+                              <ErpNavSelect
+                                order={AWB_NAV.CHARGE_DESCRIPTION}
+                                value={chargeDraft.description || undefined}
+                                onValueChange={(v) =>
+                                  setChargeDraft((d) => ({
+                                    ...d,
+                                    description: v,
+                                    itemTotal: d.itemAmount || "0",
+                                  }))
+                                }
+                                items={CHARGE_DESCRIPTIONS}
+                                triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Item Amount" required>
+                              <ErpNavInput
+                                order={AWB_NAV.CHARGE_ITEM_AMOUNT}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={chargeDraft.itemAmount}
+                                onValueChange={(v) =>
+                                  setChargeDraft((d) => ({
+                                    ...d,
+                                    itemAmount: v,
+                                    itemTotal: v || "0",
+                                  }))
+                                }
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Item Fuel (0%)">
+                              <div className="flex w-full min-w-0 items-stretch">
+                                <ErpNavSelect
+                                  order={AWB_NAV.CHARGE_ITEM_FUEL}
+                                  value={chargeDraft.itemFuel}
+                                  onValueChange={(v) => setChargeDraft((d) => ({ ...d, itemFuel: v }))}
+                                  items={YES_NO}
+                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                />
+                                <Input
+                                  value="0.00"
+                                  readOnly
+                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Tax On Fuel">
+                              <div className="flex w-full min-w-0 items-stretch">
+                                <ErpNavSelect
+                                  order={AWB_NAV.CHARGE_TAX_ON_FUEL}
+                                  value={chargeDraft.taxOnFuel}
+                                  onValueChange={(v) => setChargeDraft((d) => ({ ...d, taxOnFuel: v }))}
+                                  items={YES_NO}
+                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                />
+                                <Input
+                                  value="0.00"
+                                  readOnly
+                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Tax">
+                              <div className="flex w-full min-w-0 items-stretch">
+                                <ErpNavSelect
+                                  order={AWB_NAV.CHARGE_TAX}
+                                  value={chargeDraft.tax}
+                                  onValueChange={(v) => setChargeDraft((d) => ({ ...d, tax: v }))}
+                                  items={YES_NO}
+                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                />
+                                <Input
+                                  value="0.00"
+                                  readOnly
+                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Item Total">
+                              <Input
+                                value={chargeDraft.itemTotal}
+                                readOnly
+                                className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              />
+                            </FieldWrapper>
+                            <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
+                              <Button
+                                type="button"
+                                className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                                {...erpNavOrder(AWB_NAV.CHARGE_ADD)}
+                                onClick={addChargeLine}
+                              >
+                                <Plus className="mr-1 h-4 w-4" />
+                                Add
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="overflow-x-auto border-t">
+                            <table className="w-full min-w-[960px] text-sm">
+                              <TableHeader>
+                                <TableRow className="bg-sidebar hover:bg-sidebar">
+                                  {[
+                                    "Description",
+                                    "Rate",
+                                    "Amount",
+                                    "Fuel Apply",
+                                    "Fuel Amt",
+                                    "TaxApply",
+                                    "Tax On Fuel",
+                                    "IGST",
+                                    "SGST",
+                                    "CGST",
+                                    "Total",
+                                    "Charges Type",
+                                    "Action",
+                                  ].map((h) => (
+                                    <TableHead
+                                      key={h}
+                                      className="whitespace-nowrap text-sidebar-foreground"
+                                    >
+                                      {h}
+                                    </TableHead>
+                                  ))}
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {form.chargeLines.length === 0 ? (
+                                  <TableRow>
+                                    <TableCell
+                                      colSpan={13}
+                                      className="h-16 text-center text-muted-foreground"
+                                    >
+                                      No charge lines added
+                                    </TableCell>
+                                  </TableRow>
+                                ) : (
+                                  form.chargeLines.map((l) => (
+                                    <TableRow key={l.id}>
+                                      <TableCell>{l.description}</TableCell>
+                                      <TableCell>{l.rate}</TableCell>
+                                      <TableCell>{l.amount}</TableCell>
+                                      <TableCell>{l.fuelApply}</TableCell>
+                                      <TableCell>{l.fuelAmt}</TableCell>
+                                      <TableCell>{l.taxApply}</TableCell>
+                                      <TableCell>{l.taxOnFuel}</TableCell>
+                                      <TableCell>{l.igst}</TableCell>
+                                      <TableCell>{l.sgst}</TableCell>
+                                      <TableCell>{l.cgst}</TableCell>
+                                      <TableCell>{l.total}</TableCell>
+                                      <TableCell>{l.chargesType}</TableCell>
+                                      <TableCell>
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-8 w-8 text-destructive"
+                                          onClick={() => removeChargeLine(l.id)}
+                                          aria-label="Delete charge line"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))
+                                )}
+                              </TableBody>
+                            </table>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+
+                      <FormSection title="Shipment Details" className="mt-4">
+                        <ShipmentDetailsFields
+                          form={form}
+                          setForm={setForm}
+                          paymentTypeReadOnly={paymentTypeReadOnly}
+                          clientLoading={clientLoading}
+                          isReadOnly={isReadOnly}
                         />
                       </FormSection>
                     </div>
-                  </div>
-
-                  <div className="mt-4 rounded-md border bg-card">
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(4rem,0.72fr)_minmax(4.5rem,0.78fr)_minmax(8rem,1.35fr)_minmax(5rem,0.9fr)_minmax(3.75rem,0.68fr)_minmax(3.75rem,0.68fr)_minmax(6.75rem,1fr)_minmax(3.75rem,0.68fr)_minmax(4.25rem,0.75fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                      <FieldWrapper borderLabel label="Box No">
-                        <ErpNavSelect
-                          key={`proforma-box-${proformaBoxNumbers.join("-") || "none"}`}
-                          order={AWB_NAV.PROFORMA_BOX_NO}
-                          value={
-                            proformaBoxNumbers.includes(proformaDraft.boxNo)
-                              ? proformaDraft.boxNo
-                              : undefined
-                          }
-                          onValueChange={(v) => patchProformaDraft({ boxNo: v })}
-                          items={proformaBoxNumbers}
-                          disabled={proformaBoxNumbers.length === 0}
-                          placeholder={
-                            proformaBoxNumbers.length === 0
-                              ? "Add pieces in AWB tab"
-                              : "Select"
-                          }
-                          triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Packages">
-                        <ErpNavInput
-                          order={AWB_NAV.PROFORMA_PACKAGES}
-                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          value={proformaDraft.packages}
-                          onValueChange={(v) => patchProformaDraft({ packages: v })}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Description">
-                        <ErpNavInput
-                          order={AWB_NAV.PROFORMA_DESCRIPTION}
-                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          value={proformaDraft.description}
-                          onValueChange={(v) => patchProformaDraft({ description: v })}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="HSN Code">
-                        <ErpNavInput
-                          order={AWB_NAV.PROFORMA_HSN_CODE}
-                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          value={proformaDraft.hsnCode}
-                          onValueChange={(v) => patchProformaDraft({ hsnCode: v })}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Quantity">
-                        <ErpNavInput
-                          order={AWB_NAV.PROFORMA_QUANTITY}
-                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          value={proformaDraft.quantity}
-                          onValueChange={(v) => patchProformaDraft({ quantity: v })}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Weight">
-                        <ErpNavInput
-                          order={AWB_NAV.PROFORMA_WEIGHT}
-                          className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          value={proformaDraft.weight}
-                          onValueChange={(v) => patchProformaDraft({ weight: v })}
-                        />
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Unit">
-                        <div className="flex w-full min-w-0 items-stretch">
-                          <ErpNavSelect
-                            order={AWB_NAV.PROFORMA_UNIT}
-                            value={proformaDraft.unit}
-                            onValueChange={(v) => patchProformaDraft({ unit: v })}
-                            items={proformaUnits}
-                            triggerClassName="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                  </fieldset>
+                  {editing?.id &&
+                    (showShipmentDocumentsCenter || vendorShippingActive || vendorBookingBusy) ? (
+                    <div className="space-y-4 border-t px-4 py-4 md:px-6">
+                      {vendorShippingActive || vendorBookingBusy ? (
+                        vendorMeta.status === "VENDOR_BOOKED" || vendorMeta.otpVerified ? (
+                          <ShipmentBookedBanner
+                            vendorAwb={vendorMeta.vendorAwb}
+                            trackingNumber={vendorMeta.trackingNumber}
+                            provider={vendorMeta.provider}
                           />
+                        ) : (
+                          <VendorBookingStatusStrip
+                            meta={vendorMeta}
+                            bookingInProgress={vendorBookingBusy}
+                            canRetry={canRetryVendorBooking && !vendorBookingBusy}
+                            onRetry={() => void runVendorRetry()}
+                            lastResult={vendorLastResult}
+                          />
+                        )
+                      ) : null}
+                      {showShipmentDocumentsCenter ? (
+                        <div id="shipment-documents-center">
+                          <ShipmentDocumentsCard
+                            shipmentId={editing.id}
+                            refreshKey={vendorPanelKey}
+                            poll={vendorShippingActive}
+                            onEnsureDocument={ensureInternalDocument}
+                          />
+                        </div>
+                      ) : null}
+                      {vendorShippingActive || vendorBookingBusy ? (
+                        <VendorActivityTimeline shipmentId={editing.id} refreshKey={vendorPanelKey} />
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {canCarrierActions && !vendorShippingActive ? (
+                    <div className="border-t px-4 py-4 md:px-6">
+                      <FormSection title="Carrier booking & tracking">
+                        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <FieldWrapper label="Provider">
+                            <Input
+                              readOnly
+                              className="bg-muted/30"
+                              value={editing?.carrierProviderCode || resolveCarrierCode()}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper label="Booking status">
+                            <Input
+                              readOnly
+                              className="bg-muted/30"
+                              value={editing?.carrierBookingStatus || "NONE"}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper label="Booking ref">
+                            <Input
+                              readOnly
+                              className="bg-muted/30"
+                              value={editing?.carrierBookingRef || ""}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper label="Tracking no">
+                            <Input
+                              readOnly
+                              className="bg-muted/30"
+                              value={editing?.carrierTrackingNo || ""}
+                            />
+                          </FieldWrapper>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {!carrierBooked ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={saving}
+                              onClick={() => void handleCarrierBook()}
+                            >
+                              Book with carrier
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={saving}
+                                onClick={() => void handleCarrierCancel()}
+                              >
+                                Cancel booking
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={saving}
+                                onClick={() => void handleCarrierTrack()}
+                              >
+                                Refresh tracking
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={saving}
+                                onClick={() => void handleCarrierLabel()}
+                              >
+                                Download label
+                              </Button>
+                            </>
+                          )}
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
-                            title="Add custom unit"
-                            aria-label="Add custom unit"
-                            className="h-8 w-8 shrink-0 rounded-none border-0 border-l border-input px-0 shadow-none"
-                            {...erpNavSkip()}
-                            onClick={() => {
-                              setNewUnitInput("");
-                              setAddUnitOpen(true);
-                            }}
+                            disabled={saving}
+                            onClick={() => void handleCarrierServiceability()}
                           >
-                            <Plus className="h-3.5 w-3.5" />
+                            Check serviceability
                           </Button>
+                          <span className="self-center text-xs text-muted-foreground">
+                            Supported: {SUPPORTED_CARRIER_CODES.join(", ")}
+                          </span>
                         </div>
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Rate">
-                        <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
-                          <ErpNavInput
-                            order={AWB_NAV.PROFORMA_RATE}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={proformaDraft.rate}
-                            onValueChange={(v) => patchProformaDraft({ rate: v })}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && e.shiftKey) {
-                                e.preventDefault();
-                                const container = awbFormNavRef.current;
-                                if (container) {
-                                  focusPrevBeforeOrder(container, AWB_NAV.PROFORMA_RATE);
-                                }
-                                return;
-                              }
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                commitProformaLine();
-                              }
-                            }}
-                          />
-                        </div>
-                      </FieldWrapper>
-                      <FieldWrapper borderLabel label="Amount">
-                        <Input
-                          value={proformaDraft.amount}
-                          readOnly
-                          className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                        />
-                      </FieldWrapper>
-                      <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
-                        <Button
-                          type="button"
-                          className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
-                          {...erpNavSkip()}
-                          onClick={addProformaLine}
-                        >
-                          <Plus className="mr-1 h-4 w-4" />
-                          Add line
-                        </Button>
+                      </FormSection>
+                    </div>
+                  ) : null}
+                  <div className="border-t px-4 py-4 md:px-6">
+                    {bookingErrors.length > 0 ? (
+                      <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                        {bookingErrors.map((msg) => (
+                          <div key={msg}>{msg}</div>
+                        ))}
                       </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-4 border-t px-3 py-2.5 text-sm">
-                      <span>
-                        Total Record:{" "}
-                        <span className="font-semibold text-primary">
-                          {proformaSummary.totalRecord}
-                        </span>
-                      </span>
-                      <span>
-                        Quantity:{" "}
-                        <span className="font-semibold text-primary">{proformaSummary.quantity}</span>
-                      </span>
-                      <span>
-                        Weight:{" "}
-                        <span className="font-semibold text-primary">{proformaSummary.weight}</span>
-                      </span>
-                      <span>
-                        Amount:{" "}
-                        <span className="font-semibold text-primary">{proformaSummary.amount}</span>
-                      </span>
-                    </div>
-
-                    <div className="overflow-x-auto border-t">
-                      <table className="w-full min-w-[960px] text-sm">
-                      <TableHeader>
-                        <TableRow className="bg-sidebar hover:bg-sidebar">
-                          {[
-                            "Box No",
-                            "Package",
-                            "Description",
-                            "HS Code",
-                            "Quantity",
-                            "Weight",
-                            "Unit",
-                            "Rate",
-                            "Amount",
-                            "IGST %",
-                            "IGST Amount",
-                            "Action",
-                          ].map((h) => (
-                            <TableHead
-                              key={h}
-                              className="whitespace-nowrap text-sidebar-foreground"
-                            >
-                              {h}
-                            </TableHead>
-                          ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {form.proforma.lines.length === 0 ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={12}
-                              className="h-16 text-center text-muted-foreground"
-                            >
-                              No proforma lines added
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          form.proforma.lines.map((l) => (
-                            <TableRow key={l.id}>
-                              <TableCell>{l.boxNo}</TableCell>
-                              <TableCell>{l.packages}</TableCell>
-                              <TableCell>{l.description}</TableCell>
-                              <TableCell>{l.hsCode}</TableCell>
-                              <TableCell>{l.quantity}</TableCell>
-                              <TableCell>{l.weight}</TableCell>
-                              <TableCell>{l.unit}</TableCell>
-                              <TableCell>{l.rate}</TableCell>
-                              <TableCell>{l.amount}</TableCell>
-                              <TableCell>{l.igstPercent}</TableCell>
-                              <TableCell>{l.igstAmount}</TableCell>
-                              <TableCell>
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-8 w-8 text-destructive"
-                                  onClick={() => removeProformaLine(l.id)}
-                                  aria-label="Delete proforma line"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </table>
-                    </div>
+                    ) : null}
+                    <AwbFormFooter
+                      showPrevious={false}
+                      readOnly={isReadOnly}
+                      saving={saving}
+                      onSave={handleSave}
+                      saveLabel={isSaved ? "Update" : "Save"}
+                      onNext={goNextTab}
+                      onCancel={requestCloseForm}
+                    />
                   </div>
-                </div>
-                <div className="mt-6">
-                  <AwbFormFooter
-                    showPrevious
-                    onPrevious={goPrevTab}
-                    readOnly={isReadOnly}
-                    saving={saving}
-                    onSave={handleSave}
-                    onNext={goNextTab}
-                    onCancel={requestCloseForm}
-                  />
-                </div>
-              </div>
-            </TabsContent>
+                </TabsContent>
 
-            <TabsContent value="forwarding" className="mt-0">
-              <div className="p-4 md:p-6">
-                <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                    <FieldWrapper borderLabel label="Delivery AWB">
-                      <ErpNavInput
-                        order={AWB_NAV.FWD_DELIVERY_AWB}
-                        className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                        value={form.forwarding.deliveryAwb}
-                        onValueChange={(v) => patchForwarding({ deliveryAwb: v })}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper borderLabel label="Forwarding AWB">
-                      <ErpNavInput
-                        order={AWB_NAV.FWD_FORWARDING_AWB}
-                        className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                        value={form.forwarding.forwardingAwb}
-                        onValueChange={(v) => patchForwarding({ forwardingAwb: v })}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper borderLabel lookupSplit label="Delivery Product">
-                      <LookupPairInput
-                        lookup="product"
-                        value={form.forwarding.deliveryProduct}
-                        onChange={(v) => patchForwarding({ deliveryProduct: v })}
-                        navOrder={AWB_NAV.FWD_DELIVERY_PRODUCT}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper borderLabel lookupSplit label="Delivery Vendor">
-                      <LookupPairInput
-                        lookup="vendor"
-                        value={form.forwarding.deliveryVendor}
-                        onChange={(v) => patchForwarding({ deliveryVendor: v })}
-                        navOrder={AWB_NAV.FWD_DELIVERY_VENDOR}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper borderLabel lookupSplit label="Delivery Service">
-                      <LookupPairInput
-                        lookup="product"
-                        value={form.forwarding.deliveryService}
-                        onChange={(v) => patchForwarding({ deliveryService: v })}
-                        navOrder={AWB_NAV.FWD_DELIVERY_SERVICE}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper borderLabel label="Vendor Weight">
-                      <ErpNavInput
-                        order={AWB_NAV.FWD_VENDOR_WEIGHT}
-                        className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                        value={form.forwarding.vendorWeight}
-                        onValueChange={(v) => patchForwarding({ vendorWeight: v })}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper borderLabel label="Vendor Amount">
-                      <ErpNavInput
-                        order={AWB_NAV.FWD_VENDOR_AMOUNT}
-                        className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                        value={form.forwarding.vendorAmount}
-                        onValueChange={(v) => patchForwarding({ vendorAmount: v })}
-                      />
-                    </FieldWrapper>
-                    <FieldWrapper borderLabel label="Vendor Invoice">
-                      <ErpNavInput
-                        order={AWB_NAV.FWD_VENDOR_INVOICE}
-                        className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                        value={form.forwarding.vendorInvoice}
-                        onValueChange={(v) => patchForwarding({ vendorInvoice: v })}
-                      />
-                    </FieldWrapper>
-                  </div>
-
-                  <Collapsible
-                    open={vendorChargesOpen}
-                    onOpenChange={setVendorChargesOpen}
-                    className="mt-4"
-                  >
-                    <CollapsibleTrigger
-                      className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
-                      {...erpNavSkip()}
-                    >
-                      Click here to enter Vendor Charge details Or Press [Alt + w]
-                      <ChevronDown
-                        className={cn(
-                          "h-4 w-4 transition-transform",
-                          vendorChargesOpen && "rotate-180",
-                        )}
-                      />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="border border-t-0 bg-card">
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-4 xl:grid-cols-8 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                        {(
-                          [
-                            ["Contract Charges", vendorChargeSummary.contractCharges],
-                            ["Other Charges", vendorChargeSummary.otherCharges],
-                            ["Sub Total", vendorChargeSummary.subTotal],
-                            ["Total Fuel", vendorChargeSummary.totalFuel],
-                            ["IGST", vendorChargeSummary.igst],
-                            ["CGST", vendorChargeSummary.cgst],
-                            ["SGST", vendorChargeSummary.sgst],
-                            ["Total Amount", vendorChargeSummary.totalAmount],
-                          ] as const
-                        ).map(([label, val]) => (
-                          <FieldWrapper key={label} borderLabel label={label}>
+                <TabsContent value="proforma" className="mt-0">
+                  <div className="p-4 md:p-6">
+                    <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
+                      <FormSection title="Manifest GST Detail">
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                          <FieldWrapper borderLabel label="CSB_Type">
+                            <ErpNavSelect
+                              order={AWB_NAV.PROFORMA_CSB_TYPE}
+                              value={form.proforma.csbType}
+                              onValueChange={(v) => patchProforma({ csbType: v })}
+                              items={CSB_TYPES}
+                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Term Of Invoice">
+                            <ErpNavSelect
+                              order={AWB_NAV.PROFORMA_TERM_OF_INVOICE}
+                              value={form.proforma.termOfInvoice || undefined}
+                              onValueChange={(v) => patchProforma({ termOfInvoice: v })}
+                              items={TERM_OF_INVOICE}
+                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="GST Invoice">
+                            <ErpNavSelect
+                              order={AWB_NAV.PROFORMA_GST_INVOICE}
+                              value={form.proforma.gstInvoice ? "Yes" : "No"}
+                              onValueChange={(v) => patchProforma({ gstInvoice: v === "Yes" })}
+                              items={YES_NO}
+                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Invoice No">
+                            <ErpNavInput
+                              order={AWB_NAV.PROFORMA_INVOICE_NO}
+                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={form.proforma.invoiceNo}
+                              onValueChange={(v) => patchProforma({ invoiceNo: v })}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Invoice Date">
+                            <ErpNavDateInput
+                              order={AWB_NAV.PROFORMA_INVOICE_DATE}
+                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={form.proforma.invoiceDate}
+                              onValueChange={(v) => patchProforma({ invoiceDate: v })}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Department No">
                             <Input
-                              value={val}
+                              readOnly
+                              className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={form.proforma.departmentNo}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Export Reason">
+                            <ErpNavSelect
+                              order={AWB_NAV.PROFORMA_EXPORT_REASON}
+                              value={form.proforma.exportReason}
+                              onValueChange={(v) => patchProforma({ exportReason: v })}
+                              items={EXPORT_REASONS}
+                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Format">
+                            <ErpNavSelect
+                              order={AWB_NAV.PROFORMA_FORMAT}
+                              value={form.proforma.format || undefined}
+                              onValueChange={(v) => patchProforma({ format: v })}
+                              items={PROFORMA_FORMATS}
+                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                        </div>
+                      </FormSection>
+
+                      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]">
+                        <div className="relative rounded border border-border bg-card p-3 pt-5">
+                          <span className="absolute left-2.5 top-0 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[13px] font-semibold leading-none text-sidebar-foreground">
+                            Import Proforma
+                          </span>
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
+                              {...erpNavSkip()}
+                              onClick={() =>
+                                toast.info("Excel format download will be enabled with backend wiring")
+                              }
+                            >
+                              <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                              Download Excel File Format
+                            </Button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm text-foreground">Select File</span>
+                              <Input type="file" className="h-8 max-w-[220px] text-[13px]" {...erpNavSkip()} />
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
+                                {...erpNavSkip()}
+                                onClick={() =>
+                                  toast.info("Proforma import will be enabled with backend wiring")
+                                }
+                              >
+                                <Upload className="h-3.5 w-3.5" />
+                                Upload
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="min-w-[12rem]">
+                          <FormSection title="Currency">
+                            <ErpNavSelect
+                              order={AWB_NAV.PROFORMA_CURRENCY}
+                              value={form.proforma.currency}
+                              onValueChange={(v) => patchProforma({ currency: v })}
+                              items={PROFORMA_CURRENCIES}
+                              triggerClassName="h-8 text-[13px]"
+                              contentClassName="max-h-64"
+                            />
+                          </FormSection>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-md border bg-card">
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(4rem,0.72fr)_minmax(4.5rem,0.78fr)_minmax(8rem,1.35fr)_minmax(5rem,0.9fr)_minmax(3.75rem,0.68fr)_minmax(3.75rem,0.68fr)_minmax(6.75rem,1fr)_minmax(3.75rem,0.68fr)_minmax(4.25rem,0.75fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                          <FieldWrapper borderLabel label="Box No">
+                            <ErpNavSelect
+                              key={`proforma-box-${proformaBoxNumbers.join("-") || "none"}`}
+                              order={AWB_NAV.PROFORMA_BOX_NO}
+                              value={
+                                proformaBoxNumbers.includes(proformaDraft.boxNo)
+                                  ? proformaDraft.boxNo
+                                  : undefined
+                              }
+                              onValueChange={(v) => patchProformaDraft({ boxNo: v })}
+                              items={proformaBoxNumbers}
+                              disabled={proformaBoxNumbers.length === 0}
+                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Packages">
+                            <ErpNavInput
+                              order={AWB_NAV.PROFORMA_PACKAGES}
+                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={proformaDraft.packages}
+                              onValueChange={(v) => patchProformaDraft({ packages: v })}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Description">
+                            <ErpNavInput
+                              order={AWB_NAV.PROFORMA_DESCRIPTION}
+                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={proformaDraft.description}
+                              onValueChange={(v) => patchProformaDraft({ description: v })}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="HSN Code">
+                            <ErpNavInput
+                              order={AWB_NAV.PROFORMA_HSN_CODE}
+                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={proformaDraft.hsnCode}
+                              onValueChange={(v) => patchProformaDraft({ hsnCode: v })}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Quantity">
+                            <ErpNavInput
+                              order={AWB_NAV.PROFORMA_QUANTITY}
+                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={proformaDraft.quantity}
+                              onValueChange={(v) => patchProformaDraft({ quantity: v })}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Weight">
+                            <ErpNavInput
+                              order={AWB_NAV.PROFORMA_WEIGHT}
+                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={proformaDraft.weight}
+                              onValueChange={(v) => patchProformaDraft({ weight: v })}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Unit">
+                            <div className="flex w-full min-w-0 items-stretch">
+                              <ErpNavSelect
+                                order={AWB_NAV.PROFORMA_UNIT}
+                                value={proformaDraft.unit}
+                                onValueChange={(v) => patchProformaDraft({ unit: v })}
+                                items={proformaUnits}
+                                triggerClassName="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                title="Add custom unit"
+                                aria-label="Add custom unit"
+                                className="h-8 w-8 shrink-0 rounded-none border-0 border-l border-input px-0 shadow-none"
+                                {...erpNavSkip()}
+                                onClick={() => {
+                                  setNewUnitInput("");
+                                  setAddUnitOpen(true);
+                                }}
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Rate">
+                            <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
+                              <ErpNavInput
+                                order={AWB_NAV.PROFORMA_RATE}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={proformaDraft.rate}
+                                onValueChange={(v) => patchProformaDraft({ rate: v })}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && e.shiftKey) {
+                                    e.preventDefault();
+                                    const container = awbFormNavRef.current;
+                                    if (container) {
+                                      focusPrevBeforeOrder(container, AWB_NAV.PROFORMA_RATE);
+                                    }
+                                    return;
+                                  }
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    commitProformaLine();
+                                  }
+                                }}
+                              />
+                            </div>
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Amount">
+                            <Input
+                              value={proformaDraft.amount}
                               readOnly
                               className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             />
                           </FieldWrapper>
-                        ))}
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                        <FieldWrapper borderLabel label="Description" required>
-                          <ErpNavSelect
-                            order={AWB_NAV.VENDOR_CHARGE_DESCRIPTION}
-                            value={vendorChargeDraft.description || undefined}
-                            onValueChange={(v) => patchVendorChargeDraft({ description: v })}
-                            beforeOpen={ensureVendorChargePrerequisites}
-                            placeholder="Select"
-                            items={VENDOR_CHARGE_DESCRIPTIONS}
-                            triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Amount" required>
-                          <ErpNavInput
-                            order={AWB_NAV.VENDOR_CHARGE_AMOUNT}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={vendorChargeDraft.amount}
-                            onValueChange={(v) => patchVendorChargeDraft({ amount: v })}
-                            onFocus={() => {
-                              if (!ensureVendorChargePrerequisites()) {
-                                (document.activeElement as HTMLElement | null)?.blur();
-                              }
-                            }}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Fuel(0)">
-                          <div className="flex w-full min-w-0 items-stretch">
-                            <ErpNavSelect
-                              order={AWB_NAV.VENDOR_CHARGE_FUEL}
-                              value={vendorChargeDraft.fuel}
-                              onValueChange={(v) => patchVendorChargeDraft({ fuel: v })}
-                              beforeOpen={ensureVendorChargePrerequisites}
-                              items={YES_NO}
-                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                            />
-                            <Input
-                              value={vendorChargeDraft.fuelAmt}
-                              readOnly
-                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            />
+                          <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
+                            <Button
+                              type="button"
+                              className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                              {...erpNavSkip()}
+                              onClick={addProformaLine}
+                            >
+                              <Plus className="mr-1 h-4 w-4" />
+                              Add line
+                            </Button>
                           </div>
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Tax On Fuel">
-                          <div className="flex w-full min-w-0 items-stretch">
-                            <ErpNavSelect
-                              order={AWB_NAV.VENDOR_CHARGE_TAX_ON_FUEL}
-                              value={vendorChargeDraft.taxOnFuel}
-                              onValueChange={(v) => patchVendorChargeDraft({ taxOnFuel: v })}
-                              beforeOpen={ensureVendorChargePrerequisites}
-                              items={YES_NO}
-                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                            />
-                            <Input
-                              value={vendorChargeDraft.taxOnFuelAmt}
-                              readOnly
-                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            />
-                          </div>
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Tax">
-                          <div className="flex w-full min-w-0 items-stretch">
-                            <ErpNavSelect
-                              order={AWB_NAV.VENDOR_CHARGE_TAX}
-                              value={vendorChargeDraft.tax}
-                              onValueChange={(v) => patchVendorChargeDraft({ tax: v })}
-                              beforeOpen={ensureVendorChargePrerequisites}
-                              items={YES_NO}
-                              triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                            />
-                            <Input
-                              value={vendorChargeDraft.taxAmt}
-                              readOnly
-                              className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            />
-                          </div>
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Total">
-                          <Input
-                            value={vendorChargeDraft.total}
-                            readOnly
-                            className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                          />
-                        </FieldWrapper>
-                        <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
-                          <Button
-                            type="button"
-                            className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
-                            {...erpNavOrder(AWB_NAV.VENDOR_CHARGE_ADD)}
-                            onClick={addVendorChargeLine}
-                          >
-                            <Plus className="mr-1 h-4 w-4" />
-                            Add
-                          </Button>
                         </div>
-                      </div>
-                      <div className="overflow-x-auto border-t">
-                        <table className="w-full min-w-[960px] text-sm">
-                          <TableHeader>
-                            <TableRow className="bg-sidebar hover:bg-sidebar">
-                              {[
-                                "Description",
-                                "Rate",
-                                "Amount",
-                                "Fuel Apply",
-                                "Fuel Amt",
-                                "TaxApply",
-                                "Tax On Fuel",
-                                "IGST",
-                                "SGST",
-                                "CGST",
-                                "Total",
-                                "Charges Type",
-                                "Action",
-                              ].map((h) => (
-                                <TableHead
-                                  key={h}
-                                  className="whitespace-nowrap text-sidebar-foreground"
-                                >
-                                  {h}
-                                </TableHead>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {form.forwarding.vendorChargeLines.length === 0 ? (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={13}
-                                  className="h-16 text-center text-muted-foreground"
-                                >
-                                  No vendor charges added
-                                </TableCell>
+
+                        <div className="flex flex-wrap gap-4 border-t px-3 py-2.5 text-sm">
+                          <span>
+                            Total Record:{" "}
+                            <span className="font-semibold text-primary">
+                              {proformaSummary.totalRecord}
+                            </span>
+                          </span>
+                          <span>
+                            Quantity:{" "}
+                            <span className="font-semibold text-primary">{proformaSummary.quantity}</span>
+                          </span>
+                          <span>
+                            Weight:{" "}
+                            <span className="font-semibold text-primary">{proformaSummary.weight}</span>
+                          </span>
+                          <span>
+                            Amount:{" "}
+                            <span className="font-semibold text-primary">{proformaSummary.amount}</span>
+                          </span>
+                        </div>
+
+                        <div className="overflow-x-auto border-t">
+                          <table className="w-full min-w-[960px] text-sm">
+                            <TableHeader>
+                              <TableRow className="bg-sidebar hover:bg-sidebar">
+                                {[
+                                  "Box No",
+                                  "Package",
+                                  "Description",
+                                  "HS Code",
+                                  "Quantity",
+                                  "Weight",
+                                  "Unit",
+                                  "Rate",
+                                  "Amount",
+                                  "IGST %",
+                                  "IGST Amount",
+                                  "Action",
+                                ].map((h) => (
+                                  <TableHead
+                                    key={h}
+                                    className="whitespace-nowrap text-sidebar-foreground"
+                                  >
+                                    {h}
+                                  </TableHead>
+                                ))}
                               </TableRow>
-                            ) : (
-                              form.forwarding.vendorChargeLines.map((l) => (
-                                <TableRow key={l.id}>
-                                  <TableCell>{l.description}</TableCell>
-                                  <TableCell>{l.rate}</TableCell>
-                                  <TableCell>{l.amount}</TableCell>
-                                  <TableCell>{l.fuelApply}</TableCell>
-                                  <TableCell>{l.fuelAmt}</TableCell>
-                                  <TableCell>{l.taxApply}</TableCell>
-                                  <TableCell>{l.taxOnFuel}</TableCell>
-                                  <TableCell>{l.igst}</TableCell>
-                                  <TableCell>{l.sgst}</TableCell>
-                                  <TableCell>{l.cgst}</TableCell>
-                                  <TableCell>{l.total}</TableCell>
-                                  <TableCell>{l.chargesType}</TableCell>
-                                  <TableCell>
-                                    <Button
-                                      size="icon"
-                                      variant="ghost"
-                                      className="h-8 w-8 text-destructive"
-                                      onClick={() => removeVendorChargeLine(l.id)}
-                                      aria-label="Delete vendor charge"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
+                            </TableHeader>
+                            <TableBody>
+                              {form.proforma.lines.length === 0 ? (
+                                <TableRow>
+                                  <TableCell
+                                    colSpan={12}
+                                    className="h-16 text-center text-muted-foreground"
+                                  >
+                                    No proforma lines added
                                   </TableCell>
                                 </TableRow>
-                              ))
-                            )}
-                          </TableBody>
-                        </table>
+                              ) : (
+                                form.proforma.lines.map((l) => (
+                                  <TableRow key={l.id}>
+                                    <TableCell>{l.boxNo}</TableCell>
+                                    <TableCell>{l.packages}</TableCell>
+                                    <TableCell>{l.description}</TableCell>
+                                    <TableCell>{l.hsCode}</TableCell>
+                                    <TableCell>{l.quantity}</TableCell>
+                                    <TableCell>{l.weight}</TableCell>
+                                    <TableCell>{l.unit}</TableCell>
+                                    <TableCell>{l.rate}</TableCell>
+                                    <TableCell>{l.amount}</TableCell>
+                                    <TableCell>{l.igstPercent}</TableCell>
+                                    <TableCell>{l.igstAmount}</TableCell>
+                                    <TableCell>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-8 w-8 text-destructive"
+                                        onClick={() => removeProformaLine(l.id)}
+                                        aria-label="Delete proforma line"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </table>
+                        </div>
                       </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-                </div>
-                <div className="mt-6">
-                  <AwbFormFooter
-                    showPrevious
-                    onPrevious={goPrevTab}
-                    readOnly={isReadOnly}
-                    saving={saving}
-                    onSave={handleSave}
-                    onNext={goNextTab}
-                    onCancel={requestCloseForm}
-                  />
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="kyc" className="mt-0">
-              <div className="p-4 md:p-6">
-                <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
-                  <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-                    <TooltipProvider delayDuration={200}>
-                      <IconButton
-                        label="Settings"
-                        onClick={() =>
-                          toast.info("KYC settings will be enabled with backend wiring")
-                        }
-                      >
-                        <Settings className="h-4 w-4" />
-                      </IconButton>
-                      <IconButton
-                        label="Info"
-                        onClick={() =>
-                          toast.info("KYC document guidelines will be enabled with backend wiring")
-                        }
-                      >
-                        <Info className="h-4 w-4" />
-                      </IconButton>
-                      <IconButton
-                        label="List"
-                        onClick={() =>
-                          toast.info("KYC list view will be enabled with backend wiring")
-                        }
-                      >
-                        <List className="h-4 w-4" />
-                      </IconButton>
-                    </TooltipProvider>
-                    <ErpNavSelect
-                      order={AWB_NAV.KYC_SEARCH_FIELD}
-                      value={kycSearchField}
-                      onValueChange={(v) => setKycSearchField(v as SearchField)}
-                      items={SEARCH_FIELDS.map((f) => ({ value: f.value, label: f.label }))}
-                      triggerClassName="h-9 w-[8.5rem]"
-                    />
-                    <ErpNavInput
-                      order={AWB_NAV.KYC_SEARCH_INPUT}
-                      value={kycSearchInput}
-                      onValueChange={setKycSearchInput}
-                      placeholder="Search"
-                      className="h-9 w-40"
-                    />
-                    <Button
-                      size="icon"
-                      className="h-9 w-9 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-                      aria-label="Search KYC"
-                      {...erpNavSkip()}
-                    >
-                      <Search className="h-4 w-4" />
-                    </Button>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,280px)_1fr]">
-                    <div className="flex flex-col gap-4">
-                      <FieldWrapper label="Type">
-                        <ErpNavSelect
-                          order={AWB_NAV.KYC_TYPE}
-                          value={kycDocType}
-                          onValueChange={setKycDocType}
-                          items={KYC_TYPES}
-                        />
-                      </FieldWrapper>
-                      <input
-                        ref={kycFileRef}
-                        type="file"
-                        className="hidden"
-                        onChange={(e) => {
-                          handleKycFile(e.target.files);
-                          e.target.value = "";
-                        }}
+                    </div>
+                    <div className="mt-6">
+                      <AwbFormFooter
+                        showPrevious
+                        onPrevious={goPrevTab}
+                        readOnly={isReadOnly}
+                        saving={saving}
+                        onSave={handleSave}
+                        saveLabel={isSaved ? "Update" : "Save"}
+                        onNext={goNextTab}
+                        onCancel={requestCloseForm}
                       />
-                      <button
-                        type="button"
-                        onClick={() => kycFileRef.current?.click()}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          handleKycFile(e.dataTransfer.files);
-                        }}
-                        className="flex min-h-[180px] flex-col items-center justify-center rounded-md border-2 border-dashed border-emerald-500/60 bg-emerald-500/5 p-6 text-center text-sm font-medium uppercase tracking-wide text-emerald-600 hover:bg-emerald-500/10"
-                      >
-                        Drag and drop a file or select add image
-                      </button>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[520px] text-sm">
-                        <TableHeader>
-                          <TableRow className="bg-sidebar hover:bg-sidebar">
-                            {["Id", "File Name", "Entry Type", "Entry Date", "Action"].map((h) => (
-                              <TableHead key={h} className="text-sidebar-foreground">
-                                {h}
-                              </TableHead>
-                            ))}
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {filteredKycDocs.length === 0 ? (
-                            <TableRow>
-                              <TableCell
-                                colSpan={5}
-                                className="h-32 text-center text-muted-foreground"
-                              >
-                                No KYC documents added
-                              </TableCell>
-                            </TableRow>
-                          ) : (
-                            filteredKycDocs.map((d, i) => (
-                              <TableRow key={d.id}>
-                                <TableCell>{i + 1}</TableCell>
-                                <TableCell>{d.fileName}</TableCell>
-                                <TableCell>{d.entryType}</TableCell>
-                                <TableCell>{d.entryDate}</TableCell>
-                                <TableCell>
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    className="h-8 w-8 text-destructive"
-                                    onClick={() => removeKycDocument(d.id)}
-                                    aria-label="Delete KYC document"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            ))
-                          )}
-                        </TableBody>
-                      </table>
                     </div>
                   </div>
-                </div>
+                </TabsContent>
 
-                <div className="mt-6">
-                  <AwbFormFooter
-                    showPrevious
-                    onPrevious={goPrevTab}
-                    readOnly={isReadOnly}
-                    saving={saving}
-                    onSave={handleSave}
-                    onCancel={requestCloseForm}
-                  />
-                </div>
-              </div>
-            </TabsContent>
+                <TabsContent value="forwarding" className="mt-0">
+                  <div className="p-4 md:p-6">
+                    <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                        <FieldWrapper borderLabel label="Delivery AWB">
+                          <ErpNavInput
+                            order={AWB_NAV.FWD_DELIVERY_AWB}
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            value={form.forwarding.deliveryAwb}
+                            onValueChange={(v) => patchForwarding({ deliveryAwb: v })}
+                          />
+                        </FieldWrapper>
+                        <FieldWrapper borderLabel label="Forwarding AWB">
+                          <ErpNavInput
+                            order={AWB_NAV.FWD_FORWARDING_AWB}
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            value={form.forwarding.forwardingAwb}
+                            onValueChange={(v) => patchForwarding({ forwardingAwb: v })}
+                          />
+                        </FieldWrapper>
+                        <FieldWrapper borderLabel lookupSplit label="Delivery Product">
+                          <LookupPairInput
+                            lookup="product"
+                            value={form.forwarding.deliveryProduct}
+                            onChange={(v) => patchForwarding({ deliveryProduct: v })}
+                            navOrder={AWB_NAV.FWD_DELIVERY_PRODUCT}
+                          />
+                        </FieldWrapper>
+                        <FieldWrapper borderLabel lookupSplit label="Delivery Vendor">
+                          <LookupPairInput
+                            lookup="vendor"
+                            value={form.forwarding.deliveryVendor}
+                            onChange={(v) => patchForwarding({ deliveryVendor: v })}
+                            navOrder={AWB_NAV.FWD_DELIVERY_VENDOR}
+                          />
+                        </FieldWrapper>
+                        <FieldWrapper borderLabel lookupSplit label="Delivery Service">
+                          <LookupPairInput
+                            lookup="product"
+                            value={form.forwarding.deliveryService}
+                            onChange={(v) => patchForwarding({ deliveryService: v })}
+                            navOrder={AWB_NAV.FWD_DELIVERY_SERVICE}
+                          />
+                        </FieldWrapper>
+                        <FieldWrapper borderLabel label="Vendor Weight">
+                          <ErpNavInput
+                            order={AWB_NAV.FWD_VENDOR_WEIGHT}
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            value={form.forwarding.vendorWeight}
+                            onValueChange={(v) => patchForwarding({ vendorWeight: v })}
+                          />
+                        </FieldWrapper>
+                        <FieldWrapper borderLabel label="Vendor Amount">
+                          <ErpNavInput
+                            order={AWB_NAV.FWD_VENDOR_AMOUNT}
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            value={form.forwarding.vendorAmount}
+                            onValueChange={(v) => patchForwarding({ vendorAmount: v })}
+                          />
+                        </FieldWrapper>
+                        <FieldWrapper borderLabel label="Vendor Invoice">
+                          <ErpNavInput
+                            order={AWB_NAV.FWD_VENDOR_INVOICE}
+                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                            value={form.forwarding.vendorInvoice}
+                            onValueChange={(v) => patchForwarding({ vendorInvoice: v })}
+                          />
+                        </FieldWrapper>
+                      </div>
+
+                      <Collapsible
+                        open={vendorChargesOpen}
+                        onOpenChange={setVendorChargesOpen}
+                        className="mt-4"
+                      >
+                        <CollapsibleTrigger
+                          className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
+                          {...erpNavSkip()}
+                        >
+                          Click here to enter Vendor Charge details Or Press [Alt + w]
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 transition-transform",
+                              vendorChargesOpen && "rotate-180",
+                            )}
+                          />
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="border border-t-0 bg-card">
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-4 xl:grid-cols-8 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                            {(
+                              [
+                                ["Contract Charges", vendorChargeSummary.contractCharges],
+                                ["Other Charges", vendorChargeSummary.otherCharges],
+                                ["Sub Total", vendorChargeSummary.subTotal],
+                                ["Total Fuel", vendorChargeSummary.totalFuel],
+                                ["IGST", vendorChargeSummary.igst],
+                                ["CGST", vendorChargeSummary.cgst],
+                                ["SGST", vendorChargeSummary.sgst],
+                                ["Total Amount", vendorChargeSummary.totalAmount],
+                              ] as const
+                            ).map(([label, val]) => (
+                              <FieldWrapper key={label} borderLabel label={label}>
+                                <Input
+                                  value={val}
+                                  readOnly
+                                  className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                />
+                              </FieldWrapper>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                            <FieldWrapper borderLabel label="Description" required>
+                              <ErpNavSelect
+                                order={AWB_NAV.VENDOR_CHARGE_DESCRIPTION}
+                                value={vendorChargeDraft.description || undefined}
+                                onValueChange={(v) => patchVendorChargeDraft({ description: v })}
+                                beforeOpen={ensureVendorChargePrerequisites}
+                                items={VENDOR_CHARGE_DESCRIPTIONS}
+                                triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Amount" required>
+                              <ErpNavInput
+                                order={AWB_NAV.VENDOR_CHARGE_AMOUNT}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={vendorChargeDraft.amount}
+                                onValueChange={(v) => patchVendorChargeDraft({ amount: v })}
+                                onFocus={() => {
+                                  if (!ensureVendorChargePrerequisites()) {
+                                    (document.activeElement as HTMLElement | null)?.blur();
+                                  }
+                                }}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Fuel(0)">
+                              <div className="flex w-full min-w-0 items-stretch">
+                                <ErpNavSelect
+                                  order={AWB_NAV.VENDOR_CHARGE_FUEL}
+                                  value={vendorChargeDraft.fuel}
+                                  onValueChange={(v) => patchVendorChargeDraft({ fuel: v })}
+                                  beforeOpen={ensureVendorChargePrerequisites}
+                                  items={YES_NO}
+                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                />
+                                <Input
+                                  value={vendorChargeDraft.fuelAmt}
+                                  readOnly
+                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Tax On Fuel">
+                              <div className="flex w-full min-w-0 items-stretch">
+                                <ErpNavSelect
+                                  order={AWB_NAV.VENDOR_CHARGE_TAX_ON_FUEL}
+                                  value={vendorChargeDraft.taxOnFuel}
+                                  onValueChange={(v) => patchVendorChargeDraft({ taxOnFuel: v })}
+                                  beforeOpen={ensureVendorChargePrerequisites}
+                                  items={YES_NO}
+                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                />
+                                <Input
+                                  value={vendorChargeDraft.taxOnFuelAmt}
+                                  readOnly
+                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Tax">
+                              <div className="flex w-full min-w-0 items-stretch">
+                                <ErpNavSelect
+                                  order={AWB_NAV.VENDOR_CHARGE_TAX}
+                                  value={vendorChargeDraft.tax}
+                                  onValueChange={(v) => patchVendorChargeDraft({ tax: v })}
+                                  beforeOpen={ensureVendorChargePrerequisites}
+                                  items={YES_NO}
+                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                />
+                                <Input
+                                  value={vendorChargeDraft.taxAmt}
+                                  readOnly
+                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Total">
+                              <Input
+                                value={vendorChargeDraft.total}
+                                readOnly
+                                className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              />
+                            </FieldWrapper>
+                            <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
+                              <Button
+                                type="button"
+                                className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                                {...erpNavOrder(AWB_NAV.VENDOR_CHARGE_ADD)}
+                                onClick={addVendorChargeLine}
+                              >
+                                <Plus className="mr-1 h-4 w-4" />
+                                Add
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="overflow-x-auto border-t">
+                            <table className="w-full min-w-[960px] text-sm">
+                              <TableHeader>
+                                <TableRow className="bg-sidebar hover:bg-sidebar">
+                                  {[
+                                    "Description",
+                                    "Rate",
+                                    "Amount",
+                                    "Fuel Apply",
+                                    "Fuel Amt",
+                                    "TaxApply",
+                                    "Tax On Fuel",
+                                    "IGST",
+                                    "SGST",
+                                    "CGST",
+                                    "Total",
+                                    "Charges Type",
+                                    "Action",
+                                  ].map((h) => (
+                                    <TableHead
+                                      key={h}
+                                      className="whitespace-nowrap text-sidebar-foreground"
+                                    >
+                                      {h}
+                                    </TableHead>
+                                  ))}
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {form.forwarding.vendorChargeLines.length === 0 ? (
+                                  <TableRow>
+                                    <TableCell
+                                      colSpan={13}
+                                      className="h-16 text-center text-muted-foreground"
+                                    >
+                                      No vendor charges added
+                                    </TableCell>
+                                  </TableRow>
+                                ) : (
+                                  form.forwarding.vendorChargeLines.map((l) => (
+                                    <TableRow key={l.id}>
+                                      <TableCell>{l.description}</TableCell>
+                                      <TableCell>{l.rate}</TableCell>
+                                      <TableCell>{l.amount}</TableCell>
+                                      <TableCell>{l.fuelApply}</TableCell>
+                                      <TableCell>{l.fuelAmt}</TableCell>
+                                      <TableCell>{l.taxApply}</TableCell>
+                                      <TableCell>{l.taxOnFuel}</TableCell>
+                                      <TableCell>{l.igst}</TableCell>
+                                      <TableCell>{l.sgst}</TableCell>
+                                      <TableCell>{l.cgst}</TableCell>
+                                      <TableCell>{l.total}</TableCell>
+                                      <TableCell>{l.chargesType}</TableCell>
+                                      <TableCell>
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-8 w-8 text-destructive"
+                                          onClick={() => removeVendorChargeLine(l.id)}
+                                          aria-label="Delete vendor charge"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))
+                                )}
+                              </TableBody>
+                            </table>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    </div>
+                    <div className="mt-6">
+                      <AwbFormFooter
+                        showPrevious
+                        onPrevious={goPrevTab}
+                        readOnly={isReadOnly}
+                        saving={saving}
+                        onSave={handleSave}
+                        saveLabel={isSaved ? "Update" : "Save"}
+                        onNext={goNextTab}
+                        onCancel={requestCloseForm}
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="kyc" className="mt-0">
+                  <div className="p-4 md:p-6">
+                    <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
+                      <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+                        <TooltipProvider delayDuration={200}>
+                          <IconButton
+                            label="Settings"
+                            onClick={() =>
+                              toast.info("KYC settings will be enabled with backend wiring")
+                            }
+                          >
+                            <Settings className="h-4 w-4" />
+                          </IconButton>
+                          <IconButton
+                            label="Info"
+                            onClick={() =>
+                              toast.info("KYC document guidelines will be enabled with backend wiring")
+                            }
+                          >
+                            <Info className="h-4 w-4" />
+                          </IconButton>
+                          <IconButton
+                            label="List"
+                            onClick={() =>
+                              toast.info("KYC list view will be enabled with backend wiring")
+                            }
+                          >
+                            <List className="h-4 w-4" />
+                          </IconButton>
+                        </TooltipProvider>
+                        <ErpNavSelect
+                          order={AWB_NAV.KYC_SEARCH_FIELD}
+                          value={kycSearchField}
+                          onValueChange={(v) => setKycSearchField(v as SearchField)}
+                          items={SEARCH_FIELDS.map((f) => ({ value: f.value, label: f.label }))}
+                          triggerClassName="h-9 w-[8.5rem]"
+                        />
+                        <ErpNavInput
+                          order={AWB_NAV.KYC_SEARCH_INPUT}
+                          value={kycSearchInput}
+                          onValueChange={setKycSearchInput}
+                          className="h-9 w-40"
+                        />
+                        <Button
+                          size="icon"
+                          className="h-9 w-9 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+                          aria-label="Search KYC"
+                          {...erpNavSkip()}
+                        >
+                          <Search className="h-4 w-4" />
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,280px)_1fr]">
+                        <div className="flex flex-col gap-4">
+                          <FieldWrapper label="Type">
+                            <ErpNavSelect
+                              order={AWB_NAV.KYC_TYPE}
+                              value={kycDocType}
+                              onValueChange={setKycDocType}
+                              items={KYC_TYPES}
+                            />
+                          </FieldWrapper>
+                          <input
+                            ref={kycFileRef}
+                            type="file"
+                            className="hidden"
+                            onChange={(e) => {
+                              handleKycFile(e.target.files);
+                              e.target.value = "";
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => kycFileRef.current?.click()}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              handleKycFile(e.dataTransfer.files);
+                            }}
+                            className="flex min-h-[180px] flex-col items-center justify-center rounded-md border-2 border-dashed border-emerald-500/60 bg-emerald-500/5 p-6 text-center text-sm font-medium uppercase tracking-wide text-emerald-600 hover:bg-emerald-500/10"
+                          >
+                            Drag and drop a file or select add image
+                          </button>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[520px] text-sm">
+                            <TableHeader>
+                              <TableRow className="bg-sidebar hover:bg-sidebar">
+                                {["Id", "File Name", "Entry Type", "Entry Date", "Action"].map((h) => (
+                                  <TableHead key={h} className="text-sidebar-foreground">
+                                    {h}
+                                  </TableHead>
+                                ))}
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {filteredKycDocs.length === 0 ? (
+                                <TableRow>
+                                  <TableCell
+                                    colSpan={5}
+                                    className="h-32 text-center text-muted-foreground"
+                                  >
+                                    No KYC documents added
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                filteredKycDocs.map((d, i) => (
+                                  <TableRow key={d.id}>
+                                    <TableCell>{i + 1}</TableCell>
+                                    <TableCell>{d.fileName}</TableCell>
+                                    <TableCell>{d.entryType}</TableCell>
+                                    <TableCell>{d.entryDate}</TableCell>
+                                    <TableCell>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-8 w-8 text-destructive"
+                                        onClick={() => removeKycDocument(d.id)}
+                                        aria-label="Delete KYC document"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-6">
+                      <AwbFormFooter
+                        showPrevious
+                        onPrevious={goPrevTab}
+                        readOnly={isReadOnly}
+                        saving={saving}
+                        onSave={handleSave}
+                        saveLabel={isSaved ? "Update" : "Save"}
+                        onCancel={requestCloseForm}
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
               </ErpFormNavProvider>
             </div>
           </Tabs>
@@ -5902,7 +6081,6 @@ function AwbEntryPage() {
                   <Input
                     autoFocus
                     value={newUnitInput}
-                    placeholder="e.g. BOX"
                     onChange={(e) => setNewUnitInput(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
@@ -5998,7 +6176,6 @@ function AwbEntryPage() {
                   <Input
                     value={masterAwb}
                     onChange={(e) => setMasterAwb(e.target.value)}
-                    placeholder="Master AWBNo"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") void handleEntrySearch();
                     }}
@@ -6102,7 +6279,6 @@ function AwbEntryPage() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleSearch();
                   }}
-                  placeholder="Search"
                   className="h-9 w-full min-w-[10rem] sm:w-48"
                 />
                 <Button
@@ -6170,21 +6346,21 @@ function AwbEntryPage() {
                   <TableRow className="bg-muted/20 hover:bg-muted/20">
                     {(
                       [
-                        ["awbNo", "AWB No", awbCol.awbNoFilter],
-                        ["bookDate", "Book Date", awbCol.bookDate],
-                        ["shipperName", "Shipper Name", awbCol.shipperName],
-                        ["customerCode", "Customer Code", awbCol.customerCode],
-                        ["customerName", "Customer Name", awbCol.customerName],
-                        ["consigneeName", "Consignee Name", awbCol.consigneeName],
-                        ["destination", "Destination", awbCol.destination],
-                        ["product", "Product", awbCol.product],
-                        ["vendor", "Vendor", awbCol.vendor],
-                        ["actualWeight", "Actual Weight", awbCol.actualWeight],
-                        ["chargeWeight", "Charge Weight", awbCol.chargeWeight],
-                        ["pieces", "Pieces", awbCol.pieces],
-                        ["deliveryVendor", "Delivery Vendor", awbCol.deliveryVendor],
+                        ["awbNo", awbCol.awbNoFilter],
+                        ["bookDate", awbCol.bookDate],
+                        ["shipperName", awbCol.shipperName],
+                        ["customerCode", awbCol.customerCode],
+                        ["customerName", awbCol.customerName],
+                        ["consigneeName", awbCol.consigneeName],
+                        ["destination", awbCol.destination],
+                        ["product", awbCol.product],
+                        ["vendor", awbCol.vendor],
+                        ["actualWeight", awbCol.actualWeight],
+                        ["chargeWeight", awbCol.chargeWeight],
+                        ["pieces", awbCol.pieces],
+                        ["deliveryVendor", awbCol.deliveryVendor],
                       ] as const
-                    ).map(([key, placeholder, colClass]) => (
+                    ).map(([key, colClass]) => (
                       <TableHead key={key} className={cn("py-2", colClass)}>
                         <Input
                           value={colFilters[key]}
@@ -6192,7 +6368,6 @@ function AwbEntryPage() {
                             setColFilters((f) => ({ ...f, [key]: e.target.value }));
                             setPage(1);
                           }}
-                          placeholder={placeholder}
                           className={awbCol.filter}
                         />
                       </TableHead>
@@ -6476,42 +6651,51 @@ function PartySection({
   const originLabel = isConsignee ? "Destination" : "Origin";
   const nav = isConsignee
     ? {
-        origin: AWB_NAV.CONSIGNEE_DESTINATION,
-        company: AWB_NAV.CONSIGNEE_COMPANY,
-        contact: AWB_NAV.CONSIGNEE_CONTACT,
-        address1: AWB_NAV.CONSIGNEE_ADDRESS1,
-        address2: AWB_NAV.CONSIGNEE_ADDRESS2,
-        pincode: AWB_NAV.CONSIGNEE_PINCODE,
-        city: AWB_NAV.CONSIGNEE_CITY,
-        state: AWB_NAV.CONSIGNEE_STATE,
-        telephone: AWB_NAV.CONSIGNEE_TELEPHONE,
-        mobile: AWB_NAV.CONSIGNEE_MOBILE,
-        email: AWB_NAV.CONSIGNEE_EMAIL,
-        country: AWB_NAV.CONSIGNEE_COUNTRY,
-        iec: AWB_NAV.CONSIGNEE_IEC,
-        docType: AWB_NAV.CONSIGNEE_DOC_TYPE,
-        docNo: AWB_NAV.CONSIGNEE_DOC_NO,
-      }
+      origin: AWB_NAV.CONSIGNEE_DESTINATION,
+      company: AWB_NAV.CONSIGNEE_COMPANY,
+      contact: AWB_NAV.CONSIGNEE_CONTACT,
+      address1: AWB_NAV.CONSIGNEE_ADDRESS1,
+      address2: AWB_NAV.CONSIGNEE_ADDRESS2,
+      pincode: AWB_NAV.CONSIGNEE_PINCODE,
+      city: AWB_NAV.CONSIGNEE_CITY,
+      state: AWB_NAV.CONSIGNEE_STATE,
+      telephone: AWB_NAV.CONSIGNEE_TELEPHONE,
+      mobile: AWB_NAV.CONSIGNEE_MOBILE,
+      email: AWB_NAV.CONSIGNEE_EMAIL,
+      country: AWB_NAV.CONSIGNEE_COUNTRY,
+      iec: AWB_NAV.CONSIGNEE_IEC,
+      docType: AWB_NAV.CONSIGNEE_DOC_TYPE,
+      docNo: AWB_NAV.CONSIGNEE_DOC_NO,
+    }
     : {
-        origin: AWB_NAV.SHIPPER_ORIGIN,
-        company: AWB_NAV.SHIPPER_COMPANY,
-        contact: AWB_NAV.SHIPPER_CONTACT,
-        address1: AWB_NAV.SHIPPER_ADDRESS1,
-        address2: AWB_NAV.SHIPPER_ADDRESS2,
-        pincode: AWB_NAV.SHIPPER_PINCODE,
-        city: AWB_NAV.SHIPPER_CITY,
-        state: AWB_NAV.SHIPPER_STATE,
-        telephone: AWB_NAV.SHIPPER_TELEPHONE,
-        mobile: AWB_NAV.SHIPPER_MOBILE,
-        email: AWB_NAV.SHIPPER_EMAIL,
-        country: AWB_NAV.SHIPPER_COUNTRY,
-        iec: AWB_NAV.SHIPPER_IEC,
-        docType: AWB_NAV.SHIPPER_DOC_TYPE,
-        docNo: AWB_NAV.SHIPPER_DOC_NO,
-      };
+      origin: AWB_NAV.SHIPPER_ORIGIN,
+      company: AWB_NAV.SHIPPER_COMPANY,
+      contact: AWB_NAV.SHIPPER_CONTACT,
+      address1: AWB_NAV.SHIPPER_ADDRESS1,
+      address2: AWB_NAV.SHIPPER_ADDRESS2,
+      pincode: AWB_NAV.SHIPPER_PINCODE,
+      city: AWB_NAV.SHIPPER_CITY,
+      state: AWB_NAV.SHIPPER_STATE,
+      telephone: AWB_NAV.SHIPPER_TELEPHONE,
+      mobile: AWB_NAV.SHIPPER_MOBILE,
+      email: AWB_NAV.SHIPPER_EMAIL,
+      country: AWB_NAV.SHIPPER_COUNTRY,
+      iec: AWB_NAV.SHIPPER_IEC,
+      docType: AWB_NAV.SHIPPER_DOC_TYPE,
+      docNo: AWB_NAV.SHIPPER_DOC_NO,
+    };
   const onCommit = useErpNavCommit();
   const onPincodeCommit = useErpNavCommit(nav.pincode);
   const inputClass = "h-8 px-1.5 text-[13px]";
+  const destinationCountrySeq = useRef(0);
+  const applyOriginCountry = (destinationId: string | undefined) => {
+    if (!destinationId) return;
+    const seq = ++destinationCountrySeq.current;
+    void destinationCountryName(destinationId).then((country) => {
+      if (seq !== destinationCountrySeq.current || !country) return;
+      onChange({ country });
+    });
+  };
 
   return (
     <FormSection title={title}>
@@ -6527,6 +6711,7 @@ function PartySection({
             lookup={originLookup}
             value={party.origin}
             onChange={(v) => onChange({ origin: v })}
+            onSelect={(v) => applyOriginCountry(v.id)}
             navOrder={nav.origin}
           />
         </FieldWrapper>
@@ -6548,7 +6733,11 @@ function PartySection({
             noResultsMessage={AWB_LOOKUP_NO_RESULTS}
             navOrder={nav.company}
             onCommit={onCommit}
-            onSelectContact={(c) =>
+            onSelectContact={(c) => {
+              const origin =
+                c.origin.code || c.origin.name
+                  ? { id: c.origin.id, code: c.origin.code, name: c.origin.name }
+                  : party.origin;
               onChange({
                 companyName: { id: c.id, code: c.code, name: c.name },
                 contactName: c.contactName || c.name,
@@ -6557,19 +6746,16 @@ function PartySection({
                 pincode: c.pincode,
                 city: c.city,
                 state: c.state,
-                country: c.country || "India",
                 telephone: c.telephone,
                 mobileNo: c.mobileNo,
                 email: c.email,
                 documentType: c.documentType,
                 documentNo: c.documentNo,
                 iecNo: c.iecNo,
-                origin:
-                  c.origin.code || c.origin.name
-                    ? { id: c.origin.id, code: c.origin.code, name: c.origin.name }
-                    : party.origin,
-              })
-            }
+                origin,
+              });
+              applyOriginCountry(origin.id);
+            }}
           />
         </FieldWrapper>
         <div className="grid grid-cols-2 gap-2">
@@ -6603,6 +6789,7 @@ function PartySection({
             <PincodeAutocomplete
               navOrder={nav.pincode}
               className={inputClass}
+              placeholder=""
               value={party.pincode}
               countryCode="IN"
               onValueChange={(v) => onChange({ pincode: v })}
@@ -6611,7 +6798,6 @@ function PartySection({
                   pincode: item.pincode,
                   city: item.city,
                   state: item.state,
-                  country: item.country,
                 })
               }
               onCommit={onPincodeCommit}
@@ -6666,8 +6852,9 @@ function PartySection({
           <FieldWrapper borderLabel label="Country">
             <ErpNavInput
               order={nav.country}
-              className={inputClass}
+              className={`cursor-default bg-muted/40 ${inputClass}`}
               value={party.country}
+              readOnly
               onValueChange={(v) => onChange({ country: v })}
             />
           </FieldWrapper>
@@ -6696,7 +6883,6 @@ function PartySection({
               onValueChange={(v) => onChange({ documentType: v })}
               items={DOCUMENT_TYPES}
               nextOrder={nav.docNo}
-              placeholder="Select"
               triggerClassName={inputClass}
             />
           </FieldWrapper>
@@ -6823,7 +7009,8 @@ function ServicesSection({
           <div className="flex w-full min-w-0 items-stretch">
             <ErpNavInput
               order={AWB_NAV.SHIPMENT_VALUE}
-              className={`min-w-0 flex-1 ${inputClass}`}
+              readOnly
+              className={`min-w-0 flex-1 cursor-default ${inputClass}`}
               value={form.shipmentValue}
               onValueChange={(v) => setForm((f) => ({ ...f, shipmentValue: v }))}
             />
@@ -6988,7 +7175,7 @@ function ShipmentDetailsFields({
               {...erpNavOrder(AWB_NAV.PAYMENT_TYPE)}
               className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
             >
-              <SelectValue placeholder="Select" />
+              <SelectValue />
             </SelectTrigger>
             <SelectContent {...paymentTypeSelectContentProps}>
               {PAYMENT_TYPES.map((p) => (
@@ -7086,6 +7273,7 @@ function AwbFormFooter({
   onCancel,
   readOnly = false,
   saving = false,
+  saveLabel = "Save",
 }: {
   showPrevious?: boolean;
   onPrevious?: () => void;
@@ -7094,7 +7282,9 @@ function AwbFormFooter({
   onCancel: () => void;
   readOnly?: boolean;
   saving?: boolean;
+  saveLabel?: "Save" | "Update";
 }) {
+  const showSave = saveLabel === "Update" || !readOnly;
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div>
@@ -7105,15 +7295,16 @@ function AwbFormFooter({
         ) : null}
       </div>
       <div className="flex flex-wrap gap-2">
-        {!readOnly ? (
+        {showSave ? (
           <Button
             size="sm"
             onClick={onSave}
-            disabled={saving}
+            disabled={saving || readOnly}
+            title={readOnly ? "Booked and cancelled AWBs cannot be updated" : undefined}
             className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
             {...erpNavOrder(AWB_NAV.FOOTER_SAVE)}
           >
-            Save
+            {saveLabel}
           </Button>
         ) : null}
         {onNext ? (
@@ -7245,6 +7436,9 @@ function LookupPairInput({
       emptySearchMessage={emptySearchMessage}
       noResultsMessage={noResultsMessage}
       displayVariant={displayVariant}
+      namePlaceholder=""
+      codePlaceholder=""
+      searchPlaceholder=""
     />
   );
 }

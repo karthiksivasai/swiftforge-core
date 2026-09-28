@@ -1,4 +1,10 @@
 import { passwordPolicyError, parsePasswordPolicy, type PasswordPolicy } from "@/lib/security/password-policy";
+import {
+  createSupabaseFetch,
+  isNewSupabaseApiKey,
+  supabaseProjectUrl,
+  supabasePublishableKey,
+} from "@/lib/security/supabase-env.server";
 
 const LOCKOUT_LIMIT = 5;
 const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
@@ -78,7 +84,12 @@ export async function findUserByEmail(email: string): Promise<LoginAccount | nul
     .eq("email_normalized", email)
     .is("deleted_at", null)
     .limit(2);
-  if (error || !Array.isArray(data) || data.length !== 1) return null;
+  if (error) {
+    const failure = new Error("User lookup failed") as Error & { code?: string };
+    failure.code = error.code;
+    throw failure;
+  }
+  if (!Array.isArray(data) || data.length !== 1) return null;
   return mapLoginAccount(data[0] as Record<string, unknown>);
 }
 
@@ -93,7 +104,12 @@ export async function findUserByUsername(username: string): Promise<LoginAccount
     .is("deleted_at", null)
     .ilike("username", pattern)
     .limit(10);
-  if (error || !Array.isArray(data) || data.length === 0 || data.length >= 10) return null;
+  if (error) {
+    const failure = new Error("User lookup failed") as Error & { code?: string };
+    failure.code = error.code;
+    throw failure;
+  }
+  if (!Array.isArray(data) || data.length === 0 || data.length >= 10) return null;
   const matches = (data as Record<string, unknown>[]).filter(
     (row) => String(row.username ?? "").trim().toLowerCase() === wanted,
   );
@@ -199,16 +215,13 @@ export async function signInWithPassword(email: string, password: string): Promi
   accessToken: string;
   refreshToken: string;
 } | { error: string }> {
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const supabaseKey =
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_ANON_KEY;
+  const supabaseUrl = supabaseProjectUrl();
+  const supabaseKey = supabasePublishableKey();
   if (!supabaseUrl || !supabaseKey) return { error: "Server auth is not configured" };
 
   const { createClient } = await import("@supabase/supabase-js");
   const client = createClient(supabaseUrl, supabaseKey, {
+    global: { fetch: createSupabaseFetch(supabaseKey) },
     auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
   });
   const { data, error } = await client.auth.signInWithPassword({ email, password });
@@ -217,16 +230,15 @@ export async function signInWithPassword(email: string, password: string): Promi
 }
 
 export async function recordLoginAsUser(accessToken: string, userAgent: string | null, ip: string | null): Promise<string | null> {
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const supabaseKey =
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_ANON_KEY;
+  const supabaseUrl = supabaseProjectUrl();
+  const supabaseKey = supabasePublishableKey();
   if (!supabaseUrl || !supabaseKey) return null;
   const { createClient } = await import("@supabase/supabase-js");
   const client = createClient(supabaseUrl, supabaseKey, {
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    global: {
+      fetch: createSupabaseFetch(supabaseKey),
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
     auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
   });
   const { data } = await client.rpc("record_login", {
@@ -328,7 +340,7 @@ export async function consumePasswordReset(token: string, password: string): Pro
 }
 
 export async function deleteGoTrueSessions(authUserId: string, authSessionId: string | null): Promise<void> {
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const supabaseUrl = supabaseProjectUrl();
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) return;
   const path = authSessionId
@@ -338,7 +350,7 @@ export async function deleteGoTrueSessions(authUserId: string, authSessionId: st
     method: "DELETE",
     headers: {
       apikey: serviceKey,
-      Authorization: `Bearer ${serviceKey}`,
+      ...(isNewSupabaseApiKey(serviceKey) ? {} : { Authorization: `Bearer ${serviceKey}` }),
     },
   }).catch(() => undefined);
 }
@@ -349,16 +361,13 @@ export async function mintSessionForEmail(email: string): Promise<{ accessToken:
   const tokenHash = link.data?.properties?.hashed_token;
   if (link.error || !tokenHash) return { error: "Could not start a session" };
 
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const supabaseKey =
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_ANON_KEY;
+  const supabaseUrl = supabaseProjectUrl();
+  const supabaseKey = supabasePublishableKey();
   if (!supabaseUrl || !supabaseKey) return { error: "Server auth is not configured" };
 
   const { createClient } = await import("@supabase/supabase-js");
   const client = createClient(supabaseUrl, supabaseKey, {
+    global: { fetch: createSupabaseFetch(supabaseKey) },
     auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
   });
   const { data, error } = await client.auth.verifyOtp({ token_hash: tokenHash, type: "magiclink" });

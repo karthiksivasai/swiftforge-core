@@ -553,7 +553,6 @@ export function PartyContactLookup({
       }}
       onKeyDown={onKeyDown}
       className={cn("min-w-0 flex-1", inputH, flatInput)}
-      placeholder="Company Name"
       autoComplete="off"
       role="combobox"
       aria-expanded={showDropdown}
@@ -599,7 +598,6 @@ export function PartyContactLookup({
         flatInput,
         splitCode && "cursor-default bg-muted/30 text-foreground",
       )}
-      placeholder="Code"
       autoComplete="off"
       role={splitCode ? undefined : "combobox"}
       aria-expanded={splitCode ? undefined : showDropdown}
@@ -746,7 +744,6 @@ export function PartyContactLookup({
             <Input
               value={popupQuery}
               onChange={(e) => setPopupQuery(e.target.value)}
-              placeholder="Name, code, mobile, pin, document…"
               className="max-w-xs"
               autoFocus
             />

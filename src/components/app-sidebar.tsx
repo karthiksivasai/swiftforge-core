@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
 
 // Sidebar link targets come from a config array and resolve through splat
@@ -196,10 +196,19 @@ function LeafLink({
   pathname: string;
   indent: number;
 }) {
+  const navigate = useNavigate();
   const active = pathname === leaf.path;
   return (
     <Link
       to={asPath(leaf.path)}
+      onClick={(event) => {
+        if (leaf.path !== "/transaction/awb-entry") return;
+        event.preventDefault();
+        void navigate({
+          to: "/transaction/awb-entry",
+          search: {},
+        });
+      }}
       className={cn(
         "rounded-md px-3 py-1.5 text-sm transition-colors",
         indent === 0 ? "" : "text-[13px]",

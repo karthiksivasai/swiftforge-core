@@ -38,9 +38,16 @@ export const Route = createFileRoute("/api/auth/login")({
 
         const ip = clientAddress(request);
         const userAgent = request.headers.get("user-agent");
-        const account = username
-          ? await findUserByUsername(username).catch(() => null)
-          : await findUserByEmail(email).catch(() => null);
+        let account = null;
+        try {
+          account = username ? await findUserByUsername(username) : await findUserByEmail(email);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          if (message.includes("Missing Supabase environment variable")) {
+            return Response.json({ error: "Server auth is not configured" }, { status: 500 });
+          }
+          return Response.json(GENERIC, { status: 401 });
+        }
         if (!account || account.status !== "ACTIVE" || account.deletedAt || !account.authUserId) {
           if (account) {
             await writeLoginLog({

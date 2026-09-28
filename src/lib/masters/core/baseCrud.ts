@@ -80,10 +80,23 @@ export class DuplicateError extends Error {
   }
 }
 
+/** Turn a unique-violation into a message the operator can act on. */
+function duplicateRecordMessage(error: PostgrestError): string {
+  const message = error.message?.trim() ?? "";
+  const blob = [message, error.details, error.hint].filter(Boolean).join(" ");
+  if (message && !/^duplicate key value violates unique constraint/i.test(message)) {
+    return message;
+  }
+  if (/shipments_tenant_awb_uq|key \(tenant_id, awb_no\)/i.test(blob)) {
+    return "This AWB number is already used by another shipment.";
+  }
+  return "A record with this value already exists.";
+}
+
 /** Translate a raw PostgREST error into a domain error where it helps the UI. */
 export function translateDbError(error: PostgrestError): Error {
   // 23505 = unique_violation; 42501 = insufficient_privilege (permission/RLS).
-  if (error.code === "23505") return new DuplicateError();
+  if (error.code === "23505") return new DuplicateError(duplicateRecordMessage(error));
   if (error.code === "42501") {
     return new Error("You don't have permission to perform this action.");
   }

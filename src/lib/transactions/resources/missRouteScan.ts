@@ -26,25 +26,34 @@ export type RecordMissRouteResult = {
 /**
  * Verify whether an AWB / Forwarding No exists in Supabase shipments table.
  */
+const SHIPMENT_LOOKUP_COLUMNS = "id, awb_no, forwarding_no, current_status";
+
 export async function findShipmentByAwb(awbNo: string): Promise<ShipmentRef | null> {
   const clean = awbNo.trim();
   if (!clean) return null;
 
-  const { data, error } = await supabase
+  const byAwb = await supabase
     .from("shipments")
-    .select("id, awb_no, forwarding_no, current_status")
-    .or(`awb_no.eq.${clean},forwarding_no.eq.${clean}`)
+    .select(SHIPMENT_LOOKUP_COLUMNS)
+    .eq("awb_no", clean)
     .is("deleted_at", null)
     .maybeSingle();
+  if (!byAwb.error && byAwb.data) return byAwb.data as ShipmentRef;
 
-  if (error || !data) return null;
-  return data as ShipmentRef;
+  const byForwarding = await supabase
+    .from("shipments")
+    .select(SHIPMENT_LOOKUP_COLUMNS)
+    .eq("forwarding_no", clean)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!byForwarding.error && byForwarding.data) return byForwarding.data as ShipmentRef;
+  return null;
 }
 
 /**
  * Duplicate guard: Check if shipment is already marked as misrouted.
  */
-export async function isAlreadyMisrouted(awbNo: string, shipmentId?: string): Promise<boolean> {
+export async function isAlreadyMisrouted(awbNo: string, shipmentIdArg?: string): Promise<boolean> {
   const clean = awbNo.trim();
   if (!clean) return false;
 
@@ -57,22 +66,19 @@ export async function isAlreadyMisrouted(awbNo: string, shipmentId?: string): Pr
     }
   }
 
-  // 2. Check tracking events table
-  try {
-    const { data: events } = await supabase
-      .from("tracking_events")
-      .select("id, event_name")
-      .eq("awb_no", clean)
-      .ilike("event_name", "%mis routed%");
+  const shipmentId = shipmentIdArg ?? shipment?.id;
+  if (!shipmentId) return false;
 
-    if (events && events.length > 0) {
-      return true;
-    }
-  } catch {
-    /* Ignore schema discrepancy fallback */
-  }
+  const { data: events, error } = await supabase
+    .from("tracking_events")
+    .select("id, status_text")
+    .eq("shipment_id", shipmentId)
+    .ilike("status_text", "%mis routed%")
+    .is("deleted_at", null)
+    .limit(1);
 
-  return false;
+  if (error || !events) return false;
+  return events.length > 0;
 }
 
 /**
@@ -80,73 +86,54 @@ export async function isAlreadyMisrouted(awbNo: string, shipmentId?: string): Pr
  */
 export async function recordMissRoute(input: RecordMissRouteInput): Promise<RecordMissRouteResult> {
   const awb = input.awbNo.trim();
+  const serviceCenter = input.serviceCenter.trim();
+  const scanDate = input.scanDate.trim();
+  const scanTime = input.scanTime.trim();
   if (!awb) {
     return { success: false, error: "AWB No is required" };
   }
+  if (!serviceCenter) {
+    return { success: false, error: "Service Center is required" };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(scanDate)) {
+    return { success: false, error: "Scan Date is required" };
+  }
+  if (!/^\d{4}$/.test(scanTime)) {
+    return { success: false, error: "Scan Time is required" };
+  }
 
-  // 1. Verify AWB existence
   const shipment = await findShipmentByAwb(awb);
   if (!shipment) {
     return { success: false, error: "AWB not found" };
   }
 
-  // 2. Duplicate Check
-  const alreadyMisrouted = await isAlreadyMisrouted(awb, shipment.id);
+  const alreadyMisrouted = await isAlreadyMisrouted(shipment.awb_no, shipment.id);
   if (alreadyMisrouted) {
     return { success: false, error: "AWB already marked misrouted" };
   }
 
-  // 3. Persist to DB via RPC or Direct Update
   try {
-    // Attempt Supabase RPC record_miss_route_scan if present
-    const { data: rpcData, error: rpcErr } = await supabase.rpc("record_miss_route_scan", {
-      p_awb_no: awb,
-      p_service_center: input.serviceCenter,
-      p_scan_date: input.scanDate,
-      p_scan_time: input.scanTime,
-      p_event: input.event,
-    });
-
-    if (!rpcErr && rpcData) {
-      const res = rpcData as { success?: boolean; error?: string };
-      if (res.error) {
-        return { success: false, error: res.error };
-      }
-      return { success: true, awb_no: awb, message: `AWB ${awb} saved` };
-    }
-  } catch {
-    /* Fallback to direct mutation */
-  }
-
-  // Fallback direct mutation: update shipments table + tracking progress
-  try {
-    const { error: updateErr } = await supabase
-      .from("shipments")
-      .update({ current_status: "MISROUTED" })
-      .eq("id", shipment.id);
-
-    if (updateErr) {
-      return { success: false, error: updateErr.message };
-    }
-
-    // Write tracking progress event
     await addTrackingProgress({
-      awb_no: awb,
+      awb_no: shipment.awb_no,
       fields: {
-        event_name: input.event,
-        status: "MISROUTED",
-        location: input.serviceCenter,
-        occurred_at: `${input.scanDate}T${input.scanTime}:00Z`,
-        remarks: `Mis-routed scan at ${input.serviceCenter}`,
+        event_date: scanDate,
+        event_time: scanTime,
+        service_center_code: serviceCenter,
+        remark: `Mis-routed scan at ${serviceCenter}`,
+        status_text: input.event.trim() || "Shipment Mis routed",
+        to_status: "MISROUTED",
       },
     });
-  } catch {
-    /* If tracking progress RPC fails, shipment status update still succeeded */
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to record mis-route scan",
+    };
   }
 
   return {
     success: true,
-    awb_no: awb,
-    message: `AWB ${awb} saved`,
+    awb_no: shipment.awb_no,
+    message: `AWB ${shipment.awb_no} saved`,
   };
 }

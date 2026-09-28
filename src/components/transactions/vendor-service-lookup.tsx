@@ -439,7 +439,6 @@ export function VendorServiceLookup({
                   "min-w-0 flex-1",
                   compact ? "h-8 border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0" : "h-9 border-0 bg-transparent shadow-none focus-visible:ring-0",
                 )}
-                placeholder={hasVendor ? "Service" : "Select vendor first"}
                 autoComplete="off"
                 role="combobox"
                 aria-expanded={showInlineDropdown}
@@ -447,53 +446,31 @@ export function VendorServiceLookup({
                 {...navOrderProps}
               />
             </div>
-            <div className="lookup-code flex w-[5.75rem] shrink-0 items-stretch gap-1">
-              <div
-                className={cn(
-                  "overflow-hidden rounded border border-input bg-background",
-                  compact ? "h-8 w-14" : "h-9 w-20",
-                )}
-              >
-                <Input
-                  value={value.code}
-                  disabled={inputDisabled}
-                  readOnly
-                  className={cn(
-                    "w-full cursor-default bg-muted/30 text-foreground",
-                    compact ? "h-8 border-0 px-1 text-[13px] shadow-none focus-visible:ring-0" : "h-9 border-0 shadow-none focus-visible:ring-0",
-                  )}
-                  placeholder="Code"
-                  autoComplete="off"
-                  tabIndex={-1}
-                  {...(navOrder != null ? navSkipProps : {})}
-                />
-              </div>
-              <Button
-                size="icon"
-                variant="outline"
-                type="button"
-                disabled={inputDisabled}
-                className={cn(
-                  "shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground",
-                  compact ? "h-8 w-8" : "h-9 w-9",
-                )}
-                aria-label="Search services"
-                {...searchBtnProps}
-                onMouseDown={(e) => {
-                  if (inputDisabled) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  triggerSearch();
-                }}
-                {...(navOrder != null ? navSkipProps : {})}
-              >
-                {manualSearching ? (
-                  <Loader2 className={compact ? "h-3.5 w-3.5 animate-spin" : "h-4 w-4 animate-spin"} />
-                ) : (
-                  <Search className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
-                )}
-              </Button>
-            </div>
+            <Button
+              size="icon"
+              variant="outline"
+              type="button"
+              disabled={inputDisabled}
+              className={cn(
+                "shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground",
+                compact ? "h-8 w-8" : "h-9 w-9",
+              )}
+              aria-label="Search services"
+              {...searchBtnProps}
+              onMouseDown={(e) => {
+                if (inputDisabled) return;
+                e.preventDefault();
+                e.stopPropagation();
+                triggerSearch();
+              }}
+              {...(navOrder != null ? navSkipProps : {})}
+            >
+              {manualSearching ? (
+                <Loader2 className={compact ? "h-3.5 w-3.5 animate-spin" : "h-4 w-4 animate-spin"} />
+              ) : (
+                <Search className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
+              )}
+            </Button>
           </div>
         ) : (
           <div className="flex gap-1">
@@ -507,7 +484,6 @@ export function VendorServiceLookup({
               }}
               onKeyDown={onKeyDown}
               className={cn("min-w-0 flex-1", compact ? "h-8 px-1.5 text-[13px]" : "h-9")}
-              placeholder={hasVendor ? "Service" : "Select vendor first"}
               autoComplete="off"
               role="combobox"
               aria-expanded={inlineOpen}
@@ -529,7 +505,6 @@ export function VendorServiceLookup({
               }}
               onKeyDown={onKeyDown}
               className={cn(compact ? "h-8 w-14 px-1 text-[13px]" : "h-9 w-20")}
-              placeholder="Code"
               autoComplete="off"
               role="combobox"
               aria-expanded={inlineOpen}
@@ -612,7 +587,6 @@ export function VendorServiceLookup({
           <Input
             value={popupQuery}
             onChange={(e) => setPopupQuery(e.target.value)}
-            placeholder="Search mapped services…"
             className="mb-2"
             autoFocus
           />
