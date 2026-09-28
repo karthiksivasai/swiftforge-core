@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Printer } from "lucide-react";
+import { ChevronDown, ChevronRight, Printer, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth";
@@ -52,7 +52,7 @@ type AccessItem = {
 const groups = ["BS", "OPERATION", "Staff"] as const;
 type GroupName = (typeof groups)[number];
 const permissionKeys: PermissionKey[] = ["allAccess", "add", "modify", "delete", "list", "search"];
-const permissionLabels = ["AllAccess", "Add", "Modify", "Delete", "List", "Search"];
+const permissionLabels = ["All Access", "Add", "Modify", "Delete", "List", "Search"];
 
 const accessSections: Record<SectionKey, AccessItem[]> = {
   Masters: [
@@ -324,6 +324,8 @@ function AccessRightsPage() {
   const [openSections, setOpenSections] = useState<SectionKey[]>(["Masters"]);
   const [groupPermissions, setGroupPermissions] =
     useState<Record<GroupName, Record<string, boolean>>>(buildGroupPermissions);
+  const [emptySearchAttempt, setEmptySearchAttempt] = useState(false);
+  const [savingSections, setSavingSections] = useState<Record<string, boolean>>({});
 
   // Live (Supabase) state — used only when authenticated.
   const [liveGroups, setLiveGroups] = useState<{ id: string; name: string }[]>([]);
@@ -347,7 +349,7 @@ function AccessRightsPage() {
     isAuthenticated && liveGroups.length
       ? liveGroups.map((g) => g.name)
       : (groups as readonly string[]);
-  const selectedGroup = useMemo(() => group || "Select User", [group]);
+  const selectedGroup = useMemo(() => group || "Select Group", [group]);
   const permissions = isAuthenticated
     ? livePermissions
     : group
@@ -355,7 +357,11 @@ function AccessRightsPage() {
       : groupPermissions.BS;
 
   const runSearch = async () => {
-    if (!group) return toast.error("Please select group");
+    if (!group) {
+      setEmptySearchAttempt(true);
+      return toast.warning("Please select a user group to search permissions.");
+    }
+    setEmptySearchAttempt(false);
     if (!isAuthenticated) {
       setSearched(true);
       return;
@@ -390,11 +396,13 @@ function AccessRightsPage() {
       return;
     }
     if (!isAuthenticated) {
-      toast.success(`${section} access updated`);
+      toast.success(`Access rights updated successfully for group: ${group}`, { duration: 3000 });
       return;
     }
     const groupId = liveGroups.find((g) => g.name === group)?.id;
     if (!groupId || !profile) return toast.error("Sign in as a tenant user to save");
+    
+    setSavingSections((prev) => ({ ...prev, [section]: true }));
     const grants: SaveGrant[] = [];
     accessSections[section].forEach((item, rowIndex) => {
       const moduleId = moduleIdBySlug[slugFor(section, item.description)];
@@ -411,10 +419,12 @@ function AccessRightsPage() {
     });
     try {
       await saveGroupPermissions(profile.tenant_id, groupId, grants);
-      toast.success(`${section} access saved`);
+      toast.success(`Access rights updated successfully for group: ${group}`, { duration: 3000 });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Save failed (permission denied?)";
       toast.error(message);
+    } finally {
+      setSavingSections((prev) => ({ ...prev, [section]: false }));
     }
   };
 
@@ -490,8 +500,19 @@ function AccessRightsPage() {
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex w-44 flex-col gap-1 text-xs font-medium text-foreground">
             Group
-            <Select value={group} onValueChange={(value) => setGroup(value)}>
-              <SelectTrigger className="h-9">
+            <Select
+              value={group}
+              onValueChange={(value) => {
+                setGroup(value);
+                setSearched(false);
+                setOpenSections([]);
+              }}
+            >
+              <SelectTrigger
+                className={`h-9 ${
+                  emptySearchAttempt && !group ? "border-red-500 ring-1 ring-red-500" : ""
+                }`}
+              >
                 <SelectValue placeholder={selectedGroup} />
               </SelectTrigger>
               <SelectContent>
@@ -535,10 +556,15 @@ function AccessRightsPage() {
               onUpdateCell={(rowIndex, key, checked) => updateCell(section, rowIndex, key, checked)}
               onSave={() => saveSection(section)}
               canEdit={canEdit}
+              isSaving={savingSections[section]}
             />
           ))}
         </div>
-      ) : null}
+      ) : (
+        <Card className="flex h-40 items-center justify-center border-dashed text-sm text-muted-foreground">
+          Select a User Group from the dropdown above and click Search to configure access rights.
+        </Card>
+      )}
     </div>
   );
 }
@@ -553,6 +579,7 @@ function AccessSection({
   onUpdateCell,
   onSave,
   canEdit,
+  isSaving,
 }: {
   section: SectionKey;
   items: AccessItem[];
@@ -561,8 +588,9 @@ function AccessSection({
   onToggle: () => void;
   onSetSectionAccess: (checked: boolean) => void;
   onUpdateCell: (rowIndex: number, key: PermissionKey, checked: boolean) => void;
-  onSave: () => void;
+  onSave: () => Promise<void> | void;
   canEdit: boolean;
+  isSaving?: boolean;
 }) {
   const allChecked = items.every((_, rowIndex) =>
     permissionKeys.every((key) => permissions[permissionId(section, rowIndex, key)]),
@@ -633,9 +661,11 @@ function AccessSection({
             <div className="flex justify-end border-t px-3 py-2">
               <Button
                 onClick={onSave}
+                disabled={isSaving}
                 className="h-8 rounded-full bg-green-500 px-6 text-white hover:bg-green-600"
               >
-                Update
+                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isSaving ? "Saving..." : "Update"}
               </Button>
             </div>
           ) : null}
