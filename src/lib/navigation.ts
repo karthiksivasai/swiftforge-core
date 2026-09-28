@@ -19,6 +19,7 @@ import {
   Send,
   ScanLine,
   Wrench,
+  FileText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -212,6 +213,16 @@ export const NAVIGATION: NavSection[] = [
       { label: "AWB", slug: "awb" },
       { label: "Scan", slug: "scan" },
       { label: "Accounts", slug: "ar-report" },
+    ]),
+  },
+  {
+    label: "Document",
+    slug: "documents",
+    icon: FileText,
+    items: makeLeaves("/documents", [
+      { label: "Invoice Generation", slug: "invoice-generation" },
+      { label: "Invoice Print", slug: "invoice-print" },
+      { label: "Invoice Finalise", slug: "invoice-finalise" },
     ]),
   },
   {
