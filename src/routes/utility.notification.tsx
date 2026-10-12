@@ -36,6 +36,14 @@ import {
 import { userNotificationSchema } from "@/lib/notifications/schemas";
 import type { UserNotification } from "@/lib/notifications/types";
 import { canDo, UTILITY_NOTIFICATION_PERMISSIONS } from "@/lib/permissions";
+import { EmailSetup } from "@/routes/utility.tax-charges-setup.setup";
+import {
+  SHIPMENT_EMAIL_MODULES,
+  emptyEmailConfig,
+} from "@/lib/utility-setup/email-modules";
+import { getSetupEmailModule, saveSetupEmailModule } from "@/lib/utility-setup/resources";
+import { setupEmailConfigSchema } from "@/lib/utility-setup/schemas";
+import type { SetupEmailConfig } from "@/lib/utility-setup/types";
 
 type NotificationRow = {
   id: string;
@@ -399,6 +407,17 @@ function NotificationPage() {
         </p>
       </div>
 
+      <ShipmentEmailCard
+        authed={authed}
+        canEdit={
+          !authed ||
+          canDo(permissions, UTILITY_NOTIFICATION_PERMISSIONS.notification, "modify") ||
+          canDo(permissions, UTILITY_NOTIFICATION_PERMISSIONS.notification, "add") ||
+          canDo(permissions, UTILITY_NOTIFICATION_PERMISSIONS.xpresionSetup, "modify") ||
+          canDo(permissions, UTILITY_NOTIFICATION_PERMISSIONS.xpresionSetup, "add")
+        }
+      />
+
       <Card className="min-w-0 overflow-hidden border p-4 md:p-6">
         <div className="mb-4 flex items-center justify-between gap-4">
           <DataIoToolbar
@@ -581,5 +600,106 @@ function NotificationPage() {
         </div>
       </Card>
     </div>
+  );
+}
+
+function ShipmentEmailCard({ authed, canEdit }: { authed: boolean; canEdit: boolean }) {
+  const [moduleName, setModuleName] = useState<(typeof SHIPMENT_EMAIL_MODULES)[number]>(
+    "EMAIL ON BOOKING",
+  );
+  const [open, setOpen] = useState(false);
+  const [config, setConfig] = useState<SetupEmailConfig>(emptyEmailConfig());
+  const [snapshot, setSnapshot] = useState<SetupEmailConfig>(emptyEmailConfig());
+  const [busy, setBusy] = useState(false);
+
+  const search = async () => {
+    if (!authed) {
+      const blank = emptyEmailConfig();
+      setConfig(blank);
+      setSnapshot(blank);
+      setOpen(true);
+      return;
+    }
+    try {
+      const saved = (await getSetupEmailModule(moduleName)) ?? emptyEmailConfig();
+      setConfig(saved);
+      setSnapshot(saved);
+      setOpen(true);
+    } catch (error) {
+      toast.error(toErrorMessage(error));
+    }
+  };
+
+  const update = async () => {
+    if (!canEdit) return toast.error("Permission denied");
+    try {
+      setupEmailConfigSchema(!config.has_password).parse(config);
+      if (!authed) return toast.success(`${moduleName} updated`);
+      setBusy(true);
+      const saved = await saveSetupEmailModule({ moduleName, config });
+      setConfig(saved);
+      setSnapshot(saved);
+      toast.success(`${moduleName} updated`);
+    } catch (error) {
+      toast.error(toErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="min-w-0 border p-4 md:p-6">
+      <h2 className="text-sm font-semibold text-foreground">
+        Email on Booking and Email on Delivery
+      </h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Booking and delivery email use the same SMTP fields and print toggles. They are saved on
+        this screen, apart from the Xpresion Setup module list.
+      </p>
+      <div className="mt-4 flex flex-wrap items-end gap-4">
+        <label className="flex min-w-56 flex-col gap-1 text-xs font-medium text-foreground">
+          Module
+          <Select
+            value={moduleName}
+            onValueChange={(value) =>
+              setModuleName(value as (typeof SHIPMENT_EMAIL_MODULES)[number])
+            }
+          >
+            <SelectTrigger className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SHIPMENT_EMAIL_MODULES.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        <Button
+          type="button"
+          onClick={() => void search()}
+          className="h-9 rounded-full bg-slate-600 px-8 text-white hover:bg-slate-700"
+        >
+          Search
+        </Button>
+      </div>
+      {open ? (
+        <div className="mt-6 max-w-3xl">
+          <EmailSetup
+            moduleName={moduleName}
+            config={config}
+            busy={busy}
+            patch={(updates) => setConfig((current) => ({ ...current, ...updates }))}
+            onCancel={() => {
+              setConfig(snapshot);
+              setOpen(false);
+            }}
+            onUpdate={() => void update()}
+          />
+        </div>
+      ) : null}
+    </Card>
   );
 }
