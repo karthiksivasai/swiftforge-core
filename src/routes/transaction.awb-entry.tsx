@@ -7514,11 +7514,16 @@ function ServicesSection({
             onCommit={onVendorCommit}
           />
         </FieldWrapper>
-        <FieldWrapper borderLabel label="Airline" required={airlineRequired}>
-          <Input
-            readOnly
-            className={`${inputClass} bg-muted/30`}
-            value={form.airline}
+        <FieldWrapper borderLabel lookupSplit label="Airline" required={airlineRequired}>
+          <LookupPairInput
+            lookup="airline"
+            value={{ code: form.airline, name: form.airline }}
+            onChange={(v) =>
+              setForm((f) => ({
+                ...f,
+                airline: (v.name || v.code || "").trim(),
+              }))
+            }
           />
         </FieldWrapper>
         <div className="min-w-0">

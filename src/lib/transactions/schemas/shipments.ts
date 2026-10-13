@@ -67,7 +67,7 @@ export const shipmentFieldsSchema = z.object({
   book_time: optText(16),
   awb_no: optText(64),
   reference_no: optText(64),
-  airline: optText(64),
+  airline: optText(200),
   service: optText(64),
   payment_type: optText(40),
   content: optText(200),
