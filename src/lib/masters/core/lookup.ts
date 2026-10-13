@@ -24,6 +24,7 @@ export type LookupKey =
   | "pin-code"
   | "country-pincode"
   | "area"
+  | "area-service-center"
   // catalog (0018)
   | "product-type"
   | "product"

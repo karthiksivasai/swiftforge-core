@@ -39,6 +39,7 @@ export const NAV_PERMISSION_BY_PATH: Record<string, string | readonly string[]> 
   "/master/operation/field-executive": "mst.field-executive-master",
   "/master/operation/exception": "mst.delivery-exception-master",
   "/master/operation/airline": "mst.airlines",
+  "/master/operation/area": "mst.area-master",
   "/master/operation/country-pincodes": "mst.country-pincodes",
 
   "/transaction/pickup": "txn.pickup",

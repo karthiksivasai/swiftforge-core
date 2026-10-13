@@ -1,12 +1,13 @@
 import { z } from "zod";
 
-import { reqText, reqUuid, uuidRef } from "./_shared";
+import { reqText, uuidRef, reqUuid } from "./_shared";
 
+// branch_id and destination_id are derived on the server from the service center.
+// A value sent by the form is replaced before the row is stored.
 export const areaCreateSchema = z.object({
-  branch_id: reqUuid("Branch"),
   service_center_id: reqUuid("Service Center"),
-  // Uppercased to match the import path (0016 stores areas.name in UPPER).
-  name: reqText("Name", 150).transform((v) => v.toUpperCase()),
+  name: reqText("Area Name", 150).transform((v) => v.toUpperCase()),
+  branch_id: uuidRef(),
   destination_id: uuidRef(),
 });
 

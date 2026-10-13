@@ -41,43 +41,42 @@ describe("countryCreateSchema", () => {
 });
 
 describe("areaCreateSchema", () => {
-  it("uppercases name and passes through branch and service center uuids", () => {
+  it("uppercases the area name and leaves branch and destination for the server", () => {
     const out = areaCreateSchema.parse({
-      branch_id: UUID,
       service_center_id: "22222222-2222-2222-2222-222222222222",
       name: "south zone",
     });
     expect(out).toEqual({
-      branch_id: UUID,
       service_center_id: "22222222-2222-2222-2222-222222222222",
       name: "SOUTH ZONE",
+      branch_id: null,
       destination_id: null,
     });
   });
 
-  it("requires a valid branch uuid", () => {
+  it("requires an area name", () => {
     expect(() =>
       areaCreateSchema.parse({
-        branch_id: "",
         service_center_id: UUID,
-        name: "X",
+        name: " ",
       }),
-    ).toThrow(/Branch/);
+    ).toThrow(/Area Name is required/);
   });
 
   it("requires a valid service center uuid", () => {
-    expect(() => areaCreateSchema.parse({ branch_id: UUID, service_center_id: "", name: "X" })).toThrow(
+    expect(() => areaCreateSchema.parse({ service_center_id: "", name: "X" })).toThrow(
       /Service Center/,
     );
   });
 
-  it("normalizes an empty optional fk to null", () => {
+  it("accepts a blank branch because the server derives it", () => {
     const out = areaCreateSchema.parse({
-      branch_id: UUID,
+      branch_id: "",
       service_center_id: UUID,
       name: "x",
       destination_id: "",
     });
+    expect(out.branch_id).toBeNull();
     expect(out.destination_id).toBeNull();
   });
 });
