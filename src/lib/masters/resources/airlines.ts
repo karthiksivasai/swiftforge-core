@@ -1,5 +1,6 @@
 import type { BaseRow } from "@/lib/masters/core/baseCrud";
 import type { MasterResource } from "@/lib/masters/core/useMasterResource";
+import type { ExportFormat } from "@/lib/io/tableIo";
 import { COMPLEX_CATALOG_MASTER_PERMISSIONS } from "@/lib/permissions";
 import {
   airlineCreateSchema,
@@ -7,6 +8,19 @@ import {
   type AirlineCreate,
   type AirlineUpdate,
 } from "@/lib/masters/schemas/airlines";
+
+/** Template headers on the Airline import file. Product Name is display-only. */
+export const AIRLINE_IMPORT_HEADER_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  name: ["Airlines Name", "Airline Name"],
+  product_code: ["Product Code"],
+};
+
+export const AIRLINE_EXPORT_FORMATS = ["excel", "csv", "pdf", "print"] as const satisfies readonly ExportFormat[];
+
+export const AIRLINE_EXPORT_COLUMNS = [
+  { key: "airlineName", header: "Airlines Name" },
+  { key: "product", header: "Product" },
+] as const;
 
 export type AirlineRow = BaseRow & {
   name: string;
