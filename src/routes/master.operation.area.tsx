@@ -51,12 +51,14 @@ import {
 } from "@/lib/masters/resources/areas";
 import { areaCreateSchema, areaUpdateSchema } from "@/lib/masters/schemas/areas";
 import { toErrorMessage, formatImportToast } from "@/lib/masters/screen";
-import { LookupCombobox } from "@/components/masters/lookup-combobox";
+import { SearchableLookupPair } from "@/components/masters/searchable-lookup-pair";
 
 type AreaRow = {
   id: string;
   areaName: string;
   serviceCenter: string;
+  serviceCenterCode: string;
+  serviceCenterName: string;
   serviceCenterId?: string;
   destination: string;
   row_version?: number;
@@ -65,12 +67,20 @@ type AreaRow = {
 type AreaForm = {
   areaName: string;
   serviceCenter: string;
+  serviceCenterCode: string;
   serviceCenterId: string;
   destination: string;
 };
 
 const DEMO_ROWS: AreaRow[] = [
-  { id: "demo-hyd", areaName: "HYD", serviceCenter: "HYD", destination: "HYDERABAD" },
+  {
+    id: "demo-hyd",
+    areaName: "HYD",
+    serviceCenter: "HYD",
+    serviceCenterCode: "HYD",
+    serviceCenterName: "HYD",
+    destination: "HYDERABAD",
+  },
 ];
 
 const EXPORT_ICONS: Record<ExportFormat, { label: string; icon: typeof FileSpreadsheet }> = {
@@ -83,6 +93,7 @@ const EXPORT_ICONS: Record<ExportFormat, { label: string; icon: typeof FileSprea
 const emptyForm = (): AreaForm => ({
   areaName: "",
   serviceCenter: "",
+  serviceCenterCode: "",
   serviceCenterId: "",
   destination: "",
 });
@@ -97,7 +108,9 @@ function rowToView(r: AreaDbRow & Record<string, unknown>): AreaRow {
   return {
     id: r.id,
     areaName: r.name,
-    serviceCenter: serviceCenterLabel(code, name),
+    serviceCenter: serviceCenterLabel(code, name) || code || name,
+    serviceCenterCode: code,
+    serviceCenterName: name,
     serviceCenterId: (r.service_center_id as string | null) ?? "",
     destination: (r.destination_name as string) ?? "",
     row_version: r.row_version,
@@ -200,7 +213,8 @@ function AreaPage() {
     setEditing(row);
     setForm({
       areaName: row.areaName,
-      serviceCenter: row.serviceCenter,
+      serviceCenter: row.serviceCenterName,
+      serviceCenterCode: row.serviceCenterCode,
       serviceCenterId: row.serviceCenterId ?? "",
       destination: row.destination,
     });
@@ -220,7 +234,7 @@ function AreaPage() {
       return;
     }
     if (!form.areaName.trim()) return toast.error("Area Name is required");
-    if (!form.serviceCenterId.trim()) return toast.error("Service Center is required");
+    if (!form.serviceCenterId.trim()) return toast.error("Location is required");
 
     const raw = {
       name: form.areaName.trim(),
@@ -363,20 +377,28 @@ function AreaPage() {
                   }
                 />
               </FieldWrapper>
-              <FieldWrapper label="Service Center" required>
-                <LookupCombobox
-                  lookupKey="area-service-center"
-                  value={form.serviceCenterId}
-                  valueLabel={form.serviceCenter}
-                  onChange={(id, item) =>
+              <FieldWrapper label="Location" required>
+                <SearchableLookupPair
+                  lookup="serviceCentre"
+                  liveLookup="area-service-center"
+                  modalTitle="Select Location"
+                  splitCode
+                  namePlaceholder=""
+                  codePlaceholder=""
+                  value={{
+                    id: form.serviceCenterId,
+                    code: form.serviceCenterCode,
+                    name: form.serviceCenter,
+                  }}
+                  onChange={(v) =>
                     setForm((f) => ({
                       ...f,
-                      serviceCenterId: id,
-                      serviceCenter: item ? serviceCenterLabel(item.code, item.name) : "",
-                      destination: (item?.hint ?? "").trim(),
+                      serviceCenterId: v.id || "",
+                      serviceCenterCode: v.code,
+                      serviceCenter: v.name,
+                      destination: v.hint === undefined ? f.destination : (v.hint ?? "").trim(),
                     }))
                   }
-                  placeholder="Select Service Center"
                 />
               </FieldWrapper>
               <FieldWrapper label="Destination">
@@ -512,9 +534,8 @@ function AreaPage() {
                   className="h-9 w-56"
                 />
                 {canAdd ? (
-                  <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                  <Button size="icon" onClick={openAdd} className="h-8 w-8" aria-label="Add">
                     <Plus className="h-4 w-4" />
-                    Add
                   </Button>
                 ) : null}
               </div>
@@ -525,7 +546,7 @@ function AreaPage() {
                 <TableHeader>
                   <TableRow className="bg-sidebar hover:bg-sidebar">
                     <TableHead className="text-sidebar-foreground">Area Name</TableHead>
-                    <TableHead className="text-sidebar-foreground">Service Center</TableHead>
+                    <TableHead className="text-sidebar-foreground">Location</TableHead>
                     <TableHead className="text-sidebar-foreground">Destination</TableHead>
                     <TableHead className="w-28 text-center text-sidebar-foreground">Action</TableHead>
                   </TableRow>
@@ -533,7 +554,7 @@ function AreaPage() {
                     {(
                       [
                         ["areaName", "Area Name"],
-                        ["serviceCenter", "Service Center"],
+                        ["serviceCenter", "Location"],
                         ["destination", "Destination"],
                       ] as const
                     ).map(([k, placeholder]) => (

@@ -45,7 +45,7 @@ import {
   LookupDropdownPortal,
 } from "@/components/masters/lookup-dropdown-portal";
 
-export type LookupPairValue = { id?: string; code: string; name: string };
+export type LookupPairValue = { id?: string; code: string; name: string; hint?: string | null };
 
 /** Demo master-lookups keys → live `public.lookup` RPC keys when signed in. */
 export const DEMO_TO_LIVE_LOOKUP: Partial<Record<LookupKey, LiveLookupKey>> = {
@@ -130,6 +130,7 @@ export function SearchableLookupPair({
   onChange,
   onSelect,
   lookup: lookupKey,
+  liveLookup,
   minChars = 2,
   debounceMs = AWB_LOOKUP_DEBOUNCE_MS,
   disabled,
@@ -148,12 +149,15 @@ export function SearchableLookupPair({
   namePlaceholder = "Name",
   codePlaceholder = "Code",
   searchPlaceholder = "Search by code or name…",
+  modalTitle,
 }: {
   value: LookupPairValue;
   onChange: (v: LookupPairValue) => void;
   /** Called when a row is committed from search results (not while typing). */
   onSelect?: (v: LookupPairValue) => void;
   lookup: LookupKey;
+  /** Signed-in lookup key. Overrides the shared demo-to-live map for this field. */
+  liveLookup?: LiveLookupKey;
   minChars?: number;
   debounceMs?: number;
   disabled?: boolean;
@@ -175,6 +179,7 @@ export function SearchableLookupPair({
   namePlaceholder?: string;
   codePlaceholder?: string;
   searchPlaceholder?: string;
+  modalTitle?: string;
 }) {
   void _emptySearchMessage;
   void _noResultsMessage;
@@ -195,7 +200,7 @@ export function SearchableLookupPair({
   const [manualDropdownOpen, setManualDropdownOpen] = useState(false);
   const [manualSearching, setManualSearching] = useState(false);
 
-  const liveKey = DEMO_TO_LIVE_LOOKUP[lookupKey];
+  const liveKey = liveLookup ?? DEMO_TO_LIVE_LOOKUP[lookupKey];
   const manualQueryRaw = (value.name || value.code || "").trim();
   const debouncedManualQuery = useDebouncedValue(manualQueryRaw, debounceMs);
   const debouncedInline = useDebouncedValue(inlineQuery, debounceMs);
@@ -334,7 +339,7 @@ export function SearchableLookupPair({
 
   const pick = useCallback(
     (hit: SearchHit) => {
-      const next = { id: hit.id, code: hit.code, name: hit.name };
+      const next = { id: hit.id, code: hit.code, name: hit.name, hint: hit.hint ?? null };
       onChange(next);
       onSelect?.(next);
       manualQueryEditedRef.current = false;
@@ -730,7 +735,7 @@ export function SearchableLookupPair({
         >
           <DialogContent className="max-w-lg">
             <DialogTitle className="text-base font-semibold">
-              Select {MASTER_LOOKUPS[lookupKey]?.title?.replace(/^Select\s+/i, "") ?? lookupKey}
+              {modalTitle || `Select ${MASTER_LOOKUPS[lookupKey]?.title?.replace(/^Select\s+/i, "") ?? lookupKey}`}
             </DialogTitle>
             <Input
               value={popupQuery}
@@ -774,6 +779,7 @@ export function SearchableLookupPair({
           }}
           lookup={lookupKey}
           returnField="code"
+          titleOverride={modalTitle}
           onSelect={(_v, option: LookupOption) => {
             pick({ code: option.code, name: option.name });
           }}

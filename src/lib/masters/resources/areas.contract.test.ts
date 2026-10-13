@@ -18,7 +18,7 @@ describe("area master enforcement", () => {
     expect(migration).toContain("public.list_areas");
     expect(screen).toContain('supabase.rpc("list_areas")');
     expect(screen).toContain("authed && !canSearch");
-    expect(screen).toContain('lookupKey="area-service-center"');
+    expect(screen).toContain('liveLookup="area-service-center"');
   });
 
   it("derives destination, keeps branch-scoped case-insensitive names, and names delete references", () => {

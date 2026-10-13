@@ -12,7 +12,7 @@ import {
 /** Template headers on the Area import file. Destination is checked, then derived. */
 export const AREA_IMPORT_HEADER_ALIASES: Readonly<Record<string, readonly string[]>> = {
   name: ["Area Name"],
-  service_center_code: ["Service Center", "Service Centre"],
+  service_center_code: ["Service Center", "Service Centre", "Location"],
   destination_code: ["Destination"],
 };
 
