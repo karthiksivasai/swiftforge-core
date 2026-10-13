@@ -19,7 +19,9 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as UtilityServiceablePincodeRouteImport } from './routes/utility.serviceable-pincode'
 import { Route as UtilityNotificationRouteImport } from './routes/utility.notification'
 import { Route as UtilityIntegrationConfigurationRouteImport } from './routes/utility.integration-configuration'
+import { Route as UtilityAccessRightsRouteImport } from './routes/utility.access-rights'
 import { Route as UtilitySplatRouteImport } from './routes/utility.$'
+import { Route as UtilitiesAccessRightsRouteImport } from './routes/utilities.access-rights'
 import { Route as TransactionUnDeliveryScanRouteImport } from './routes/transaction.un-delivery-scan'
 import { Route as TransactionTransferRunRouteImport } from './routes/transaction.transfer-run'
 import { Route as TransactionPickupInscanRouteImport } from './routes/transaction.pickup-inscan'
@@ -173,9 +175,19 @@ const UtilityIntegrationConfigurationRoute =
     path: '/utility/integration-configuration',
     getParentRoute: () => rootRouteImport,
   } as any)
+const UtilityAccessRightsRoute = UtilityAccessRightsRouteImport.update({
+  id: '/utility/access-rights',
+  path: '/utility/access-rights',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UtilitySplatRoute = UtilitySplatRouteImport.update({
   id: '/utility/$',
   path: '/utility/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UtilitiesAccessRightsRoute = UtilitiesAccessRightsRouteImport.update({
+  id: '/utilities/access-rights',
+  path: '/utilities/access-rights',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TransactionUnDeliveryScanRoute =
@@ -759,7 +771,9 @@ export interface FileRoutesByFullPath {
   '/transaction/pickup-inscan': typeof TransactionPickupInscanRoute
   '/transaction/transfer-run': typeof TransactionTransferRunRoute
   '/transaction/un-delivery-scan': typeof TransactionUnDeliveryScanRoute
+  '/utilities/access-rights': typeof UtilitiesAccessRightsRoute
   '/utility/$': typeof UtilitySplatRoute
+  '/utility/access-rights': typeof UtilityAccessRightsRoute
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
@@ -872,7 +886,9 @@ export interface FileRoutesByTo {
   '/transaction/pickup-inscan': typeof TransactionPickupInscanRoute
   '/transaction/transfer-run': typeof TransactionTransferRunRoute
   '/transaction/un-delivery-scan': typeof TransactionUnDeliveryScanRoute
+  '/utilities/access-rights': typeof UtilitiesAccessRightsRoute
   '/utility/$': typeof UtilitySplatRoute
+  '/utility/access-rights': typeof UtilityAccessRightsRoute
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
@@ -986,7 +1002,9 @@ export interface FileRoutesById {
   '/transaction/pickup-inscan': typeof TransactionPickupInscanRoute
   '/transaction/transfer-run': typeof TransactionTransferRunRoute
   '/transaction/un-delivery-scan': typeof TransactionUnDeliveryScanRoute
+  '/utilities/access-rights': typeof UtilitiesAccessRightsRoute
   '/utility/$': typeof UtilitySplatRoute
+  '/utility/access-rights': typeof UtilityAccessRightsRoute
   '/utility/integration-configuration': typeof UtilityIntegrationConfigurationRoute
   '/utility/notification': typeof UtilityNotificationRoute
   '/utility/serviceable-pincode': typeof UtilityServiceablePincodeRoute
@@ -1101,7 +1119,9 @@ export interface FileRouteTypes {
     | '/transaction/pickup-inscan'
     | '/transaction/transfer-run'
     | '/transaction/un-delivery-scan'
+    | '/utilities/access-rights'
     | '/utility/$'
+    | '/utility/access-rights'
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
@@ -1214,7 +1234,9 @@ export interface FileRouteTypes {
     | '/transaction/pickup-inscan'
     | '/transaction/transfer-run'
     | '/transaction/un-delivery-scan'
+    | '/utilities/access-rights'
     | '/utility/$'
+    | '/utility/access-rights'
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
@@ -1327,7 +1349,9 @@ export interface FileRouteTypes {
     | '/transaction/pickup-inscan'
     | '/transaction/transfer-run'
     | '/transaction/un-delivery-scan'
+    | '/utilities/access-rights'
     | '/utility/$'
+    | '/utility/access-rights'
     | '/utility/integration-configuration'
     | '/utility/notification'
     | '/utility/serviceable-pincode'
@@ -1441,7 +1465,9 @@ export interface RootRouteChildren {
   TransactionPickupInscanRoute: typeof TransactionPickupInscanRoute
   TransactionTransferRunRoute: typeof TransactionTransferRunRoute
   TransactionUnDeliveryScanRoute: typeof TransactionUnDeliveryScanRoute
+  UtilitiesAccessRightsRoute: typeof UtilitiesAccessRightsRoute
   UtilitySplatRoute: typeof UtilitySplatRoute
+  UtilityAccessRightsRoute: typeof UtilityAccessRightsRoute
   UtilityIntegrationConfigurationRoute: typeof UtilityIntegrationConfigurationRoute
   UtilityNotificationRoute: typeof UtilityNotificationRoute
   UtilityServiceablePincodeRoute: typeof UtilityServiceablePincodeRoute
@@ -1592,11 +1618,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UtilityIntegrationConfigurationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/utility/access-rights': {
+      id: '/utility/access-rights'
+      path: '/utility/access-rights'
+      fullPath: '/utility/access-rights'
+      preLoaderRoute: typeof UtilityAccessRightsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/utility/$': {
       id: '/utility/$'
       path: '/utility/$'
       fullPath: '/utility/$'
       preLoaderRoute: typeof UtilitySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utilities/access-rights': {
+      id: '/utilities/access-rights'
+      path: '/utilities/access-rights'
+      fullPath: '/utilities/access-rights'
+      preLoaderRoute: typeof UtilitiesAccessRightsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/transaction/un-delivery-scan': {
@@ -2337,7 +2377,9 @@ const rootRouteChildren: RootRouteChildren = {
   TransactionPickupInscanRoute: TransactionPickupInscanRoute,
   TransactionTransferRunRoute: TransactionTransferRunRoute,
   TransactionUnDeliveryScanRoute: TransactionUnDeliveryScanRoute,
+  UtilitiesAccessRightsRoute: UtilitiesAccessRightsRoute,
   UtilitySplatRoute: UtilitySplatRoute,
+  UtilityAccessRightsRoute: UtilityAccessRightsRoute,
   UtilityIntegrationConfigurationRoute: UtilityIntegrationConfigurationRoute,
   UtilityNotificationRoute: UtilityNotificationRoute,
   UtilityServiceablePincodeRoute: UtilityServiceablePincodeRoute,

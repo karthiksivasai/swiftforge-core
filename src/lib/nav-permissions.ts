@@ -76,7 +76,11 @@ export const NAV_PERMISSION_BY_PATH: Record<string, string | readonly string[]> 
 
   "/utility/serviceable-pincode": "utl.serviceable-pincode",
   "/utility/notification": "utl.notification",
-  "/utility/integration-configuration": "mst.vendor-master",
+  "/master/operation/pin-code": "mst.pincode-master",
+  "/documents/invoice-generation": "doc.generate-invoice",
+  "/documents/invoice-print": "doc.print-invoice",
+  "/documents/invoice-finalise": "doc.invoice-finalise",
+  "/utility/integration-configuration": "utl.integration-configuration",
   "/utility/users/user-setup": ["utl.user-setup", "utility.user_setup"],
   "/utility/users/access-rights": "utl.access-rights",
   "/utility/users/loggedin-users": "utl.loggedin-users",
@@ -91,6 +95,8 @@ export const NAV_PERMISSION_BY_PATH: Record<string, string | readonly string[]> 
   "/utility/rate-zone-update/rate-update": "utl.rate-update",
   "/utility/rate-zone-update/zone-update": "utl.zone-update",
   "/utility/rate-zone-update/rate-import": "utl.rate-import",
+  "/utility/rate-zone-update/rate-update-jobs": "utl.rate-update-jobs",
+  "/utility/rate-zone-update/zone-update-jobs": "utl.zone-update-jobs",
 };
 
 type Can = (slug: string, action: PermissionAction) => boolean;
