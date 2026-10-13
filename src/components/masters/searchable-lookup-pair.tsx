@@ -148,6 +148,7 @@ export function SearchableLookupPair({
   namePlaceholder = "Name",
   codePlaceholder = "Code",
   searchPlaceholder = "Search by code or name…",
+  modalTitle,
 }: {
   value: LookupPairValue;
   onChange: (v: LookupPairValue) => void;
@@ -175,6 +176,7 @@ export function SearchableLookupPair({
   namePlaceholder?: string;
   codePlaceholder?: string;
   searchPlaceholder?: string;
+  modalTitle?: string;
 }) {
   void _emptySearchMessage;
   void _noResultsMessage;
@@ -730,7 +732,7 @@ export function SearchableLookupPair({
         >
           <DialogContent className="max-w-lg">
             <DialogTitle className="text-base font-semibold">
-              Select {MASTER_LOOKUPS[lookupKey]?.title?.replace(/^Select\s+/i, "") ?? lookupKey}
+              {modalTitle || `Select ${MASTER_LOOKUPS[lookupKey]?.title?.replace(/^Select\s+/i, "") ?? lookupKey}`}
             </DialogTitle>
             <Input
               value={popupQuery}
@@ -774,6 +776,7 @@ export function SearchableLookupPair({
           }}
           lookup={lookupKey}
           returnField="code"
+          titleOverride={modalTitle}
           onSelect={(_v, option: LookupOption) => {
             pick({ code: option.code, name: option.name });
           }}

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { RefreshCw, Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, FileSpreadsheet, FileUp, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,7 @@ import {
   PAGE_SIZE,
   TablePager,
 } from "@/components/master-table-kit";
-import { DataIoToolbar } from "@/components/data-io-toolbar";
+import { exportTable, parseTabularFile } from "@/lib/io/tableIo";
 import { MASTER_LOOKUPS } from "@/lib/master-lookups";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -57,7 +57,7 @@ import {
   toErrorMessage,
   formatImportToast,
 } from "@/lib/masters/screen";
-import { LookupCombobox } from "@/components/masters/lookup-combobox";
+import { SearchableLookupPair } from "@/components/masters/searchable-lookup-pair";
 import type { LookupItem } from "@/lib/masters/core/lookup";
 
 type AreaRow = {
@@ -74,6 +74,7 @@ type AreaRow = {
 type AreaForm = {
   areaName: string;
   serviceCenter: string;
+  serviceCenterCode: string;
   serviceCenterId?: string;
   destination: string;
   branchId?: string;
@@ -101,6 +102,7 @@ const SEED_ROWS: Omit<AreaRow, "id">[] = [
 const emptyForm = (): AreaForm => ({
   areaName: "",
   serviceCenter: "HYD",
+  serviceCenterCode: "HYD",
   serviceCenterId: "",
   destination: SERVICE_CENTER_DESTINATIONS.HYD,
 });
@@ -111,7 +113,7 @@ function resolveBranchId(
 ): string {
   if (!item) return "";
   const candidates = [item.hint, item.code]
-    .filter(Boolean)
+    .filter((v): v is string => typeof v === "string" && v.trim() !== "")
     .map((value) => value.trim().toUpperCase());
   for (const needle of candidates) {
     const byCode = branchOptions.find((b) => (b.code ?? "").trim().toUpperCase() === needle);
@@ -180,6 +182,8 @@ function AreaPage() {
   const [form, setForm] = useState<AreaForm>(emptyForm());
   const [deleteTarget, setDeleteTarget] = useState<AreaRow | null>(null);
   const [saving, setSaving] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
 
   const rows: AreaRow[] = authed
     ? (live.rows as (AreaDbRow & Record<string, unknown>)[]).map(rowToView)
@@ -233,6 +237,7 @@ function AreaPage() {
     setForm({
       areaName: row.areaName,
       serviceCenter: row.serviceCenter,
+      serviceCenterCode: "",
       serviceCenterId: row.serviceCenterId ?? "",
       destination: row.destination,
       branchId: row.branchId,
@@ -247,10 +252,7 @@ function AreaPage() {
     setForm(emptyForm());
   };
 
-  const handleServiceCenterChange = (serviceCenter: string) => {
-    const destination = SERVICE_CENTER_DESTINATIONS[serviceCenter] ?? form.destination;
-    setForm((f) => ({ ...f, serviceCenter, destination }));
-  };
+
 
   const toRaw = (f: AreaForm) => ({
     branch_id: f.branchId || "",
@@ -260,9 +262,21 @@ function AreaPage() {
   });
 
   const handleSave = async () => {
+    let hasError = false;
+
+    if (!form.areaName.trim()) {
+      toast.error("Area Name is required");
+      hasError = true;
+    }
+
     if (authed) {
-      if (!form.serviceCenterId?.trim()) return toast.error("Service Center is required");
-      if (!form.branchId?.trim()) return toast.error("Service Center is required");
+      if (!form.serviceCenterId?.trim() || !form.branchId?.trim()) {
+        toast.error("Location is required");
+        hasError = true;
+      }
+
+      if (hasError) return;
+
       setSaving(true);
       try {
         const raw = toRaw(form);
@@ -288,8 +302,12 @@ function AreaPage() {
       return;
     }
 
-    if (!form.areaName.trim()) return toast.error("Area Name is required");
-    if (!form.serviceCenter.trim()) return toast.error("Service Center is required");
+    if (!form.serviceCenter.trim()) {
+      toast.error("Location is required");
+      hasError = true;
+    }
+
+    if (hasError) return;
 
     const payload = {
       areaName: form.areaName.trim().toUpperCase(),
@@ -364,6 +382,62 @@ function AreaPage() {
     }
   };
 
+  const doImport = async () => {
+    if (!importFile) return;
+    try {
+      const parsed = await parseTabularFile(importFile);
+      if (parsed.rows.length === 0) {
+        toast.error("File is empty");
+        return;
+      }
+      await handleImportRows(parsed.rows);
+      setImportOpen(false);
+      setImportFile(null);
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to import file"));
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      await exportTable({
+        format: "excel",
+        filename: "areas",
+        title: "Areas",
+        columns: [
+          { key: "areaName", header: "Area Name" },
+          { key: "serviceCenter", header: "Service Center" },
+          { key: "destination", header: "Destination" },
+        ],
+        rows: rows.map((r) => ({
+          areaName: r.areaName,
+          serviceCenter: r.serviceCenter,
+          destination: r.destination,
+        })),
+      });
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Export failed"));
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      await exportTable({
+        format: "excel",
+        filename: "areas_template",
+        title: "Import Areas from Excel",
+        columns: [
+          { key: "areaName", header: "Area Name" },
+          { key: "serviceCenter", header: "Service Center" },
+          { key: "destination", header: "Destination" },
+        ],
+        rows: [],
+      });
+    } catch (err) {
+      toast.error(toErrorMessage(err, "Failed to download template"));
+    }
+  };
+
   const handleRefresh = () => {
     setSearch("");
     setColFilters({ areaName: "", serviceCenter: "", destination: "" });
@@ -393,54 +467,32 @@ function AreaPage() {
                   }
                 />
               </FieldWrapper>
-              <FieldWrapper label="Service Center" required>
-                {authed ? (
-                  <LookupCombobox
-                    lookupKey="service-center"
-                    value={form.serviceCenterId ?? ""}
-                    valueLabel={form.serviceCenter}
-                    onChange={(id, item) =>
-                      setForm((f) => ({
-                        ...f,
-                        serviceCenterId: id,
-                        serviceCenter: item?.name ?? "",
-                        branchId: resolveBranchId(item, branches.options),
-                      }))
-                    }
-                    placeholder="Select Service Center"
-                  />
-                ) : (
-                  <Select value={form.serviceCenter} onValueChange={handleServiceCenterChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select Service Center" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SERVICE_CENTRES.map((sc) => (
-                        <SelectItem key={sc.code} value={sc.code}>
-                          {sc.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+              <FieldWrapper label="Location" required>
+                <SearchableLookupPair
+                  lookup="serviceCentre"
+                  modalTitle="Select Location"
+                  splitCode
+                  namePlaceholder=""
+                  codePlaceholder=""
+                  value={{ id: form.serviceCenterId || "", code: form.serviceCenterCode, name: form.serviceCenter }}
+                  onChange={(v) => {
+                    const dest = SERVICE_CENTER_DESTINATIONS[v.code] ?? form.destination;
+                    setForm((f) => ({
+                      ...f,
+                      serviceCenterId: v.id || "",
+                      serviceCenterCode: v.code,
+                      serviceCenter: v.name,
+                      destination: dest,
+                      branchId: resolveBranchId({ hint: "", code: v.code, name: v.name } as any, branches.options),
+                    }))
+                  }}
+                />
               </FieldWrapper>
               <FieldWrapper label="Destination">
-                {authed ? (
-                  <LookupCombobox
-                    lookupKey="destination"
-                    value={form.destinationId ?? ""}
-                    valueLabel={form.destination}
-                    onChange={(id, item) =>
-                      setForm((f) => ({ ...f, destinationId: id, destination: item?.name ?? "" }))
-                    }
-                    placeholder="Select Destination"
-                  />
-                ) : (
-                  <Input
-                    value={form.destination}
-                    onChange={(e) => setForm((f) => ({ ...f, destination: e.target.value }))}
-                  />
-                )}
+                <Input
+                  value={form.destination}
+                  disabled
+                />
               </FieldWrapper>
             </div>
 
@@ -458,37 +510,56 @@ function AreaPage() {
             </div>
           </div>
         </Card>
+      ) : importOpen ? (
+        <Card className="overflow-hidden border p-0">
+          <div className="p-4 md:p-6">
+            <Badge className="mb-4 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
+              Import Areas from Excel
+            </Badge>
+
+            <div className="flex flex-col gap-4 py-4">
+              <p className="text-sm text-muted-foreground">
+                Data should be in same format as per Excel.
+              </p>
+              <div>
+                <Button variant="link" className="p-0 h-auto" onClick={handleDownloadTemplate}>
+                  Download Excel File Format
+                </Button>
+              </div>
+              <div className="grid w-full max-w-sm items-center gap-1.5">
+                <Input 
+                  id="excel-file" 
+                  type="file" 
+                  accept=".xlsx, .xls"
+                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-between">
+              <Button className="bg-emerald-600 text-white hover:bg-emerald-600/90" onClick={doImport}>
+                Import
+              </Button>
+              <Button variant="destructive" onClick={() => { setImportOpen(false); setImportFile(null); }}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </Card>
       ) : (
         <>
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Area</h1>
-            <p className="text-sm text-muted-foreground">
-              Manage areas mapped to service centres and destinations.
-            </p>
-          </div>
-
           <Card className="overflow-hidden p-0">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
               <TooltipProvider delayDuration={200}>
                 <div className="flex items-center gap-1.5">
-                  <DataIoToolbar
-                    export={{
-                      filename: "areas",
-                      title: "Areas",
-                      columns: [
-                        { key: "areaName", header: "Area Name" },
-                        { key: "serviceCenter", header: "Service Center" },
-                        { key: "destination", header: "Destination" },
-                      ],
-                      getRows: () =>
-                        rows.map((r) => ({
-                          areaName: r.areaName,
-                          serviceCenter: r.serviceCenter,
-                          destination: r.destination,
-                        })),
-                    }}
-                    import={canAdd ? { onRows: handleImportRows } : null}
-                  />
+                  <IconButton label="Export" onClick={handleExport} className="h-8 w-8 text-emerald-600 hover:text-emerald-700">
+                    <FileSpreadsheet className="h-4 w-4" />
+                  </IconButton>
+                  {canAdd ? (
+                    <IconButton label="Import" onClick={() => setImportOpen(true)} className="h-8 w-8 text-blue-600 hover:text-blue-700">
+                      <FileUp className="h-4 w-4" />
+                    </IconButton>
+                  ) : null}
                   <IconButton label="Refresh" onClick={handleRefresh}>
                     <RefreshCw className="h-4 w-4" />
                   </IconButton>
@@ -505,9 +576,8 @@ function AreaPage() {
                   className="h-9 w-56"
                 />
                 {canAdd ? (
-                  <Button size="sm" onClick={openAdd} className="h-9 gap-1.5">
+                  <Button size="icon" onClick={openAdd} className="h-8 w-8">
                     <Plus className="h-4 w-4" />
-                    Add
                   </Button>
                 ) : null}
               </div>
@@ -518,7 +588,7 @@ function AreaPage() {
                 <TableHeader>
                   <TableRow className="bg-sidebar hover:bg-sidebar">
                     <TableHead className="text-sidebar-foreground">Area Name</TableHead>
-                    <TableHead className="text-sidebar-foreground">Service Center</TableHead>
+                    <TableHead className="text-sidebar-foreground">Location</TableHead>
                     <TableHead className="text-sidebar-foreground">Destination</TableHead>
                     <TableHead className="w-28 text-center text-sidebar-foreground">
                       Action
@@ -528,7 +598,7 @@ function AreaPage() {
                     {(
                       [
                         ["areaName", "Area Name"],
-                        ["serviceCenter", "Service Center"],
+                        ["serviceCenter", "Location"],
                         ["destination", "Destination"],
                       ] as const
                     ).map(([k, placeholder]) => (

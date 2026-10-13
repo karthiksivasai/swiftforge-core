@@ -13,9 +13,10 @@ interface Props {
   lookup: LookupKey;
   onSelect: (value: string, option: LookupOption) => void;
   returnField?: LookupReturn;
+  titleOverride?: string;
 }
 
-export function MasterLookupDialog({ open, onOpenChange, lookup, onSelect, returnField = "name" }: Props) {
+export function MasterLookupDialog({ open, onOpenChange, lookup, onSelect, returnField = "name", titleOverride }: Props) {
   const cfg = MASTER_LOOKUPS[lookup];
   const [query, setQuery] = useState("");
 
@@ -35,7 +36,7 @@ export function MasterLookupDialog({ open, onOpenChange, lookup, onSelect, retur
     <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) setQuery(""); }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{cfg.title}</DialogTitle>
+          <DialogTitle>{titleOverride || cfg.title}</DialogTitle>
         </DialogHeader>
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
