@@ -86,6 +86,21 @@ import {
 } from "@/lib/forms/erp-keyboard-nav";
 import type { LookupKey } from "@/lib/master-lookups";
 import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
+import { fetchCustomerChildren } from "@/lib/masters/resources/customers";
+import { sendEmail, sendSms } from "@/lib/notifications/delivery";
+import {
+  awbGstPercent,
+  awbIntraState,
+  balanceDue,
+  formatChargeWeight,
+  fuelPercentFor,
+  hsnIsValid,
+  manualChargeAmounts,
+  resolveDivision,
+  type FuelSurchargeRow,
+  type VolumetricFactor,
+} from "@/lib/transactions/awbEntryRules";
 import { toErrorMessage } from "@/lib/masters/screen";
 import { rememberPartiesAfterAwbSave } from "@/lib/transactions/resources/partyContacts";
 import {
@@ -231,6 +246,7 @@ type PiecesLine = {
   height: string;
   volWeight: string;
   chargeWeight: string;
+  division?: string;
 };
 
 type ChargeLine = {
@@ -274,6 +290,12 @@ type ProformaData = {
   exportReason: string;
   format: string;
   currency: string;
+  adCode: string;
+  bondUt: string;
+  payOfIgst: string;
+  ecommerce: string;
+  meis: string;
+  invoiceType: string;
   lines: ProformaLine[];
 };
 
@@ -362,6 +384,9 @@ type AwbFullForm = {
   balanceAmount: string;
   cashReceiptDate: string;
   lock: boolean;
+  expectedDeliveryDate: string;
+  notifyEmail: boolean;
+  notifySms: boolean;
   forwardingNo: string;
   deliveryNo: string;
   pickupId?: string;
@@ -702,7 +727,17 @@ const KYC_TYPES = [
   "Document",
 ] as const;
 
-const AWB_TABS = ["awb", "proforma", "forwarding", "kyc"] as const;
+const AWB_TABS = ["awb", "proforma", "forwarding", "kyc", "notification"] as const;
+const FORM_SETUP_STORAGE_KEY = "cms.awb-form-setup.v1";
+
+type AwbChargeHead = {
+  code: string;
+  name: string;
+  charge_rate: number;
+  apply_fuel: boolean;
+  apply_tax_on_fuel: boolean;
+  apply_tax: boolean;
+};
 type AwbTab = (typeof AWB_TABS)[number];
 
 const AWB_FORM_SETUP_COLUMNS = [
@@ -924,6 +959,12 @@ const emptyProforma = (): ProformaData => ({
   exportReason: "UNSOLICITED GIFT - NOT FOR SALE",
   format: "",
   currency: "INR",
+  adCode: "",
+  bondUt: "No",
+  payOfIgst: "No",
+  ecommerce: "No",
+  meis: "No",
+  invoiceType: "",
   lines: [],
 });
 
@@ -1011,6 +1052,9 @@ const emptyForm = (): AwbFullForm => ({
   balanceAmount: "",
   cashReceiptDate: "",
   lock: false,
+  expectedDeliveryDate: "",
+  notifyEmail: false,
+  notifySms: false,
   forwardingNo: "",
   deliveryNo: "",
   proforma: emptyProforma(),
@@ -1122,6 +1166,9 @@ const cloneAwbFormFromSource = (
     balanceAmount: "",
     cashReceiptDate: "",
     lock: false,
+    expectedDeliveryDate: source.expectedDeliveryDate ?? "",
+    notifyEmail: source.notifyEmail === true,
+    notifySms: source.notifySms === true,
     forwardingNo: "",
     deliveryNo: "",
     pickupId: undefined,
@@ -1149,6 +1196,19 @@ const cloneAwbFormFromSource = (
   };
 };
 
+/** Digits only. Used for piece counts. */
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+/** Digits and one decimal point. Letters and other symbols are dropped. */
+function decimalNumber(value: string): string {
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const dot = cleaned.indexOf(".");
+  if (dot === -1) return cleaned;
+  return `${cleaned.slice(0, dot + 1)}${cleaned.slice(dot + 1).replace(/\./g, "")}`;
+}
+
 const calcVolWeight = (draft: PiecesDraft) => {
   const l = Number.parseFloat(draft.length) || 0;
   const w = Number.parseFloat(draft.width) || 0;
@@ -1159,12 +1219,69 @@ const calcVolWeight = (draft: PiecesDraft) => {
   return ((l * w * h * pcs) / div).toFixed(3);
 };
 
-const calcChargeWeight = (draft: PiecesDraft) => {
+const calcChargeWeight = (draft: PiecesDraft, roundOff = false) => {
   const vol = Number.parseFloat(calcVolWeight(draft)) || 0;
   const act =
     (Number.parseFloat(draft.actualWeightPerPc) || 0) * (Number.parseFloat(draft.noOfPieces) || 0);
-  return Math.max(vol, act).toFixed(3);
+  return formatChargeWeight(Math.max(vol, act), roundOff);
 };
+
+function collectAwbProductionErrors(form: AwbFullForm): string[] {
+  const errors: string[] = [];
+  if (!isAwbLookupSelected(form.vendor)) errors.push("Vendor is required");
+  if (!form.shipper.address1.trim()) errors.push("Shipper Address 1 is required");
+  if (!form.shipper.pincode.trim()) errors.push("Shipper Pincode is required");
+  if (!form.shipper.city.trim()) errors.push("Shipper City is required");
+  if (!form.shipper.state.trim()) errors.push("Shipper State is required");
+  if (form.proforma.csbType.trim().toUpperCase() === "CSB 5" && !form.proforma.adCode.trim()) {
+    errors.push("Ad Code is required when CSB Type is CSB 5");
+  }
+  return errors;
+}
+
+async function notifySavedAwb(form: AwbFullForm) {
+  if (!form.notifyEmail && !form.notifySms) return;
+  const awb = form.awbNo.trim() || "shipment";
+  const body = `Shipment ${awb} was saved.`;
+  const warnings: string[] = [];
+  try {
+    if (form.notifyEmail) {
+      const emails = [form.shipper.email, form.consignee.email]
+        .map((value) => value.trim())
+        .filter((value) => value.includes("@"));
+      if (emails.length === 0) warnings.push("No email address on the shipper or consignee.");
+      for (const to of emails) {
+        const result = await sendEmail({
+          to,
+          subject: `AWB ${awb} saved`,
+          html_body: `<p>${body}</p>`,
+          text_body: body,
+          skip_preference_check: true,
+        });
+        if (result.ok === false) warnings.push(String(result.message || "Email was not sent."));
+      }
+    }
+    if (form.notifySms) {
+      const phones = [form.shipper.mobileNo, form.consignee.mobileNo]
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (phones.length === 0) warnings.push("No mobile number on the shipper or consignee.");
+      for (const to of phones) {
+        const result = await sendSms({
+          to,
+          purpose: "SHIPMENT_BOOKED",
+          body,
+          variables: { awb },
+          skip_preference_check: true,
+        });
+        if (result.ok === false) warnings.push(String(result.message || "SMS was not sent."));
+      }
+    }
+  } catch (error) {
+    warnings.push(toErrorMessage(error, "Notification could not be sent."));
+  }
+  if (warnings.length > 0) toast.warning(`Shipment saved. ${warnings[0]}`);
+}
 
 /** Service Details totals: Actual = Σ(weight/pc × pcs), Vol/Charge = Σ of piece-row values. */
 function summarizePieceLines(lines: PiecesLine[]): {
@@ -1516,7 +1633,7 @@ export const Route = createFileRoute("/transaction/awb-entry")({
 function AwbEntryPage() {
   const { fresh, view } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { isAuthenticated: authed, profile } = useAuth();
+  const { isAuthenticated: authed, profile, hasPermission } = useAuth();
   const { activeBranchName, activeBranchId } = useActiveBranch();
   const queryClient = useQueryClient();
   const userKey = draftUserKey(profile?.id, profile?.auth_user_id);
@@ -1560,6 +1677,10 @@ function AwbEntryPage() {
   const [formSetupSettings, setFormSetupSettings] =
     useState<AwbFormSetupSettings>(defaultAwbFormSetup);
   const [formSetupDraft, setFormSetupDraft] = useState<AwbFormSetupSettings>(defaultAwbFormSetup);
+  const [chargeHeads, setChargeHeads] = useState<AwbChargeHead[]>([]);
+  const [volumetricRows, setVolumetricRows] = useState<VolumetricFactor[]>([]);
+  const [fuelRows, setFuelRows] = useState<FuelSurchargeRow[]>([]);
+  const [vendorRoundOff, setVendorRoundOff] = useState(false);
   const [formToolbarSearch, setFormToolbarSearch] = useState("");
   const [toolbarSearchField, setToolbarSearchField] = useState<AwbLookupField>("awb_no");
   const [lastSavedForm, setLastSavedForm] = useState<AwbFullForm | null>(null);
@@ -1633,6 +1754,8 @@ function AwbEntryPage() {
 
   const formStatus = editing?.status ?? (showForm && !editing ? "DRAFT" : undefined);
   const isReadOnly = Boolean(formStatus && formStatus !== "DRAFT");
+  const canModifyAwb = profile?.user_type === "ADMIN" || hasPermission("txn.awb-entry", "modify");
+  const entryLocked = isReadOnly || form.lock;
   /** Persisted shipment id from save/book/open-edit — not the AWB number input. */
   const isSaved = Boolean(editing?.id);
   const hasUnfinishedDraft =
@@ -1754,6 +1877,12 @@ function AwbEntryPage() {
       exportReason: String(p.exportReason ?? base.exportReason),
       format: String(p.format ?? base.format),
       currency: String(p.currency ?? base.currency),
+      adCode: String(p.adCode ?? base.adCode),
+      bondUt: String(p.bondUt ?? base.bondUt),
+      payOfIgst: String(p.payOfIgst ?? base.payOfIgst),
+      ecommerce: String(p.ecommerce ?? base.ecommerce),
+      meis: String(p.meis ?? base.meis),
+      invoiceType: String(p.invoiceType ?? base.invoiceType),
       lines: linesRaw.map((line, i) => {
         const l = line && typeof line === "object" ? (line as Record<string, unknown>) : {};
         return {
@@ -1832,6 +1961,9 @@ function AwbEntryPage() {
       ...data,
       masterAwbNo: String(data.masterAwbNo ?? ""),
       bookTime: bookTimeDigits || data.bookTime,
+      expectedDeliveryDate: String(data.expectedDeliveryDate ?? ""),
+      notifyEmail: data.notifyEmail === true,
+      notifySms: data.notifySms === true,
       proforma: normalizeProforma(data.proforma),
       forwarding: {
         ...forwarding,
@@ -1990,6 +2122,11 @@ function AwbEntryPage() {
 
   const handleFormSetupSave = () => {
     setFormSetupSettings({ ...formSetupDraft });
+    try {
+      localStorage.setItem(`${FORM_SETUP_STORAGE_KEY}:${userKey}`, JSON.stringify(formSetupDraft));
+    } catch {
+      /* Form setup still applies for this visit when storage is unavailable. */
+    }
     setFormSetupOpen(false);
     toast.success("Form setup saved");
   };
@@ -2421,7 +2558,19 @@ function AwbEntryPage() {
         destinationCode: form.consignee.origin.code || form.consignee.origin.name || "AUSTRALIA",
         bookDate: form.bookDate || todayIso(),
         pieces: piecesPayload,
-        division: 5000,
+        division: Number.parseFloat(form.piecesLines[0]?.division || piecesDraft.division) || 5000,
+        roundHalfKg: vendorRoundOff,
+        fuelPct: fuelPercentFor({
+          rows: fuelRows,
+          vendorCode: form.vendor.code,
+          vendorName: form.vendor.name,
+          productCode: form.product.code,
+          productName: form.product.name,
+          destinationCode: form.consignee.origin.code,
+          destinationName: form.consignee.origin.name,
+          bookDate: form.bookDate,
+        }),
+        gstPct: awbGstPercent({ commercial: form.commercial, csbType: form.proforma.csbType }),
         otherCharges: otherChargesSum,
         customerBillingStateCode: form.shipper.state || "TELANGANA",
         branchStateCode: "TELANGANA",
@@ -2467,7 +2616,7 @@ function AwbEntryPage() {
       setForm((f) => ({
         ...f,
         customerChargesTotal: summary.totalAmount,
-        balanceAmount: summary.totalAmount,
+        balanceAmount: balanceDue(summary.totalAmount, f.amountReceived),
         chargeLines,
       }));
 
@@ -2501,6 +2650,160 @@ function AwbEntryPage() {
       };
     });
   }, [form.piecesLines]);
+
+  useEffect(() => {
+    const next = balanceDue(form.customerChargesTotal, form.amountReceived);
+    setForm((current) => (current.balanceAmount === next ? current : { ...current, balanceAmount: next }));
+  }, [form.customerChargesTotal, form.amountReceived]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`${FORM_SETUP_STORAGE_KEY}:${userKey}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<AwbFormSetupSettings>;
+      setFormSetupSettings((current) => ({ ...current, ...parsed }));
+      setFormSetupDraft((current) => ({ ...current, ...parsed }));
+    } catch {
+      /* Ignore a damaged form-setup record and keep the defaults. */
+    }
+  }, [userKey]);
+
+  useEffect(() => {
+    if (!authed) {
+      setChargeHeads([]);
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from("charges")
+      .select("code, name, charge_rate, apply_fuel, apply_tax_on_fuel, apply_tax, charge_type, sequence")
+      .is("deleted_at", null)
+      .eq("charge_type", "AIRWAYBILL")
+      .order("sequence", { ascending: true })
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setChargeHeads(
+          data.map((row) => ({
+            code: String(row.code ?? ""),
+            name: String(row.name ?? row.code ?? ""),
+            charge_rate: Number(row.charge_rate ?? 0),
+            apply_fuel: row.apply_fuel === true,
+            apply_tax_on_fuel: row.apply_tax_on_fuel === true,
+            apply_tax: row.apply_tax === true,
+          })),
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authed]);
+
+  useEffect(() => {
+    const customerId = form.clientName.id;
+    if (!authed || !customerId) {
+      setVolumetricRows([]);
+      setFuelRows([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchCustomerChildren(customerId)
+      .then((children) => {
+        if (cancelled) return;
+        setVolumetricRows(children.volumetrics);
+        setFuelRows(children.fuelSurcharges);
+        const adCode = children.addresses.find((address) => (address.ad_code ?? "").trim())?.ad_code?.trim() ?? "";
+        if (!adCode) return;
+        setForm((current) =>
+          current.proforma.adCode.trim()
+            ? current
+            : { ...current, proforma: { ...current.proforma, adCode } },
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVolumetricRows([]);
+          setFuelRows([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authed, form.clientName.id]);
+
+  useEffect(() => {
+    const vendorId = form.vendor.id;
+    if (!authed || !vendorId) {
+      setVendorRoundOff(false);
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from("vendors")
+      .select("vol_weight_round_off")
+      .eq("id", vendorId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setVendorRoundOff(data?.vol_weight_round_off === true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authed, form.vendor.id]);
+
+  const divisionKey = [
+    form.product.code,
+    form.product.name,
+    form.vendor.code,
+    form.vendor.name,
+    form.service.code,
+    form.service.name,
+    piecesDraft.measurementUnit,
+    volumetricRows
+      .map((row) => `${row.product}|${row.vendor}|${row.service}|${row.cm_divisor}|${row.inch_divisor}`)
+      .join(";"),
+  ].join("||");
+
+  useEffect(() => {
+    const nextDivision = resolveDivision({
+      measurementUnit: piecesDraft.measurementUnit,
+      productCode: form.product.code,
+      productName: form.product.name,
+      vendorCode: form.vendor.code,
+      vendorName: form.vendor.name,
+      serviceCode: form.service.code,
+      serviceName: form.service.name,
+      rows: volumetricRows,
+    });
+    setPiecesDraft((current) => {
+      if (current.division === nextDivision) return current;
+      const next = { ...current, division: nextDivision };
+      next.volWeight = calcVolWeight(next);
+      next.chargeWeight = calcChargeWeight(next, vendorRoundOff);
+      return next;
+    });
+    // divisionKey is the only trigger. Typing a division must not reset it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [divisionKey]);
+
+  useEffect(() => {
+    setPiecesDraft((current) => {
+      const chargeWeight = calcChargeWeight(current, vendorRoundOff);
+      return current.chargeWeight === chargeWeight ? current : { ...current, chargeWeight };
+    });
+    setForm((current) => {
+      if (current.piecesLines.length === 0) return current;
+      let changed = false;
+      const piecesLines = current.piecesLines.map((line) => {
+        const volumetric = Number.parseFloat(line.volWeight) || 0;
+        const actual = (Number.parseFloat(line.actualWeightPerPc) || 0) * (Number.parseFloat(line.pieces) || 0);
+        const chargeWeight = formatChargeWeight(Math.max(volumetric, actual), vendorRoundOff);
+        if (chargeWeight === line.chargeWeight) return line;
+        changed = true;
+        return { ...line, chargeWeight };
+      });
+      return changed ? { ...current, piecesLines } : current;
+    });
+  }, [vendorRoundOff]);
 
   // Automatic reactive rate calculation whenever piece rows or shipment parameters change
   useEffect(() => {
@@ -2719,6 +3022,11 @@ function AwbEntryPage() {
 
   const handleSave = async () => {
     if (isReadOnly) return toast.error("BOOKED and CANCELLED shipments cannot be edited");
+    if (form.lock && !canModifyAwb) {
+      return toast.error("This AWB is locked. Unlock access is required to change it.");
+    }
+    const productionError = collectAwbProductionErrors(form)[0];
+    if (productionError) return toast.error(productionError);
 
     const awbValidation = validateAwbEntry({
       paymentType: form.paymentType,
@@ -2946,6 +3254,7 @@ function AwbEntryPage() {
         void awbStatusQuery.refetch();
         void branchStockQuery.refetch();
         toast.success(editing ? "AWB entry updated" : `AWB ${allocatedAwb} saved (DRAFT)`);
+        await notifySavedAwb({ ...payload, awbNo: allocatedAwb });
       } catch (e) {
         toast.error(toErrorMessage(e));
       } finally {
@@ -2968,6 +3277,7 @@ function AwbEntryPage() {
           : prev,
       );
       toast.success("AWB entry updated");
+      await notifySavedAwb(payload);
     } else {
       if (demoRows.some((r) => r.awbNo === payload.awbNo))
         return toast.error("AWB No already exists");
@@ -2976,6 +3286,7 @@ function AwbEntryPage() {
       setDemoRows((prev) => [row, ...prev]);
       setEditing(row);
       toast.success("AWB entry saved");
+      await notifySavedAwb(payload);
     }
     setLastSavedForm(payload);
     setVendorPanelKey((k) => k + 1);
@@ -3076,6 +3387,8 @@ function AwbEntryPage() {
     }
 
     // Strict ID format validators for PAN, GSTIN, Aadhaar, IEC (#45)
+    errors.push(...collectAwbProductionErrors(form));
+
     const shipperDocErrors = validatePartyIdNumbers(form.shipper, "Shipper");
     const consigneeDocErrors = validatePartyIdNumbers(form.consignee, "Consignee");
     errors.push(...shipperDocErrors);
@@ -3865,7 +4178,7 @@ function AwbEntryPage() {
     setPiecesDraft((d) => {
       const next = { ...d, ...patch };
       next.volWeight = calcVolWeight(next);
-      next.chargeWeight = calcChargeWeight(next);
+      next.chargeWeight = calcChargeWeight(next, vendorRoundOff);
       return next;
     });
   };
@@ -3882,6 +4195,7 @@ function AwbEntryPage() {
       height: piecesDraft.height,
       volWeight: piecesDraft.volWeight,
       chargeWeight: piecesDraft.chargeWeight,
+      division: piecesDraft.division,
     };
     setForm((f) => ({ ...f, piecesLines: [...f.piecesLines, line] }));
     setPiecesDraft(emptyPiecesDraft());
@@ -3904,23 +4218,49 @@ function AwbEntryPage() {
     setForm((f) => ({ ...f, piecesLines: f.piecesLines.filter((l) => l.id !== id) }));
   };
 
+  const priceChargeDraft = (draft: ChargeDraft) => {
+    const head = chargeHeads.find((row) => row.name === draft.description || row.code === draft.description);
+    const applyFuel = head ? head.apply_fuel : draft.itemFuel === "Yes";
+    const applyTaxOnFuel = head ? head.apply_tax_on_fuel : draft.taxOnFuel === "Yes";
+    const applyTax = head ? head.apply_tax : draft.tax === "Yes";
+    return manualChargeAmounts({
+      itemAmount: Number.parseFloat(draft.itemAmount) || 0,
+      applyFuel,
+      applyTaxOnFuel,
+      applyTax,
+      fuelPct: fuelPercentFor({
+        rows: fuelRows,
+        vendorCode: form.vendor.code,
+        vendorName: form.vendor.name,
+        productCode: form.product.code,
+        productName: form.product.name,
+        destinationCode: form.consignee.origin.code,
+        destinationName: form.consignee.origin.name,
+        bookDate: form.bookDate,
+      }),
+      gstPct: awbGstPercent({ commercial: form.commercial, csbType: form.proforma.csbType }),
+      intraState: awbIntraState(form.shipper.state, form.consignee.state),
+    });
+  };
+
   const addChargeLine = () => {
     if (!chargeDraft.description) return toast.error("Description is required");
     if (!chargeDraft.itemAmount.trim()) return toast.error("Item Amount is required");
     const amount = chargeDraft.itemAmount;
+    const priced = priceChargeDraft(chargeDraft);
     const line: ChargeLine = {
       id: crypto.randomUUID(),
       description: chargeDraft.description,
       rate: amount,
       amount,
       fuelApply: chargeDraft.itemFuel,
-      fuelAmt: "0",
+      fuelAmt: priced.fuelAmt,
       taxApply: chargeDraft.tax,
       taxOnFuel: chargeDraft.taxOnFuel,
-      igst: "0",
-      sgst: "0",
-      cgst: "0",
-      total: chargeDraft.itemTotal || amount,
+      igst: priced.igst,
+      sgst: priced.sgst,
+      cgst: priced.cgst,
+      total: priced.total,
       chargesType: "Other",
     };
     setForm((f) => ({ ...f, chargeLines: [...f.chargeLines, line] }));
@@ -3966,6 +4306,10 @@ function AwbEntryPage() {
   };
 
   const addProformaLine = (): boolean => {
+    if (!hsnIsValid(proformaDraft.hsnCode)) {
+      toast.error("HSN must be exactly 8 digits");
+      return false;
+    }
     if (!proformaDraft.description.trim()) {
       toast.error("Description is required");
       return false;
@@ -4240,16 +4584,49 @@ function AwbEntryPage() {
     });
   }, [form.product, form.vendor, form.service]);
 
+  const selectedChargeHead = chargeHeads.find(
+    (row) => row.name === chargeDraft.description || row.code === chargeDraft.description,
+  );
+  const chargePreview = priceChargeDraft(chargeDraft);
+  const chargeFuelPct = fuelPercentFor({
+    rows: fuelRows,
+    vendorCode: form.vendor.code,
+    vendorName: form.vendor.name,
+    productCode: form.product.code,
+    productName: form.product.name,
+    destinationCode: form.consignee.origin.code,
+    destinationName: form.consignee.origin.name,
+    bookDate: form.bookDate,
+  });
+  const chargeGstPct = awbGstPercent({ commercial: form.commercial, csbType: form.proforma.csbType });
+  const chargeFuelAmount = Number.parseFloat(chargePreview.fuelAmt) || 0;
+  const chargeTaxOnFuelOn = selectedChargeHead
+    ? selectedChargeHead.apply_tax_on_fuel
+    : chargeDraft.taxOnFuel === "Yes";
+  const chargeTaxOn = selectedChargeHead ? selectedChargeHead.apply_tax : chargeDraft.tax === "Yes";
+  const chargeTaxOnFuelAmount = chargeTaxOnFuelOn ? (chargeFuelAmount * chargeGstPct) / 100 : 0;
+  const chargeTaxAmount = chargeTaxOn
+    ? ((Number.parseFloat(chargeDraft.itemAmount) || 0) * chargeGstPct) / 100
+    : 0;
+  const chargeDescriptionItems =
+    chargeHeads.length > 0 ? chargeHeads.map((row) => row.name || row.code) : CHARGE_DESCRIPTIONS;
+  const proformaTotalIgst = form.proforma.lines
+    .reduce((sum, line) => sum + (Number.parseFloat(line.igstAmount) || 0), 0)
+    .toFixed(2);
+
   return (
     <div className="flex w-full min-w-0 flex-col gap-1.5 px-3 py-2 md:gap-2 md:px-4 md:py-3">
       <MasterBreadcrumb trail={["Transaction", showForm ? "AWB Entry" : "AWB Entry List"]} />
 
       {showForm ? (
         <Card className="min-w-0 border shadow-none p-0">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs
+            value={AWB_TABS.includes(activeTab as AwbTab) ? activeTab : "awb"}
+            onValueChange={setActiveTab}
+          >
             <div className="flex flex-col gap-1.5 border-b bg-muted/30 px-2.5 py-1.5 lg:flex-row lg:items-center lg:justify-between">
               <TabsList className="h-auto gap-1 bg-transparent p-0">
-                {(["awb", "proforma", "forwarding", "kyc"] as const).map((tab) => (
+                {AWB_TABS.map((tab) => (
                   <TabsTrigger
                     key={tab}
                     value={tab}
@@ -4324,12 +4701,12 @@ function AwbEntryPage() {
             <div ref={awbFormNavRef} className="erp-form-nav" data-erp-form-nav>
               <ErpFormNavProvider
                 containerRef={awbFormNavRef}
-                enabled={!isReadOnly}
+                enabled={!entryLocked}
                 validateBeforeAdvance={validateAwbNavAdvance}
                 onAdvanceBlocked={handleAwbNavAdvanceBlocked}
               >
                 <TabsContent value="awb" className="mt-0">
-                  <fieldset disabled={isReadOnly} className="min-w-0 border-0 p-0 disabled:opacity-90">
+                  <fieldset disabled={entryLocked} className="min-w-0 border-0 p-0 disabled:opacity-90">
                     {(() => {
                       const displayAwbUserId =
                         awbStatusQuery.data?.awbUserId ||
@@ -4464,6 +4841,7 @@ function AwbEntryPage() {
                           <FieldWrapper borderLabel label="Book Date" className="lg:col-span-2">
                             <ErpNavDateInput
                               order={AWB_NAV.BOOK_DATE}
+                              readOnly={!canModifyAwb}
                               value={form.bookDate}
                               onValueChange={(v) => setForm((f) => ({ ...f, bookDate: v }))}
                               className="h-8 px-1.5 text-[13px]"
@@ -4472,6 +4850,7 @@ function AwbEntryPage() {
                           <FieldWrapper borderLabel label="Time" className="lg:col-span-1">
                             <ErpNavInput
                               order={AWB_NAV.TIME}
+                              readOnly={!canModifyAwb}
                               value={form.bookTime}
                               onValueChange={(v) =>
                                 setForm((f) => ({
@@ -4534,7 +4913,7 @@ function AwbEntryPage() {
                     </div>
                   ) : null}
 
-                  <fieldset disabled={isReadOnly} className="min-w-0 border-0 p-0 disabled:opacity-90">
+                  <fieldset disabled={entryLocked} className="min-w-0 border-0 p-0 disabled:opacity-90">
                     <div className="p-2 md:p-2.5">
                       <div className="mt-0.5 grid grid-cols-1 items-start gap-2 pt-2 md:grid-cols-2 xl:grid-cols-3 xl:gap-2.5">
                         <PartySection
@@ -4543,6 +4922,7 @@ function AwbEntryPage() {
                           onChange={(p) => patchParty("shipper", p)}
                           originLookup="destination"
                           originRequired
+                          addressRequired
                           invalidNavOrders={navInvalidOrders}
                           onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
                         />
@@ -4673,50 +5053,72 @@ function AwbEntryPage() {
                             <FieldWrapper borderLabel label="Actl Weight/PCS">
                               <ErpNavInput
                                 order={AWB_NAV.PIECES_ACTUAL_WEIGHT_PCS}
+                                inputMode="decimal"
                                 className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                                 value={piecesDraft.actualWeightPerPc}
-                                onValueChange={(v) => patchPiecesDraft({ actualWeightPerPc: v })}
+                                onValueChange={(v) => patchPiecesDraft({ actualWeightPerPc: decimalNumber(v) })}
                               />
                             </FieldWrapper>
                             <FieldWrapper borderLabel label="No. Of Pieces">
                               <ErpNavInput
                                 order={AWB_NAV.PIECES_NO_OF_PIECES}
+                                inputMode="numeric"
                                 className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                                 value={piecesDraft.noOfPieces}
-                                onValueChange={(v) => patchPiecesDraft({ noOfPieces: v })}
+                                onValueChange={(v) => patchPiecesDraft({ noOfPieces: digitsOnly(v) })}
                               />
                             </FieldWrapper>
                             <FieldWrapper borderLabel label="Length">
                               <ErpNavInput
                                 order={AWB_NAV.PIECES_LENGTH}
+                                inputMode="decimal"
                                 className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                                 value={piecesDraft.length}
-                                onValueChange={(v) => patchPiecesDraft({ length: v })}
+                                onValueChange={(v) => patchPiecesDraft({ length: decimalNumber(v) })}
                               />
                             </FieldWrapper>
                             <FieldWrapper borderLabel label="Width">
                               <ErpNavInput
                                 order={AWB_NAV.PIECES_WIDTH}
+                                inputMode="decimal"
                                 className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                                 value={piecesDraft.width}
-                                onValueChange={(v) => patchPiecesDraft({ width: v })}
+                                onValueChange={(v) => patchPiecesDraft({ width: decimalNumber(v) })}
                               />
                             </FieldWrapper>
                             <FieldWrapper borderLabel label="Height">
                               <ErpNavInput
                                 order={AWB_NAV.PIECES_HEIGHT}
+                                inputMode="decimal"
                                 className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                                 value={piecesDraft.height}
-                                onValueChange={(v) => patchPiecesDraft({ height: v })}
+                                onValueChange={(v) => patchPiecesDraft({ height: decimalNumber(v) })}
                               />
                             </FieldWrapper>
                             <FieldWrapper borderLabel label="Division">
-                              <ErpNavInput
-                                order={AWB_NAV.PIECES_DIVISION}
-                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                value={piecesDraft.division}
-                                onValueChange={(v) => patchPiecesDraft({ division: v })}
-                              />
+                              <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
+                                <ErpNavInput
+                                  order={AWB_NAV.PIECES_DIVISION}
+                                  inputMode="decimal"
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={piecesDraft.division}
+                                  onValueChange={(v) => patchPiecesDraft({ division: decimalNumber(v) })}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && e.shiftKey) {
+                                      e.preventDefault();
+                                      const container = awbFormNavRef.current;
+                                      if (container) {
+                                        focusPrevBeforeOrder(container, AWB_NAV.PIECES_DIVISION);
+                                      }
+                                      return;
+                                    }
+                                    if (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
+                                      e.preventDefault();
+                                      commitPiecesLine();
+                                    }
+                                  }}
+                                />
+                              </div>
                             </FieldWrapper>
                             <FieldWrapper
                               borderLabel
@@ -4944,14 +5346,20 @@ function AwbEntryPage() {
                               <ErpNavSelect
                                 order={AWB_NAV.CHARGE_DESCRIPTION}
                                 value={chargeDraft.description || undefined}
-                                onValueChange={(v) =>
+                                onValueChange={(v) => {
+                                  const head = chargeHeads.find((row) => row.name === v || row.code === v);
                                   setChargeDraft((d) => ({
                                     ...d,
-                                    description: v,
-                                    itemTotal: d.itemAmount || "0",
-                                  }))
-                                }
-                                items={CHARGE_DESCRIPTIONS}
+                                    description: head?.name || v,
+                                    itemFuel: head ? (head.apply_fuel ? "Yes" : "No") : d.itemFuel,
+                                    taxOnFuel: head ? (head.apply_tax_on_fuel ? "Yes" : "No") : d.taxOnFuel,
+                                    tax: head ? (head.apply_tax ? "Yes" : "No") : d.tax,
+                                    itemAmount:
+                                      d.itemAmount ||
+                                      (head && head.charge_rate > 0 ? String(head.charge_rate) : d.itemAmount),
+                                  }));
+                                }}
+                                items={chargeDescriptionItems}
                                 triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                               />
                             </FieldWrapper>
@@ -4969,17 +5377,18 @@ function AwbEntryPage() {
                                 }
                               />
                             </FieldWrapper>
-                            <FieldWrapper borderLabel label="Item Fuel (0%)">
+                            <FieldWrapper borderLabel label={`Item Fuel (${chargeFuelPct}%)`}>
                               <div className="flex w-full min-w-0 items-stretch">
                                 <ErpNavSelect
                                   order={AWB_NAV.CHARGE_ITEM_FUEL}
                                   value={chargeDraft.itemFuel}
+                                  disabled={Boolean(selectedChargeHead)}
                                   onValueChange={(v) => setChargeDraft((d) => ({ ...d, itemFuel: v }))}
                                   items={YES_NO}
                                   triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
                                 />
                                 <Input
-                                  value="0.00"
+                                  value={chargePreview.fuelAmt}
                                   readOnly
                                   className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                                 />
@@ -4990,12 +5399,13 @@ function AwbEntryPage() {
                                 <ErpNavSelect
                                   order={AWB_NAV.CHARGE_TAX_ON_FUEL}
                                   value={chargeDraft.taxOnFuel}
+                                  disabled={Boolean(selectedChargeHead)}
                                   onValueChange={(v) => setChargeDraft((d) => ({ ...d, taxOnFuel: v }))}
                                   items={YES_NO}
                                   triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
                                 />
                                 <Input
-                                  value="0.00"
+                                  value={chargeTaxOnFuelAmount.toFixed(2)}
                                   readOnly
                                   className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                                 />
@@ -5006,12 +5416,13 @@ function AwbEntryPage() {
                                 <ErpNavSelect
                                   order={AWB_NAV.CHARGE_TAX}
                                   value={chargeDraft.tax}
+                                  disabled={Boolean(selectedChargeHead)}
                                   onValueChange={(v) => setChargeDraft((d) => ({ ...d, tax: v }))}
                                   items={YES_NO}
                                   triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
                                 />
                                 <Input
-                                  value="0.00"
+                                  value={chargeTaxAmount.toFixed(2)}
                                   readOnly
                                   className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                                 />
@@ -5019,7 +5430,7 @@ function AwbEntryPage() {
                             </FieldWrapper>
                             <FieldWrapper borderLabel label="Item Total">
                               <Input
-                                value={chargeDraft.itemTotal}
+                                value={chargePreview.total}
                                 readOnly
                                 className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                               />
@@ -5120,6 +5531,18 @@ function AwbEntryPage() {
                       </FormSection>
                     </div>
                   </fieldset>
+                  <div className="flex items-center gap-2 px-4 pb-2">
+                    <Checkbox
+                      id="lock"
+                      checked={form.lock}
+                      disabled={isReadOnly || !canModifyAwb}
+                      onCheckedChange={(checked) => setForm((current) => ({ ...current, lock: checked === true }))}
+                      {...erpNavOrder(AWB_NAV.LOCK)}
+                    />
+                    <label htmlFor="lock" className="text-sm text-muted-foreground">
+                      Lock
+                    </label>
+                  </div>
                   {editing?.id &&
                     (showShipmentDocumentsCenter || vendorShippingActive || vendorBookingBusy) ? (
                     <div className="space-y-4 border-t px-4 py-4 md:px-6">
@@ -5268,7 +5691,7 @@ function AwbEntryPage() {
 
                 <TabsContent value="proforma" className="mt-0">
                   <div className="p-4 md:p-6">
-                    <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
+                    <div className={cn(entryLocked && "pointer-events-none opacity-90")}>
                       <FormSection title="Manifest GST Detail">
                         <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                           <FieldWrapper borderLabel label="CSB_Type">
@@ -5337,6 +5760,69 @@ function AwbEntryPage() {
                               onValueChange={(v) => patchProforma({ format: v })}
                               items={PROFORMA_FORMATS}
                               triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper
+                            borderLabel
+                            label="Ad Code"
+                            required={form.proforma.csbType.trim().toUpperCase() === "CSB 5"}
+                          >
+                            <ErpNavInput
+                              order={AWB_NAV.PROFORMA_AD_CODE}
+                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={form.proforma.adCode}
+                              onValueChange={(v) => patchProforma({ adCode: v })}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Total IGST">
+                            <Input
+                              readOnly
+                              className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={proformaTotalIgst}
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Bond / UT">
+                            <ErpNavSelect
+                              order={AWB_NAV.PROFORMA_BOND_UT}
+                              value={form.proforma.bondUt || "No"}
+                              onValueChange={(v) => patchProforma({ bondUt: v })}
+                              items={YES_NO}
+                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Pay of IGST">
+                            <ErpNavSelect
+                              order={AWB_NAV.PROFORMA_PAY_IGST}
+                              value={form.proforma.payOfIgst || "No"}
+                              onValueChange={(v) => patchProforma({ payOfIgst: v })}
+                              items={YES_NO}
+                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Ecommerce">
+                            <ErpNavSelect
+                              order={AWB_NAV.PROFORMA_ECOMMERCE}
+                              value={form.proforma.ecommerce || "No"}
+                              onValueChange={(v) => patchProforma({ ecommerce: v })}
+                              items={YES_NO}
+                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="MEIS">
+                            <ErpNavSelect
+                              order={AWB_NAV.PROFORMA_MEIS}
+                              value={form.proforma.meis || "No"}
+                              onValueChange={(v) => patchProforma({ meis: v })}
+                              items={YES_NO}
+                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            />
+                          </FieldWrapper>
+                          <FieldWrapper borderLabel label="Type of Invoice">
+                            <ErpNavInput
+                              order={AWB_NAV.PROFORMA_INVOICE_TYPE}
+                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={form.proforma.invoiceType}
+                              onValueChange={(v) => patchProforma({ invoiceType: v })}
                             />
                           </FieldWrapper>
                         </div>
@@ -5628,7 +6114,7 @@ function AwbEntryPage() {
 
                 <TabsContent value="forwarding" className="mt-0">
                   <div className="p-4 md:p-6">
-                    <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
+                    <div className={cn(entryLocked && "pointer-events-none opacity-90")}>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                         <FieldWrapper borderLabel label="Delivery AWB">
                           <ErpNavInput
@@ -5920,7 +6406,7 @@ function AwbEntryPage() {
 
                 <TabsContent value="kyc" className="mt-0">
                   <div className="p-4 md:p-6">
-                    <div className={cn(isReadOnly && "pointer-events-none opacity-90")}>
+                    <div className={cn(entryLocked && "pointer-events-none opacity-90")}>
                       <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
                         <TooltipProvider delayDuration={200}>
                           <IconButton
@@ -6052,6 +6538,58 @@ function AwbEntryPage() {
                       </div>
                     </div>
 
+                    <div className="mt-6">
+                      <AwbFormFooter
+                        showPrevious
+                        onPrevious={goPrevTab}
+                        readOnly={isReadOnly}
+                        saving={saving}
+                        onSave={handleSave}
+                        saveLabel={isSaved ? "Update" : "Save"}
+                        onNext={goNextTab}
+                        onCancel={requestCloseForm}
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="notification" className="mt-0">
+                  <div className="p-4 md:p-6">
+                    <div className={cn(entryLocked && "pointer-events-none opacity-90")}>
+                      <FormSection title="Notification">
+                        <div className="flex flex-col gap-3">
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id="notify-email"
+                              checked={form.notifyEmail}
+                              onCheckedChange={(checked) =>
+                                setForm((current) => ({ ...current, notifyEmail: checked === true }))
+                              }
+                              {...erpNavOrder(AWB_NAV.NOTIFY_EMAIL)}
+                            />
+                            <label htmlFor="notify-email" className="text-sm">
+                              Email shipper and consignee after save
+                            </label>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id="notify-sms"
+                              checked={form.notifySms}
+                              onCheckedChange={(checked) =>
+                                setForm((current) => ({ ...current, notifySms: checked === true }))
+                              }
+                              {...erpNavOrder(AWB_NAV.NOTIFY_SMS)}
+                            />
+                            <label htmlFor="notify-sms" className="text-sm">
+                              SMS shipper and consignee after save
+                            </label>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            A failed email or SMS leaves the saved AWB in place and shows a warning.
+                          </p>
+                        </div>
+                      </FormSection>
+                    </div>
                     <div className="mt-6">
                       <AwbFormFooter
                         showPrevious
@@ -6635,6 +7173,7 @@ function PartySection({
   originLookup,
   originRequired,
   companyRequired = true,
+  addressRequired = false,
   invalidNavOrders,
   onValidationError,
 }: {
@@ -6644,6 +7183,7 @@ function PartySection({
   originLookup: LookupKey;
   originRequired?: boolean;
   companyRequired?: boolean;
+  addressRequired?: boolean;
   invalidNavOrders?: Set<number>;
   onValidationError?: (message: string) => void;
 }) {
@@ -6767,7 +7307,7 @@ function PartySection({
               onValueChange={(v) => onChange({ contactName: v })}
             />
           </FieldWrapper>
-          <FieldWrapper borderLabel label="Address 1">
+          <FieldWrapper borderLabel label="Address 1" required={addressRequired}>
             <ErpNavInput
               order={nav.address1}
               className={inputClass}
@@ -6785,7 +7325,7 @@ function PartySection({
           />
         </FieldWrapper>
         <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Pincode">
+          <FieldWrapper borderLabel label="Pincode" required={addressRequired}>
             <PincodeAutocomplete
               navOrder={nav.pincode}
               className={inputClass}
@@ -6803,7 +7343,7 @@ function PartySection({
               onCommit={onPincodeCommit}
             />
           </FieldWrapper>
-          <FieldWrapper borderLabel label="City">
+          <FieldWrapper borderLabel label="City" required={addressRequired}>
             <ErpNavInput
               order={nav.city}
               className={inputClass}
@@ -6813,7 +7353,7 @@ function PartySection({
           </FieldWrapper>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="State">
+          <FieldWrapper borderLabel label="State" required={addressRequired}>
             <ErpNavInput
               order={nav.state}
               className={inputClass}
@@ -6935,8 +7475,6 @@ function ServicesSection({
   );
   const inputClass = "h-8 px-1.5 text-[13px]";
   const skip = erpNavSkip();
-  const pieceWeightTotals = summarizePieceLines(form.piecesLines);
-  const readOnlyWeightClass = `cursor-default bg-muted/40 ${inputClass}`;
 
   return (
     <FormSection title="Services Details">
@@ -6955,7 +7493,13 @@ function ServicesSection({
             navOrder={AWB_NAV.PRODUCT}
           />
         </FieldWrapper>
-        <FieldWrapper borderLabel lookupSplit label="Vendor">
+        <FieldWrapper
+          borderLabel
+          lookupSplit
+          label="Vendor"
+          required
+          invalid={invalidNavOrders?.has(AWB_NAV.VENDOR)}
+        >
           <LookupPairInput
             lookup="vendor"
             value={form.vendor}
@@ -7009,10 +7553,9 @@ function ServicesSection({
           <div className="flex w-full min-w-0 items-stretch">
             <ErpNavInput
               order={AWB_NAV.SHIPMENT_VALUE}
-              readOnly
-              className={`min-w-0 flex-1 cursor-default ${inputClass}`}
+              className={`min-w-0 flex-1 ${inputClass}`}
               value={form.shipmentValue}
-              onValueChange={(v) => setForm((f) => ({ ...f, shipmentValue: v }))}
+              onValueChange={(v) => setForm((f) => ({ ...f, shipmentValue: decimalNumber(v) }))}
             />
             <Select
               value={form.shipmentCurrency}
@@ -7067,11 +7610,9 @@ function ServicesSection({
             <div className="flex w-full min-w-0 items-stretch">
               <ErpNavInput
                 order={AWB_NAV.ACTUAL_WEIGHT}
-                readOnly
-                aria-readonly="true"
-                title="Calculated from piece details"
-                className={`min-w-0 flex-1 ${readOnlyWeightClass}`}
-                value={pieceWeightTotals.actualWeight}
+                className={`min-w-0 flex-1 ${inputClass}`}
+                value={form.actualWeight}
+                onValueChange={(v) => setForm((f) => ({ ...f, actualWeight: v }))}
               />
               <Select
                 value={form.weightUnit}
@@ -7098,45 +7639,55 @@ function ServicesSection({
           <FieldWrapper borderLabel label="Volumetric Weight">
             <ErpNavInput
               order={AWB_NAV.VOL_WEIGHT}
-              readOnly
-              aria-readonly="true"
-              title="Calculated from piece details"
-              className={readOnlyWeightClass}
-              value={pieceWeightTotals.volWeight}
+              className={inputClass}
+              value={form.volWeight}
+              onValueChange={(v) => setForm((f) => ({ ...f, volWeight: v }))}
             />
           </FieldWrapper>
           <FieldWrapper borderLabel label="Charge Weight">
             <ErpNavInput
               order={AWB_NAV.CHARGE_WEIGHT}
-              readOnly
-              aria-readonly="true"
-              title="Calculated from piece details"
-              className={readOnlyWeightClass}
-              value={pieceWeightTotals.chargeWeight}
+              className={inputClass}
+              value={form.chargeWeight}
+              onValueChange={(v) => setForm((f) => ({ ...f, chargeWeight: v }))}
             />
           </FieldWrapper>
         </div>
-        <div className="flex flex-nowrap items-center gap-x-2.5 gap-y-0.5 pt-0.5">
+        <div className="flex flex-nowrap items-center gap-2 pt-0.5">
           {(
             [
               ["commercial", "Commercial", AWB_NAV.COMMERCIAL],
               ["oda", "ODA", AWB_NAV.ODA],
               ["medicalCharges", "Medical Charges", AWB_NAV.MEDICAL],
             ] as const
-          ).map(([key, label, order]) => (
-            <div key={key} className="flex items-center gap-1">
-              <Checkbox
-                id={key}
-                checked={form[key]}
-                onCheckedChange={(c) => setForm((f) => ({ ...f, [key]: c === true }))}
-                className="h-3.5 w-3.5"
+          ).map(([key, label, order]) => {
+            const checked = form[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={checked}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded border px-2.5 text-[12px] font-medium",
+                  checked
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-input bg-background text-foreground hover:bg-muted/40",
+                )}
+                onClick={() => setForm((f) => ({ ...f, [key]: !f[key] }))}
                 {...erpNavOrder(order)}
-              />
-              <label htmlFor={key} className="whitespace-nowrap text-[12px] text-muted-foreground">
+              >
+                <span
+                  className={cn(
+                    "grid h-3.5 w-3.5 place-content-center rounded-sm border",
+                    checked ? "border-background bg-background text-foreground" : "border-input bg-background",
+                  )}
+                >
+                  {checked ? <Check className="h-3 w-3" /> : null}
+                </span>
                 {label}
-              </label>
-            </div>
-          ))}
+              </button>
+            );
+          })}
         </div>
       </div>
     </FormSection>
@@ -7235,9 +7786,10 @@ function ShipmentDetailsFields({
       <FieldWrapper borderLabel label="Balance Amount">
         <ErpNavInput
           order={AWB_NAV.BALANCE_AMOUNT}
+          readOnly
           className={inputClass}
           value={form.balanceAmount}
-          onValueChange={(v) => setForm((f) => ({ ...f, balanceAmount: v }))}
+          onValueChange={() => undefined}
         />
       </FieldWrapper>
       <FieldWrapper borderLabel label="Cash Receipt Date">
@@ -7248,19 +7800,14 @@ function ShipmentDetailsFields({
           onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptDate: v }))}
         />
       </FieldWrapper>
-      <div className="col-span-2 flex items-end lg:col-span-4">
-        <div className="flex items-center gap-2 pt-1.5">
-          <Checkbox
-            id="lock"
-            checked={form.lock}
-            onCheckedChange={(c) => setForm((f) => ({ ...f, lock: c === true }))}
-            {...erpNavOrder(AWB_NAV.LOCK)}
-          />
-          <label htmlFor="lock" className="text-sm text-muted-foreground">
-            Lock
-          </label>
-        </div>
-      </div>
+      <FieldWrapper borderLabel label="Expected Delivery Date">
+        <ErpNavDateInput
+          order={AWB_NAV.EXPECTED_DELIVERY}
+          className={inputClass}
+          value={form.expectedDeliveryDate}
+          onValueChange={(v) => setForm((f) => ({ ...f, expectedDeliveryDate: v }))}
+        />
+      </FieldWrapper>
     </div>
   );
 }

@@ -56,6 +56,7 @@ export const Route = createFileRoute("/api/shipments/rate")({
             bookDate: body.bookDate || new Date().toISOString().slice(0, 10),
             pieces,
             division: body.division || 5000,
+            roundHalfKg: body.roundHalfKg === true,
             otherCharges: body.otherCharges || 0,
             customerBillingStateCode: body.customerBillingStateCode || "TELANGANA",
             branchStateCode: body.branchStateCode || "TELANGANA",

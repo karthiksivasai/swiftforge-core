@@ -9,6 +9,7 @@ export const AWB_REQUIRED_NAV_ORDERS = new Set<number>([
   AWB_NAV.CONSIGNEE_DESTINATION,
   AWB_NAV.CONSIGNEE_COMPANY,
   AWB_NAV.PRODUCT,
+  AWB_NAV.VENDOR,
   AWB_NAV.SERVICE,
 ]);
 
@@ -52,6 +53,7 @@ export function validateAwbNavField(
     shipper: { origin: LookupPair; companyName: LookupPair };
     consignee: { origin: LookupPair; companyName: LookupPair };
     product: LookupPair;
+    vendor: LookupPair;
     service: LookupPair;
   },
   opts?: { consigneeNotRequired?: boolean },
@@ -71,6 +73,8 @@ export function validateAwbNavField(
       return isAwbLookupSelected(form.consignee.companyName);
     case AWB_NAV.PRODUCT:
       return Boolean(form.product.code.trim() || form.product.name.trim());
+    case AWB_NAV.VENDOR:
+      return isAwbLookupSelected(form.vendor);
     case AWB_NAV.SERVICE:
       return isAwbLookupSelected(form.service);
     default:

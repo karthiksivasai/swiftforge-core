@@ -6,6 +6,8 @@
  * Display formatting (3 dp contract charges, 4 dp GST, 2 dp total) is applied at UI level.
  */
 
+import { formatChargeWeight } from "@/lib/transactions/awbEntryRules";
+
 export interface PieceItemInput {
   actualWeight: number;
   pieces: number;
@@ -61,6 +63,8 @@ export interface RateQueryInput {
   bookDate: string;
   pieces: PieceItemInput[];
   division?: number;
+  /** Vendor Master "Volumetric Weight Round off": ceil charge weight to the next 0.500 kg. */
+  roundHalfKg?: boolean;
   otherCharges?: number;
   customerBillingStateCode?: string;
   branchStateCode?: string;
@@ -92,7 +96,11 @@ export interface RatingCalculationResult {
  * Calculates volumetric and chargeable weights per piece row and sums total chargeable weight.
  * Default division is 5000 cm³/kg.
  */
-export function calculatePieceWeights(pieces: PieceItemInput[], division = 5000) {
+export function calculatePieceWeights(
+  pieces: PieceItemInput[],
+  division = 5000,
+  options?: { roundHalfKg?: boolean },
+) {
   const div = division > 0 ? division : 5000;
   let totalChargeable = 0;
 
@@ -100,7 +108,8 @@ export function calculatePieceWeights(pieces: PieceItemInput[], division = 5000)
     const pcs = Math.max(p.pieces || 1, 1);
     const volumetric = (p.length * p.width * p.height * pcs) / div;
     const actual = (p.actualWeight || 0) * pcs;
-    const rowChargeWeight = Math.max(volumetric, actual);
+    const raw = Math.max(volumetric, actual);
+    const rowChargeWeight = options?.roundHalfKg ? Number(formatChargeWeight(raw, true)) : raw;
     totalChargeable += rowChargeWeight;
     return {
       ...p,
@@ -309,7 +318,9 @@ export function computeShipmentRating(
   rateCard: CustomerRateRecord[] = SEED_CUSTOMER_RATES,
   serviceRules: ServiceWeightRuleRecord[] = SEED_SERVICE_WEIGHT_RULES,
 ): RatingCalculationResult {
-  const { chargeableWeight } = calculatePieceWeights(query.pieces, query.division);
+  const { chargeableWeight } = calculatePieceWeights(query.pieces, query.division, {
+    roundHalfKg: query.roundHalfKg === true,
+  });
 
   // Validate service weight bounds BEFORE rate resolution
   const weightValidation = validateServiceWeight({

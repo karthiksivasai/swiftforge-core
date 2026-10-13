@@ -169,15 +169,9 @@ function AuthGate({ children }: { children: ReactNode }) {
     }
   }, [isAuthenticated, isPublic, loading, navigate]);
 
-  if (!isPublic && (loading || !isAuthenticated)) {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
-        Checking session…
-      </div>
-    );
-  }
+  const showSessionLoader = !isPublic && (loading || !isAuthenticated);
 
-  if (!isPublic && !allowed) {
+  if (!showSessionLoader && !isPublic && !allowed) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center px-6">
         <div className="max-w-md text-center">
@@ -190,7 +184,25 @@ function AuthGate({ children }: { children: ReactNode }) {
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      {showSessionLoader ? (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/35"
+          role="status"
+        >
+          <svg className="ap" viewBox="0 0 64 64" width="96" height="96" fill="none" role="img" aria-label="Loading">
+            <circle className="ap-halo" cx="32" cy="32" r="30.5" />
+            <circle className="ap-r1" cx="32" cy="32" r="27" pathLength="100" />
+            <circle className="ap-r2" cx="32" cy="32" r="20" pathLength="100" />
+            <circle className="ap-r3" cx="32" cy="32" r="13" pathLength="100" />
+            <circle className="ap-core" cx="32" cy="32" r="2.6" />
+          </svg>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function RootComponent() {

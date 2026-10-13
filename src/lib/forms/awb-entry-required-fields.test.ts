@@ -14,6 +14,7 @@ const emptyForm = () => ({
     companyName: { code: "", name: "" },
   },
   product: { code: "", name: "" },
+  vendor: { code: "", name: "" },
   service: { code: "", name: "" },
 });
 

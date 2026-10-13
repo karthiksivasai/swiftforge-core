@@ -67,7 +67,14 @@ export const Route = createFileRoute("/api/auth/login")({
           return Response.json(GENERIC, { status: 401 });
         }
 
-        if (await loginLocked(account.tenantId, account.username).catch(() => false)) {
+        const profileEmail = account.email?.trim() ?? "";
+        const [locked, authEmail] = await Promise.all([
+          loginLocked(account.tenantId, account.username).catch(() => false),
+          profileEmail.includes("@")
+            ? Promise.resolve(profileEmail)
+            : authEmailForUser(account.authUserId),
+        ]);
+        if (locked) {
           await writeLoginLog({
             tenantId: account.tenantId,
             userId: account.userId,
@@ -79,10 +86,14 @@ export const Route = createFileRoute("/api/auth/login")({
           }).catch(() => undefined);
           return Response.json({ error: "Too many failed attempts. Try again in 15 minutes." }, { status: 429 });
         }
-
-        const authEmail = await authEmailForUser(account.authUserId);
         if (!authEmail) return Response.json(GENERIC, { status: 401 });
-        const signedIn = await signInWithPassword(authEmail, password);
+        let signedIn = await signInWithPassword(authEmail, password);
+        if ("error" in signedIn && profileEmail.includes("@")) {
+          const storedEmail = await authEmailForUser(account.authUserId);
+          if (storedEmail && storedEmail.toLowerCase() !== authEmail.toLowerCase()) {
+            signedIn = await signInWithPassword(storedEmail, password);
+          }
+        }
         if ("error" in signedIn) {
           await writeLoginLog({
             tenantId: account.tenantId,
@@ -95,16 +106,8 @@ export const Route = createFileRoute("/api/auth/login")({
           return Response.json(GENERIC, { status: 401 });
         }
 
+        // record_login already writes the success row, so sign-in does not wait on a second log insert.
         const sessionId = await recordLoginAsUser(signedIn.accessToken, userAgent, asInet(ip)).catch(() => null);
-        await writeLoginLog({
-          tenantId: account.tenantId,
-          userId: account.userId,
-          username: account.username,
-          event: "LOGIN_SUCCESS",
-          ip,
-          userAgent,
-          detail: "password",
-        }).catch(() => undefined);
 
         return Response.json({
           access_token: signedIn.accessToken,
