@@ -5,9 +5,6 @@ import { requireApiAuth } from "@/lib/security/require-api-auth.server";
 export type AwbEntryStatusResponse = {
   awbUserId: string | null;
   podUserId: string | null;
-  limit: number | null;
-  used: number | null;
-  balance: number | null;
   manifestNo: string;
   manifestDate: string | null;
   invoiceNo: string | null;
@@ -28,31 +25,6 @@ export const Route = createFileRoute("/api/awb-entry/status")({
         try {
           const db = auth.supabase;
           const awbUserId = (auth.username || "USER").toUpperCase();
-          const branchId = auth.homeBranchId;
-
-          let limit: number | null = null;
-          let used: number | null = null;
-          let balance: number | null = null;
-
-          const { data: stockData, error: stockErr } = await db.rpc("get_branch_awb_stock_summary", {
-            p_branch_id: branchId,
-          });
-          if (!stockErr && stockData && typeof stockData === "object") {
-            const stockObj = stockData as { limit?: number; used?: number; balance?: number };
-            limit = typeof stockObj.limit === "number" ? stockObj.limit : null;
-            used = typeof stockObj.used === "number" ? stockObj.used : null;
-            if (limit != null && used != null) balance = limit - used;
-          }
-
-          if (limit == null) {
-            const { count } = await db
-              .from("shipments")
-              .select("id", { count: "exact", head: true })
-              .eq("tenant_id", auth.tenantId);
-            limit = 50000;
-            used = typeof count === "number" ? count : 0;
-            balance = limit - used;
-          }
 
           const { count: manifestCount } = await db
             .from("manifests")
@@ -62,9 +34,6 @@ export const Route = createFileRoute("/api/awb-entry/status")({
           return Response.json({
             awbUserId,
             podUserId: null,
-            limit,
-            used,
-            balance,
             manifestNo: String(manifestCount ?? 0),
             manifestDate: null,
             invoiceNo: null,

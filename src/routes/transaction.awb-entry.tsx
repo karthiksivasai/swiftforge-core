@@ -164,7 +164,6 @@ import { getAwbEntryStatus } from "@/lib/transactions/resources/awbStatus";
 import {
   getBranchAwbStockSummary,
   validateManualAwb,
-  type BranchAwbStockSummary,
 } from "@/lib/transactions/resources/awbStock";
 import {
   validateDocumentId,
@@ -1634,7 +1633,7 @@ function AwbEntryPage() {
   const { fresh, view } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { isAuthenticated: authed, profile, hasPermission } = useAuth();
-  const { activeBranchName, activeBranchId } = useActiveBranch();
+  const { activeBranchId } = useActiveBranch();
   const queryClient = useQueryClient();
   const userKey = draftUserKey(profile?.id, profile?.auth_user_id);
   const [demoRows, setDemoRows] = useState<AwbRow[]>(seedRows);
@@ -1712,13 +1711,8 @@ function AwbEntryPage() {
   const currentUserId = profile?.username || profile?.full_name || profile?.id || null;
 
   const awbStatusQuery = useQuery({
-    queryKey: ["awb-entry-status", currentUserId, activeBranchName, activeBranchId],
-    queryFn: () =>
-      getAwbEntryStatus({
-        userId: currentUserId,
-        branchName: activeBranchName,
-        branchId: activeBranchId,
-      }),
+    queryKey: ["awb-entry-status", currentUserId],
+    queryFn: () => getAwbEntryStatus({ userId: currentUserId }),
     enabled: authed,
   });
 
@@ -4613,10 +4607,39 @@ function AwbEntryPage() {
   const proformaTotalIgst = form.proforma.lines
     .reduce((sum, line) => sum + (Number.parseFloat(line.igstAmount) || 0), 0)
     .toFixed(2);
+  const displayAwbUserId =
+    awbStatusQuery.data?.awbUserId ||
+    (profile?.username ? profile.username.toUpperCase() : profile?.full_name?.toUpperCase()) ||
+    "—";
+  const displayPodUserId =
+    awbStatusQuery.data?.podUserId ||
+    (profile as unknown as { pod_user_id?: string })?.pod_user_id ||
+    "";
+  const displayManifestNo = awbStatusQuery.data?.manifestNo ?? form.manifestNo ?? "0";
+  const displayManifestDate = awbStatusQuery.data?.manifestDate || form.manifestDate || "";
+  const displayInvoiceNo = awbStatusQuery.data?.invoiceNo || form.invoiceNo || "";
+  const displayDebitNoteNo = awbStatusQuery.data?.debitNoteNo ?? form.debitNoteNo ?? "0";
+  const displayCreditNoteNo = awbStatusQuery.data?.creditNoteNo ?? form.creditNoteNo ?? "0";
+  const displayFlightNo = awbStatusQuery.data?.flightNo || form.flightNo || "";
+  const awbStatusItems: { label: string; value: string }[] = [
+    { label: "AWB UserID:", value: displayAwbUserId },
+    { label: "POD UserID:", value: displayPodUserId },
+    { label: "Manifest No:", value: displayManifestNo },
+    {
+      label: "Manifest Date",
+      value: displayManifestDate ? formatDisplayDate(displayManifestDate) : "",
+    },
+    { label: "Invoice No:", value: displayInvoiceNo },
+    { label: "Debit Note No:", value: displayDebitNoteNo },
+    { label: "Credit Note No:", value: displayCreditNoteNo },
+    { label: "Flight No.", value: displayFlightNo },
+  ];
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-1.5 px-3 py-2 md:gap-2 md:px-4 md:py-3">
-      <MasterBreadcrumb trail={["Transaction", showForm ? "AWB Entry" : "AWB Entry List"]} />
+      {showForm ? null : (
+        <MasterBreadcrumb trail={["Transaction", "AWB Entry List"]} />
+      )}
 
       {showForm ? (
         <Card className="min-w-0 border shadow-none p-0">
@@ -4625,12 +4648,12 @@ function AwbEntryPage() {
             onValueChange={setActiveTab}
           >
             <div className="flex flex-col gap-1.5 border-b bg-muted/30 px-2.5 py-1.5 lg:flex-row lg:items-center lg:justify-between">
-              <TabsList className="h-auto gap-1 bg-transparent p-0">
+              <TabsList className="h-auto gap-1 rounded-full bg-muted p-1.5">
                 {AWB_TABS.map((tab) => (
                   <TabsTrigger
                     key={tab}
                     value={tab}
-                    className="rounded-full px-2.5 py-0.5 text-xs capitalize data-[state=active]:bg-sidebar data-[state=active]:text-sidebar-foreground data-[state=active]:shadow-none"
+                    className="rounded-full border-0 bg-transparent px-4 py-1.5 text-base font-bold text-muted-foreground shadow-none hover:text-foreground data-[state=active]:bg-sidebar data-[state=active]:text-sidebar-foreground data-[state=active]:shadow-none"
                   >
                     {tab === "awb"
                       ? "AWB"
@@ -4698,7 +4721,11 @@ function AwbEntryPage() {
               </TooltipProvider>
             </div>
 
-            <div ref={awbFormNavRef} className="erp-form-nav" data-erp-form-nav>
+            <div
+              ref={awbFormNavRef}
+              className="erp-form-nav text-[13px] [&_.erp-field-shell]:h-9 [&_.erp-field-shell_input]:h-9 [&_.erp-field-shell_input]:min-h-9 [&_.erp-field-shell_input]:px-2 [&_.erp-field-shell_input]:text-[13px] [&_.erp-field-shell_button[role=combobox]]:h-9 [&_.erp-field-shell_button[role=combobox]]:px-2 [&_.erp-field-shell_button[role=combobox]]:text-[13px] [&_.erp-field-shell_button[aria-label=Search]]:h-9 [&_.erp-field-shell_button[aria-label=Search]]:w-9 [&_.erp-field-shell_label]:text-[12px] [&_.lookup-name]:min-h-9 [&_.lookup-name_input]:h-9 [&_.lookup-name_input]:min-h-9 [&_.lookup-name_input]:text-[13px] [&_input]:h-9 [&_input]:min-h-9 [&_input]:text-[13px] [&_button[role=combobox]]:h-9 [&_button[role=combobox]]:text-[13px] [&_button[aria-label=Search]]:h-9 [&_button[aria-label=Search]]:w-9"
+              data-erp-form-nav
+            >
               <ErpFormNavProvider
                 containerRef={awbFormNavRef}
                 enabled={!entryLocked}
@@ -4706,79 +4733,26 @@ function AwbEntryPage() {
                 onAdvanceBlocked={handleAwbNavAdvanceBlocked}
               >
                 <TabsContent value="awb" className="mt-0">
+                  <section
+                    aria-label="AWB booking status"
+                    className={cn(
+                      "mt-3 grid w-full grid-cols-4 gap-x-3 gap-y-1 border-y bg-muted/30 px-3 py-2 text-[12px] leading-tight text-muted-foreground lg:grid-cols-8",
+                      awbStatusQuery.isFetching && "animate-pulse opacity-80",
+                    )}
+                  >
+                    {awbStatusItems.map((item) => (
+                      <span key={item.label} className="min-w-0 truncate whitespace-nowrap">
+                        {item.label}
+                        {item.value ? (
+                          <>
+                            {" "}
+                            <span className="font-medium text-foreground">{item.value}</span>
+                          </>
+                        ) : null}
+                      </span>
+                    ))}
+                  </section>
                   <fieldset disabled={entryLocked} className="min-w-0 border-0 p-0 disabled:opacity-90">
-                    {(() => {
-                      const displayAwbUserId =
-                        awbStatusQuery.data?.awbUserId ||
-                        (profile?.username ? profile.username.toUpperCase() : profile?.full_name?.toUpperCase()) ||
-                        "—";
-
-                      const displayPodUserId =
-                        awbStatusQuery.data?.podUserId ||
-                        (profile as unknown as { pod_user_id?: string })?.pod_user_id ||
-                        "—";
-
-                      const displayLimit = awbStatusQuery.data?.limit ?? branchStockQuery.data?.limit ?? null;
-                      const displayUsed = awbStatusQuery.data?.used ?? branchStockQuery.data?.used ?? null;
-                      const displayBalance =
-                        displayLimit !== null && displayUsed !== null
-                          ? displayLimit - displayUsed
-                          : (branchStockQuery.data?.balance ?? null);
-
-                      const displayManifestNo = awbStatusQuery.data?.manifestNo ?? form.manifestNo ?? "0";
-                      const displayManifestDate = awbStatusQuery.data?.manifestDate || form.manifestDate || "";
-                      const displayInvoiceNo = awbStatusQuery.data?.invoiceNo || form.invoiceNo || "";
-                      const displayDebitNoteNo = awbStatusQuery.data?.debitNoteNo ?? form.debitNoteNo ?? "0";
-                      const displayCreditNoteNo = awbStatusQuery.data?.creditNoteNo ?? form.creditNoteNo ?? "0";
-                      const displayFlightNo = awbStatusQuery.data?.flightNo || form.flightNo || "";
-
-                      return (
-                        <div
-                          className={cn(
-                            "flex flex-wrap gap-x-3 gap-y-0.5 border-b bg-muted/10 px-2.5 py-0.5 text-[12px] leading-tight text-muted-foreground transition-opacity",
-                            awbStatusQuery.isFetching && "animate-pulse opacity-80",
-                          )}
-                        >
-                          <span>
-                            AWB UserID:{" "}
-                            <span className="font-medium text-foreground">{displayAwbUserId}</span>
-                          </span>
-                          <span>
-                            POD UserID:{" "}
-                            <span className="font-medium text-foreground">{displayPodUserId}</span>
-                          </span>
-                          <span>
-                            AWB Stock:{" "}
-                            <span
-                              className={cn(
-                                "font-medium",
-                                displayBalance !== null && displayBalance <= 0
-                                  ? "text-destructive font-semibold"
-                                  : "text-foreground",
-                              )}
-                            >
-                              Limit ({displayLimit !== null ? displayLimit : "—"}) · Used ({displayUsed !== null ? displayUsed : "—"}) · Bal (
-                              {displayBalance !== null ? displayBalance : "—"})
-                            </span>
-                          </span>
-                          <span>Manifest No ({displayManifestNo})</span>
-                          <span>
-                            Manifest Date: {displayManifestDate ? formatDisplayDate(displayManifestDate) : "—"}
-                          </span>
-                          <span>Invoice No: {displayInvoiceNo || "—"}</span>
-                          <span>Debit Note No ({displayDebitNoteNo})</span>
-                          <span>Credit Note No ({displayCreditNoteNo})</span>
-                          <span>Flight No: {displayFlightNo || "—"}</span>
-                          {form.masterAwbNo ? (
-                            <span>
-                              Master AWB:{" "}
-                              <span className="font-medium text-foreground">{form.masterAwbNo}</span>
-                            </span>
-                          ) : null}
-                        </div>
-                      );
-                    })()}
-
                     <div className="p-2 md:p-2.5">
                       <div className="mb-2 rounded border border-border bg-card p-2 pt-2.5">
                         <div className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-2 lg:grid-cols-12 lg:gap-x-2">
@@ -7158,7 +7132,7 @@ function FormSection({
       )}
     >
       {/* Centered on the top border — do not use nested <fieldset>/<legend> (breaks inside the page fieldset). */}
-      <span className="absolute left-2.5 top-1 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[14px] font-semibold leading-none text-sidebar-foreground">
+      <span className="absolute left-2.5 top-1 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-sm font-semibold leading-none text-sidebar-foreground">
         {title}
       </span>
       {children}
@@ -7226,7 +7200,7 @@ function PartySection({
     };
   const onCommit = useErpNavCommit();
   const onPincodeCommit = useErpNavCommit(nav.pincode);
-  const inputClass = "h-8 px-1.5 text-[13px]";
+  const inputClass = "h-9 px-2 text-[13px]";
   const destinationCountrySeq = useRef(0);
   const applyOriginCountry = (destinationId: string | undefined) => {
     if (!destinationId) return;
@@ -7473,7 +7447,7 @@ function ServicesSection({
   const hasVendor = Boolean(
     form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim(),
   );
-  const inputClass = "h-8 px-1.5 text-[13px]";
+  const inputClass = "h-9 px-2 text-[13px]";
   const skip = erpNavSkip();
 
   return (
@@ -7716,7 +7690,7 @@ function ShipmentDetailsFields({
     useErpSelectNav((v: string) => setForm((f) => ({ ...f, paymentType: v })), {
       fromOrder: AWB_NAV.PAYMENT_TYPE,
     });
-  const inputClass = "h-8 px-1.5 text-[13px]";
+  const inputClass = "h-9 px-2 text-[13px]";
 
   return (
     <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">

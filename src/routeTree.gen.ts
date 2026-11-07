@@ -9,143 +9,123 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
-import { Route as DemoRouteImport } from './routes/demo'
-import { Route as DashboardRouteImport } from './routes/dashboard'
-import { Route as ActivateRouteImport } from './routes/activate'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as UtilityServiceablePincodeRouteImport } from './routes/utility.serviceable-pincode'
-import { Route as UtilityNotificationRouteImport } from './routes/utility.notification'
-import { Route as UtilityIntegrationConfigurationRouteImport } from './routes/utility.integration-configuration'
-import { Route as UtilityAccessRightsRouteImport } from './routes/utility.access-rights'
-import { Route as UtilitySplatRouteImport } from './routes/utility.$'
-import { Route as UtilitiesAccessRightsRouteImport } from './routes/utilities.access-rights'
-import { Route as TransactionUnDeliveryScanRouteImport } from './routes/transaction.un-delivery-scan'
-import { Route as TransactionTransferRunRouteImport } from './routes/transaction.transfer-run'
-import { Route as TransactionPickupInscanRouteImport } from './routes/transaction.pickup-inscan'
-import { Route as TransactionPickupRouteImport } from './routes/transaction.pickup'
-import { Route as TransactionMissRouteScanRouteImport } from './routes/transaction.miss-route-scan'
-import { Route as TransactionManifestViewRouteImport } from './routes/transaction.manifest-view'
-import { Route as TransactionManifestScanRouteImport } from './routes/transaction.manifest-scan'
-import { Route as TransactionManifestInScanRouteImport } from './routes/transaction.manifest-in-scan'
-import { Route as TransactionDrsScanRouteImport } from './routes/transaction.drs-scan'
-import { Route as TransactionBaggingRouteImport } from './routes/transaction.bagging'
-import { Route as TransactionAwbEntryRouteImport } from './routes/transaction.awb-entry'
-import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
-import { Route as ReportsStatementsRouteImport } from './routes/reports.statements'
-import { Route as ReportsScanRouteImport } from './routes/reports.scan'
-import { Route as ReportsOperationsRouteImport } from './routes/reports.operations'
-import { Route as ReportsJobsRouteImport } from './routes/reports.jobs'
-import { Route as ReportsAwbRouteImport } from './routes/reports.awb'
-import { Route as ReportsArReportRouteImport } from './routes/reports.ar-report'
-import { Route as ReportsSplatRouteImport } from './routes/reports.$'
-import { Route as PublicTrackRouteImport } from './routes/public.track'
-import { Route as MasterSplatRouteImport } from './routes/master.$'
-import { Route as DocumentsInvoicePrintRouteImport } from './routes/documents.invoice-print'
-import { Route as DocumentsInvoiceGenerationRouteImport } from './routes/documents.invoice-generation'
-import { Route as DocumentsInvoiceFinaliseRouteImport } from './routes/documents.invoice-finalise'
-import { Route as ApiUsersRouteImport } from './routes/api/users'
-import { Route as ApiPincodesRouteImport } from './routes/api/pincodes'
+import { Route as ActivateRouteImport } from './routes/activate'
+import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as DemoRouteImport } from './routes/demo'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RunNo_EntryRunNo_EntryRouteImport } from './routes/RunNo_Entry.RunNo_Entry'
-import { Route as ReportsRunIndexRouteImport } from './routes/reports.run.index'
-import { Route as UtilityUsersUserSetupRouteImport } from './routes/utility.users.user-setup'
-import { Route as UtilityUsersLoggedinUsersRouteImport } from './routes/utility.users.loggedin-users'
-import { Route as UtilityUsersAccessRightsRouteImport } from './routes/utility.users.access-rights'
-import { Route as UtilityTaxChargesSetupTaxSetupRouteImport } from './routes/utility.tax-charges-setup.tax-setup'
-import { Route as UtilityTaxChargesSetupSetupRouteImport } from './routes/utility.tax-charges-setup.setup'
-import { Route as UtilityTaxChargesSetupFuelSetupRouteImport } from './routes/utility.tax-charges-setup.fuel-setup'
-import { Route as UtilityRateZoneUpdateZoneUpdateJobsRouteImport } from './routes/utility.rate-zone-update.zone-update-jobs'
-import { Route as UtilityRateZoneUpdateZoneUpdateRouteImport } from './routes/utility.rate-zone-update.zone-update'
-import { Route as UtilityRateZoneUpdateRateUpdateJobsRouteImport } from './routes/utility.rate-zone-update.rate-update-jobs'
-import { Route as UtilityRateZoneUpdateRateUpdateRouteImport } from './routes/utility.rate-zone-update.rate-update'
-import { Route as UtilityRateZoneUpdateRateImportRouteImport } from './routes/utility.rate-zone-update.rate-import'
-import { Route as UtilityExcelImportPodMergingRouteImport } from './routes/utility.excel-import.pod-merging'
-import { Route as UtilityExcelImportForwardingMergingRouteImport } from './routes/utility.excel-import.forwarding-merging'
-import { Route as UtilityExcelImportDataUpdationRouteImport } from './routes/utility.excel-import.data-updation'
-import { Route as UtilityExcelImportDataImportRouteImport } from './routes/utility.excel-import.data-import'
-import { Route as UtilityExcelImportAwbMergingRouteImport } from './routes/utility.excel-import.awb-merging'
-import { Route as TransactionTrackingUpdateEntryRouteImport } from './routes/transaction.tracking.update-entry'
-import { Route as TransactionTrackingProgressCommentRouteImport } from './routes/transaction.tracking.progress-comment'
-import { Route as TransactionTrackingKycTrackingRouteImport } from './routes/transaction.tracking.kyc-tracking'
-import { Route as TransactionTrackingForwardingUpdationRouteImport } from './routes/transaction.tracking.forwarding-updation'
-import { Route as TransactionTrackingAwbQueryRouteImport } from './routes/transaction.tracking.awb-query'
-import { Route as TransactionReceiptReceiptEntryRouteImport } from './routes/transaction.receipt.receipt-entry'
-import { Route as TransactionReceiptExpenseEntryRouteImport } from './routes/transaction.receipt.expense-entry'
-import { Route as TransactionReceiptExpenseAuthorizeRouteImport } from './routes/transaction.receipt.expense-authorize'
-import { Route as TransactionReceiptDebitNoteRouteImport } from './routes/transaction.receipt.debit-note'
-import { Route as TransactionReceiptCustomerPaymentRouteImport } from './routes/transaction.receipt.customer-payment'
-import { Route as TransactionReceiptCreditNoteRouteImport } from './routes/transaction.receipt.credit-note'
-import { Route as TransactionRateCompareVendorRateCompareRouteImport } from './routes/transaction.rate-compare.vendor-rate-compare'
-import { Route as TransactionRateCompareCustomerRateCompareRouteImport } from './routes/transaction.rate-compare.customer-rate-compare'
-import { Route as TransactionOutScanObcEntryRouteImport } from './routes/transaction.out-scan.obc-entry'
-import { Route as TransactionBulkImportPodToExcelRouteImport } from './routes/transaction.bulk-import.pod-to-excel'
-import { Route as ReportsRunReportKeyRouteImport } from './routes/reports.run.$reportKey'
-import { Route as MasterVendorVendorContractRouteImport } from './routes/master.vendor.vendor-contract'
-import { Route as MasterVendorVendorRouteImport } from './routes/master.vendor.vendor'
-import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
-import { Route as MasterSalesStateRouteImport } from './routes/master.sales.state'
-import { Route as MasterSalesServiceCenterRouteImport } from './routes/master.sales.service-center'
-import { Route as MasterSalesSalesExecutiveRouteImport } from './routes/master.sales.sales-executive'
-import { Route as MasterSalesProductTypeRouteImport } from './routes/master.sales.product-type'
-import { Route as MasterSalesProductRouteImport } from './routes/master.sales.product'
-import { Route as MasterSalesLocalBranchRouteImport } from './routes/master.sales.local-branch'
-import { Route as MasterSalesInstructionRouteImport } from './routes/master.sales.instruction'
-import { Route as MasterSalesIndustryRouteImport } from './routes/master.sales.industry'
-import { Route as MasterSalesFlightRouteImport } from './routes/master.sales.flight'
-import { Route as MasterSalesDestinationRouteImport } from './routes/master.sales.destination'
-import { Route as MasterSalesCountryRouteImport } from './routes/master.sales.country'
-import { Route as MasterSalesContentRouteImport } from './routes/master.sales.content'
-import { Route as MasterSalesChargesMasterRouteImport } from './routes/master.sales.charges-master'
-import { Route as MasterSalesBankMasterRouteImport } from './routes/master.sales.bank-master'
-import { Route as MasterOperationServiceMappingRouteImport } from './routes/master.operation.service-mapping'
-import { Route as MasterOperationPinCodeRouteImport } from './routes/master.operation.pin-code'
-import { Route as MasterOperationFieldExecutiveRouteImport } from './routes/master.operation.field-executive'
-import { Route as MasterOperationExceptionRouteImport } from './routes/master.operation.exception'
-import { Route as MasterOperationCountryPincodesRouteImport } from './routes/master.operation.country-pincodes'
-import { Route as MasterOperationAreaRouteImport } from './routes/master.operation.area'
-import { Route as MasterOperationAirlineRouteImport } from './routes/master.operation.airline'
-import { Route as MasterCustomerShipperRouteImport } from './routes/master.customer.shipper'
-import { Route as MasterCustomerExpenseRouteImport } from './routes/master.customer.expense'
-import { Route as MasterCustomerCustomerRateRouteImport } from './routes/master.customer.customer-rate'
-import { Route as MasterCustomerCustomerRouteImport } from './routes/master.customer.customer'
-import { Route as MasterCustomerConsigneeRouteImport } from './routes/master.customer.consignee'
-import { Route as ApiShipmentsRateRouteImport } from './routes/api/shipments.rate'
-import { Route as ApiAwbEntryStatusRouteImport } from './routes/api/awb-entry.status'
-import { Route as ApiAuthResetPasswordRouteImport } from './routes/api/auth.reset-password'
-import { Route as ApiAuthOtpVerifyRouteImport } from './routes/api/auth.otp-verify'
-import { Route as ApiAuthOtpRequestRouteImport } from './routes/api/auth.otp-request'
-import { Route as ApiAuthLoginRouteImport } from './routes/api/auth.login'
-import { Route as ApiAuthForgotPasswordRouteImport } from './routes/api/auth.forgot-password'
-import { Route as ApiAuthForceLogoutRouteImport } from './routes/api/auth.force-logout'
+import { Route as ApiPincodesRouteImport } from './routes/api/pincodes'
+import { Route as ApiUsersRouteImport } from './routes/api/users'
+import { Route as DocumentsInvoiceFinaliseRouteImport } from './routes/documents.invoice-finalise'
+import { Route as DocumentsInvoiceGenerationRouteImport } from './routes/documents.invoice-generation'
+import { Route as DocumentsInvoicePrintRouteImport } from './routes/documents.invoice-print'
+import { Route as MasterSplatRouteImport } from './routes/master.$'
+import { Route as PublicTrackRouteImport } from './routes/public.track'
+import { Route as ReportsSplatRouteImport } from './routes/reports.$'
+import { Route as ReportsArReportRouteImport } from './routes/reports.ar-report'
+import { Route as ReportsAwbRouteImport } from './routes/reports.awb'
+import { Route as ReportsJobsRouteImport } from './routes/reports.jobs'
+import { Route as ReportsOperationsRouteImport } from './routes/reports.operations'
+import { Route as ReportsScanRouteImport } from './routes/reports.scan'
+import { Route as ReportsStatementsRouteImport } from './routes/reports.statements'
+import { Route as TransactionSplatRouteImport } from './routes/transaction.$'
+import { Route as TransactionAwbEntryRouteImport } from './routes/transaction.awb-entry'
+import { Route as TransactionBaggingRouteImport } from './routes/transaction.bagging'
+import { Route as TransactionDrsScanRouteImport } from './routes/transaction.drs-scan'
+import { Route as TransactionManifestInScanRouteImport } from './routes/transaction.manifest-in-scan'
+import { Route as TransactionManifestScanRouteImport } from './routes/transaction.manifest-scan'
+import { Route as TransactionManifestViewRouteImport } from './routes/transaction.manifest-view'
+import { Route as TransactionMissRouteScanRouteImport } from './routes/transaction.miss-route-scan'
+import { Route as TransactionPickupRouteImport } from './routes/transaction.pickup'
+import { Route as TransactionPickupInscanRouteImport } from './routes/transaction.pickup-inscan'
+import { Route as TransactionTransferRunRouteImport } from './routes/transaction.transfer-run'
+import { Route as TransactionUnDeliveryScanRouteImport } from './routes/transaction.un-delivery-scan'
+import { Route as UtilitiesAccessRightsRouteImport } from './routes/utilities.access-rights'
+import { Route as UtilitySplatRouteImport } from './routes/utility.$'
+import { Route as UtilityAccessRightsRouteImport } from './routes/utility.access-rights'
+import { Route as UtilityIntegrationConfigurationRouteImport } from './routes/utility.integration-configuration'
+import { Route as UtilityNotificationRouteImport } from './routes/utility.notification'
+import { Route as UtilityServiceablePincodeRouteImport } from './routes/utility.serviceable-pincode'
 import { Route as ApiAuthActivateRouteImport } from './routes/api/auth.activate'
-import { Route as ApiShippingWorldFirstBookRouteImport } from './routes/api/shipping.world-first.book'
+import { Route as ApiAuthForceLogoutRouteImport } from './routes/api/auth.force-logout'
+import { Route as ApiAuthForgotPasswordRouteImport } from './routes/api/auth.forgot-password'
+import { Route as ApiAuthLoginRouteImport } from './routes/api/auth.login'
+import { Route as ApiAuthOtpRequestRouteImport } from './routes/api/auth.otp-request'
+import { Route as ApiAuthOtpVerifyRouteImport } from './routes/api/auth.otp-verify'
+import { Route as ApiAuthResetPasswordRouteImport } from './routes/api/auth.reset-password'
+import { Route as ApiAwbEntryStatusRouteImport } from './routes/api/awb-entry.status'
+import { Route as ApiShipmentsRateRouteImport } from './routes/api/shipments.rate'
+import { Route as MasterCustomerConsigneeRouteImport } from './routes/master.customer.consignee'
+import { Route as MasterCustomerCustomerRouteImport } from './routes/master.customer.customer'
+import { Route as MasterCustomerCustomerRateRouteImport } from './routes/master.customer.customer-rate'
+import { Route as MasterCustomerExpenseRouteImport } from './routes/master.customer.expense'
+import { Route as MasterCustomerShipperRouteImport } from './routes/master.customer.shipper'
+import { Route as MasterOperationAirlineRouteImport } from './routes/master.operation.airline'
+import { Route as MasterOperationAreaRouteImport } from './routes/master.operation.area'
+import { Route as MasterOperationCountryPincodesRouteImport } from './routes/master.operation.country-pincodes'
+import { Route as MasterOperationExceptionRouteImport } from './routes/master.operation.exception'
+import { Route as MasterOperationFieldExecutiveRouteImport } from './routes/master.operation.field-executive'
+import { Route as MasterOperationPinCodeRouteImport } from './routes/master.operation.pin-code'
+import { Route as MasterOperationServiceMappingRouteImport } from './routes/master.operation.service-mapping'
+import { Route as MasterSalesBankMasterRouteImport } from './routes/master.sales.bank-master'
+import { Route as MasterSalesChargesMasterRouteImport } from './routes/master.sales.charges-master'
+import { Route as MasterSalesContentRouteImport } from './routes/master.sales.content'
+import { Route as MasterSalesCountryRouteImport } from './routes/master.sales.country'
+import { Route as MasterSalesDestinationRouteImport } from './routes/master.sales.destination'
+import { Route as MasterSalesFlightRouteImport } from './routes/master.sales.flight'
+import { Route as MasterSalesIndustryRouteImport } from './routes/master.sales.industry'
+import { Route as MasterSalesInstructionRouteImport } from './routes/master.sales.instruction'
+import { Route as MasterSalesLocalBranchRouteImport } from './routes/master.sales.local-branch'
+import { Route as MasterSalesProductRouteImport } from './routes/master.sales.product'
+import { Route as MasterSalesProductTypeRouteImport } from './routes/master.sales.product-type'
+import { Route as MasterSalesSalesExecutiveRouteImport } from './routes/master.sales.sales-executive'
+import { Route as MasterSalesServiceCenterRouteImport } from './routes/master.sales.service-center'
+import { Route as MasterSalesStateRouteImport } from './routes/master.sales.state'
+import { Route as MasterSalesZoneRouteImport } from './routes/master.sales.zone'
+import { Route as MasterVendorVendorRouteImport } from './routes/master.vendor.vendor'
+import { Route as MasterVendorVendorContractRouteImport } from './routes/master.vendor.vendor-contract'
+import { Route as ReportsRunIndexRouteImport } from './routes/reports.run.index'
+import { Route as ReportsRunReportKeyRouteImport } from './routes/reports.run.$reportKey'
+import { Route as TransactionBulkImportPodToExcelRouteImport } from './routes/transaction.bulk-import.pod-to-excel'
+import { Route as TransactionOutScanObcEntryRouteImport } from './routes/transaction.out-scan.obc-entry'
+import { Route as TransactionRateCompareCustomerRateCompareRouteImport } from './routes/transaction.rate-compare.customer-rate-compare'
+import { Route as TransactionRateCompareVendorRateCompareRouteImport } from './routes/transaction.rate-compare.vendor-rate-compare'
+import { Route as TransactionReceiptCreditNoteRouteImport } from './routes/transaction.receipt.credit-note'
+import { Route as TransactionReceiptCustomerPaymentRouteImport } from './routes/transaction.receipt.customer-payment'
+import { Route as TransactionReceiptDebitNoteRouteImport } from './routes/transaction.receipt.debit-note'
+import { Route as TransactionReceiptExpenseAuthorizeRouteImport } from './routes/transaction.receipt.expense-authorize'
+import { Route as TransactionReceiptExpenseEntryRouteImport } from './routes/transaction.receipt.expense-entry'
+import { Route as TransactionReceiptReceiptEntryRouteImport } from './routes/transaction.receipt.receipt-entry'
+import { Route as TransactionTrackingAwbQueryRouteImport } from './routes/transaction.tracking.awb-query'
+import { Route as TransactionTrackingForwardingUpdationRouteImport } from './routes/transaction.tracking.forwarding-updation'
+import { Route as TransactionTrackingKycTrackingRouteImport } from './routes/transaction.tracking.kyc-tracking'
+import { Route as TransactionTrackingProgressCommentRouteImport } from './routes/transaction.tracking.progress-comment'
+import { Route as TransactionTrackingUpdateEntryRouteImport } from './routes/transaction.tracking.update-entry'
+import { Route as UtilityExcelImportAwbMergingRouteImport } from './routes/utility.excel-import.awb-merging'
+import { Route as UtilityExcelImportDataImportRouteImport } from './routes/utility.excel-import.data-import'
+import { Route as UtilityExcelImportDataUpdationRouteImport } from './routes/utility.excel-import.data-updation'
+import { Route as UtilityExcelImportForwardingMergingRouteImport } from './routes/utility.excel-import.forwarding-merging'
+import { Route as UtilityExcelImportPodMergingRouteImport } from './routes/utility.excel-import.pod-merging'
+import { Route as UtilityRateZoneUpdateRateImportRouteImport } from './routes/utility.rate-zone-update.rate-import'
+import { Route as UtilityRateZoneUpdateRateUpdateRouteImport } from './routes/utility.rate-zone-update.rate-update'
+import { Route as UtilityRateZoneUpdateRateUpdateJobsRouteImport } from './routes/utility.rate-zone-update.rate-update-jobs'
+import { Route as UtilityRateZoneUpdateZoneUpdateRouteImport } from './routes/utility.rate-zone-update.zone-update'
+import { Route as UtilityRateZoneUpdateZoneUpdateJobsRouteImport } from './routes/utility.rate-zone-update.zone-update-jobs'
+import { Route as UtilityTaxChargesSetupFuelSetupRouteImport } from './routes/utility.tax-charges-setup.fuel-setup'
+import { Route as UtilityTaxChargesSetupSetupRouteImport } from './routes/utility.tax-charges-setup.setup'
+import { Route as UtilityTaxChargesSetupTaxSetupRouteImport } from './routes/utility.tax-charges-setup.tax-setup'
+import { Route as UtilityUsersAccessRightsRouteImport } from './routes/utility.users.access-rights'
+import { Route as UtilityUsersLoggedinUsersRouteImport } from './routes/utility.users.loggedin-users'
+import { Route as UtilityUsersUserSetupRouteImport } from './routes/utility.users.user-setup'
 import { Route as ApiShippingUpsBookRouteImport } from './routes/api/shipping.ups.book'
+import { Route as ApiShippingWorldFirstBookRouteImport } from './routes/api/shipping.world-first.book'
 
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
-  id: '/forgot-password',
-  path: '/forgot-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DemoRoute = DemoRouteImport.update({
-  id: '/demo',
-  path: '/demo',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DashboardRoute = DashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ActivateRoute = ActivateRouteImport.update({
@@ -153,78 +133,126 @@ const ActivateRoute = ActivateRouteImport.update({
   path: '/activate',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
-const UtilityServiceablePincodeRoute =
-  UtilityServiceablePincodeRouteImport.update({
-    id: '/utility/serviceable-pincode',
-    path: '/utility/serviceable-pincode',
+const DemoRoute = DemoRouteImport.update({
+  id: '/demo',
+  path: '/demo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RunNo_EntryRunNo_EntryRoute = RunNo_EntryRunNo_EntryRouteImport.update({
+  id: '/RunNo_Entry/RunNo_Entry',
+  path: '/RunNo_Entry/RunNo_Entry',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPincodesRoute = ApiPincodesRouteImport.update({
+  id: '/api/pincodes',
+  path: '/api/pincodes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiUsersRoute = ApiUsersRouteImport.update({
+  id: '/api/users',
+  path: '/api/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocumentsInvoiceFinaliseRoute =
+  DocumentsInvoiceFinaliseRouteImport.update({
+    id: '/documents/invoice-finalise',
+    path: '/documents/invoice-finalise',
     getParentRoute: () => rootRouteImport,
   } as any)
-const UtilityNotificationRoute = UtilityNotificationRouteImport.update({
-  id: '/utility/notification',
-  path: '/utility/notification',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const UtilityIntegrationConfigurationRoute =
-  UtilityIntegrationConfigurationRouteImport.update({
-    id: '/utility/integration-configuration',
-    path: '/utility/integration-configuration',
+const DocumentsInvoiceGenerationRoute =
+  DocumentsInvoiceGenerationRouteImport.update({
+    id: '/documents/invoice-generation',
+    path: '/documents/invoice-generation',
     getParentRoute: () => rootRouteImport,
   } as any)
-const UtilityAccessRightsRoute = UtilityAccessRightsRouteImport.update({
-  id: '/utility/access-rights',
-  path: '/utility/access-rights',
+const DocumentsInvoicePrintRoute = DocumentsInvoicePrintRouteImport.update({
+  id: '/documents/invoice-print',
+  path: '/documents/invoice-print',
   getParentRoute: () => rootRouteImport,
 } as any)
-const UtilitySplatRoute = UtilitySplatRouteImport.update({
-  id: '/utility/$',
-  path: '/utility/$',
+const MasterSplatRoute = MasterSplatRouteImport.update({
+  id: '/master/$',
+  path: '/master/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const UtilitiesAccessRightsRoute = UtilitiesAccessRightsRouteImport.update({
-  id: '/utilities/access-rights',
-  path: '/utilities/access-rights',
+const PublicTrackRoute = PublicTrackRouteImport.update({
+  id: '/public/track',
+  path: '/public/track',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TransactionUnDeliveryScanRoute =
-  TransactionUnDeliveryScanRouteImport.update({
-    id: '/transaction/un-delivery-scan',
-    path: '/transaction/un-delivery-scan',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionTransferRunRoute = TransactionTransferRunRouteImport.update({
-  id: '/transaction/transfer-run',
-  path: '/transaction/transfer-run',
+const ReportsSplatRoute = ReportsSplatRouteImport.update({
+  id: '/reports/$',
+  path: '/reports/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TransactionPickupInscanRoute = TransactionPickupInscanRouteImport.update({
-  id: '/transaction/pickup-inscan',
-  path: '/transaction/pickup-inscan',
+const ReportsArReportRoute = ReportsArReportRouteImport.update({
+  id: '/reports/ar-report',
+  path: '/reports/ar-report',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TransactionPickupRoute = TransactionPickupRouteImport.update({
-  id: '/transaction/pickup',
-  path: '/transaction/pickup',
+const ReportsAwbRoute = ReportsAwbRouteImport.update({
+  id: '/reports/awb',
+  path: '/reports/awb',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TransactionMissRouteScanRoute =
-  TransactionMissRouteScanRouteImport.update({
-    id: '/transaction/miss-route-scan',
-    path: '/transaction/miss-route-scan',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionManifestViewRoute = TransactionManifestViewRouteImport.update({
-  id: '/transaction/manifest-view',
-  path: '/transaction/manifest-view',
+const ReportsJobsRoute = ReportsJobsRouteImport.update({
+  id: '/reports/jobs',
+  path: '/reports/jobs',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TransactionManifestScanRoute = TransactionManifestScanRouteImport.update({
-  id: '/transaction/manifest-scan',
-  path: '/transaction/manifest-scan',
+const ReportsOperationsRoute = ReportsOperationsRouteImport.update({
+  id: '/reports/operations',
+  path: '/reports/operations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsScanRoute = ReportsScanRouteImport.update({
+  id: '/reports/scan',
+  path: '/reports/scan',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsStatementsRoute = ReportsStatementsRouteImport.update({
+  id: '/reports/statements',
+  path: '/reports/statements',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionSplatRoute = TransactionSplatRouteImport.update({
+  id: '/transaction/$',
+  path: '/transaction/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionAwbEntryRoute = TransactionAwbEntryRouteImport.update({
+  id: '/transaction/awb-entry',
+  path: '/transaction/awb-entry',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionBaggingRoute = TransactionBaggingRouteImport.update({
+  id: '/transaction/bagging',
+  path: '/transaction/bagging',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionDrsScanRoute = TransactionDrsScanRouteImport.update({
+  id: '/transaction/drs-scan',
+  path: '/transaction/drs-scan',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TransactionManifestInScanRoute =
@@ -233,434 +261,128 @@ const TransactionManifestInScanRoute =
     path: '/transaction/manifest-in-scan',
     getParentRoute: () => rootRouteImport,
   } as any)
-const TransactionDrsScanRoute = TransactionDrsScanRouteImport.update({
-  id: '/transaction/drs-scan',
-  path: '/transaction/drs-scan',
+const TransactionManifestScanRoute = TransactionManifestScanRouteImport.update({
+  id: '/transaction/manifest-scan',
+  path: '/transaction/manifest-scan',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TransactionBaggingRoute = TransactionBaggingRouteImport.update({
-  id: '/transaction/bagging',
-  path: '/transaction/bagging',
+const TransactionManifestViewRoute = TransactionManifestViewRouteImport.update({
+  id: '/transaction/manifest-view',
+  path: '/transaction/manifest-view',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TransactionAwbEntryRoute = TransactionAwbEntryRouteImport.update({
-  id: '/transaction/awb-entry',
-  path: '/transaction/awb-entry',
+const TransactionMissRouteScanRoute =
+  TransactionMissRouteScanRouteImport.update({
+    id: '/transaction/miss-route-scan',
+    path: '/transaction/miss-route-scan',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionPickupRoute = TransactionPickupRouteImport.update({
+  id: '/transaction/pickup',
+  path: '/transaction/pickup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TransactionSplatRoute = TransactionSplatRouteImport.update({
-  id: '/transaction/$',
-  path: '/transaction/$',
+const TransactionPickupInscanRoute = TransactionPickupInscanRouteImport.update({
+  id: '/transaction/pickup-inscan',
+  path: '/transaction/pickup-inscan',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReportsStatementsRoute = ReportsStatementsRouteImport.update({
-  id: '/reports/statements',
-  path: '/reports/statements',
+const TransactionTransferRunRoute = TransactionTransferRunRouteImport.update({
+  id: '/transaction/transfer-run',
+  path: '/transaction/transfer-run',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReportsScanRoute = ReportsScanRouteImport.update({
-  id: '/reports/scan',
-  path: '/reports/scan',
+const TransactionUnDeliveryScanRoute =
+  TransactionUnDeliveryScanRouteImport.update({
+    id: '/transaction/un-delivery-scan',
+    path: '/transaction/un-delivery-scan',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilitiesAccessRightsRoute = UtilitiesAccessRightsRouteImport.update({
+  id: '/utilities/access-rights',
+  path: '/utilities/access-rights',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReportsOperationsRoute = ReportsOperationsRouteImport.update({
-  id: '/reports/operations',
-  path: '/reports/operations',
+const UtilitySplatRoute = UtilitySplatRouteImport.update({
+  id: '/utility/$',
+  path: '/utility/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReportsJobsRoute = ReportsJobsRouteImport.update({
-  id: '/reports/jobs',
-  path: '/reports/jobs',
+const UtilityAccessRightsRoute = UtilityAccessRightsRouteImport.update({
+  id: '/utility/access-rights',
+  path: '/utility/access-rights',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReportsAwbRoute = ReportsAwbRouteImport.update({
-  id: '/reports/awb',
-  path: '/reports/awb',
+const UtilityIntegrationConfigurationRoute =
+  UtilityIntegrationConfigurationRouteImport.update({
+    id: '/utility/integration-configuration',
+    path: '/utility/integration-configuration',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityNotificationRoute = UtilityNotificationRouteImport.update({
+  id: '/utility/notification',
+  path: '/utility/notification',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReportsArReportRoute = ReportsArReportRouteImport.update({
-  id: '/reports/ar-report',
-  path: '/reports/ar-report',
+const UtilityServiceablePincodeRoute =
+  UtilityServiceablePincodeRouteImport.update({
+    id: '/utility/serviceable-pincode',
+    path: '/utility/serviceable-pincode',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiAuthActivateRoute = ApiAuthActivateRouteImport.update({
+  id: '/api/auth/activate',
+  path: '/api/auth/activate',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReportsSplatRoute = ReportsSplatRouteImport.update({
-  id: '/reports/$',
-  path: '/reports/$',
+const ApiAuthForceLogoutRoute = ApiAuthForceLogoutRouteImport.update({
+  id: '/api/auth/force-logout',
+  path: '/api/auth/force-logout',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PublicTrackRoute = PublicTrackRouteImport.update({
-  id: '/public/track',
-  path: '/public/track',
+const ApiAuthForgotPasswordRoute = ApiAuthForgotPasswordRouteImport.update({
+  id: '/api/auth/forgot-password',
+  path: '/api/auth/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MasterSplatRoute = MasterSplatRouteImport.update({
-  id: '/master/$',
-  path: '/master/$',
+const ApiAuthLoginRoute = ApiAuthLoginRouteImport.update({
+  id: '/api/auth/login',
+  path: '/api/auth/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DocumentsInvoicePrintRoute = DocumentsInvoicePrintRouteImport.update({
-  id: '/documents/invoice-print',
-  path: '/documents/invoice-print',
+const ApiAuthOtpRequestRoute = ApiAuthOtpRequestRouteImport.update({
+  id: '/api/auth/otp-request',
+  path: '/api/auth/otp-request',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DocumentsInvoiceGenerationRoute =
-  DocumentsInvoiceGenerationRouteImport.update({
-    id: '/documents/invoice-generation',
-    path: '/documents/invoice-generation',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const DocumentsInvoiceFinaliseRoute =
-  DocumentsInvoiceFinaliseRouteImport.update({
-    id: '/documents/invoice-finalise',
-    path: '/documents/invoice-finalise',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiUsersRoute = ApiUsersRouteImport.update({
-  id: '/api/users',
-  path: '/api/users',
+const ApiAuthOtpVerifyRoute = ApiAuthOtpVerifyRouteImport.update({
+  id: '/api/auth/otp-verify',
+  path: '/api/auth/otp-verify',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPincodesRoute = ApiPincodesRouteImport.update({
-  id: '/api/pincodes',
-  path: '/api/pincodes',
+const ApiAuthResetPasswordRoute = ApiAuthResetPasswordRouteImport.update({
+  id: '/api/auth/reset-password',
+  path: '/api/auth/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RunNo_EntryRunNo_EntryRoute = RunNo_EntryRunNo_EntryRouteImport.update({
-  id: '/RunNo_Entry/RunNo_Entry',
-  path: '/RunNo_Entry/RunNo_Entry',
+const ApiAwbEntryStatusRoute = ApiAwbEntryStatusRouteImport.update({
+  id: '/api/awb-entry/status',
+  path: '/api/awb-entry/status',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReportsRunIndexRoute = ReportsRunIndexRouteImport.update({
-  id: '/reports/run/',
-  path: '/reports/run/',
+const ApiShipmentsRateRoute = ApiShipmentsRateRouteImport.update({
+  id: '/api/shipments/rate',
+  path: '/api/shipments/rate',
   getParentRoute: () => rootRouteImport,
 } as any)
-const UtilityUsersUserSetupRoute = UtilityUsersUserSetupRouteImport.update({
-  id: '/utility/users/user-setup',
-  path: '/utility/users/user-setup',
+const MasterCustomerConsigneeRoute = MasterCustomerConsigneeRouteImport.update({
+  id: '/master/customer/consignee',
+  path: '/master/customer/consignee',
   getParentRoute: () => rootRouteImport,
 } as any)
-const UtilityUsersLoggedinUsersRoute =
-  UtilityUsersLoggedinUsersRouteImport.update({
-    id: '/utility/users/loggedin-users',
-    path: '/utility/users/loggedin-users',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityUsersAccessRightsRoute =
-  UtilityUsersAccessRightsRouteImport.update({
-    id: '/utility/users/access-rights',
-    path: '/utility/users/access-rights',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityTaxChargesSetupTaxSetupRoute =
-  UtilityTaxChargesSetupTaxSetupRouteImport.update({
-    id: '/utility/tax-charges-setup/tax-setup',
-    path: '/utility/tax-charges-setup/tax-setup',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityTaxChargesSetupSetupRoute =
-  UtilityTaxChargesSetupSetupRouteImport.update({
-    id: '/utility/tax-charges-setup/setup',
-    path: '/utility/tax-charges-setup/setup',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityTaxChargesSetupFuelSetupRoute =
-  UtilityTaxChargesSetupFuelSetupRouteImport.update({
-    id: '/utility/tax-charges-setup/fuel-setup',
-    path: '/utility/tax-charges-setup/fuel-setup',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityRateZoneUpdateZoneUpdateJobsRoute =
-  UtilityRateZoneUpdateZoneUpdateJobsRouteImport.update({
-    id: '/utility/rate-zone-update/zone-update-jobs',
-    path: '/utility/rate-zone-update/zone-update-jobs',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityRateZoneUpdateZoneUpdateRoute =
-  UtilityRateZoneUpdateZoneUpdateRouteImport.update({
-    id: '/utility/rate-zone-update/zone-update',
-    path: '/utility/rate-zone-update/zone-update',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityRateZoneUpdateRateUpdateJobsRoute =
-  UtilityRateZoneUpdateRateUpdateJobsRouteImport.update({
-    id: '/utility/rate-zone-update/rate-update-jobs',
-    path: '/utility/rate-zone-update/rate-update-jobs',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityRateZoneUpdateRateUpdateRoute =
-  UtilityRateZoneUpdateRateUpdateRouteImport.update({
-    id: '/utility/rate-zone-update/rate-update',
-    path: '/utility/rate-zone-update/rate-update',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityRateZoneUpdateRateImportRoute =
-  UtilityRateZoneUpdateRateImportRouteImport.update({
-    id: '/utility/rate-zone-update/rate-import',
-    path: '/utility/rate-zone-update/rate-import',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityExcelImportPodMergingRoute =
-  UtilityExcelImportPodMergingRouteImport.update({
-    id: '/utility/excel-import/pod-merging',
-    path: '/utility/excel-import/pod-merging',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityExcelImportForwardingMergingRoute =
-  UtilityExcelImportForwardingMergingRouteImport.update({
-    id: '/utility/excel-import/forwarding-merging',
-    path: '/utility/excel-import/forwarding-merging',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityExcelImportDataUpdationRoute =
-  UtilityExcelImportDataUpdationRouteImport.update({
-    id: '/utility/excel-import/data-updation',
-    path: '/utility/excel-import/data-updation',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityExcelImportDataImportRoute =
-  UtilityExcelImportDataImportRouteImport.update({
-    id: '/utility/excel-import/data-import',
-    path: '/utility/excel-import/data-import',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityExcelImportAwbMergingRoute =
-  UtilityExcelImportAwbMergingRouteImport.update({
-    id: '/utility/excel-import/awb-merging',
-    path: '/utility/excel-import/awb-merging',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionTrackingUpdateEntryRoute =
-  TransactionTrackingUpdateEntryRouteImport.update({
-    id: '/transaction/tracking/update-entry',
-    path: '/transaction/tracking/update-entry',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionTrackingProgressCommentRoute =
-  TransactionTrackingProgressCommentRouteImport.update({
-    id: '/transaction/tracking/progress-comment',
-    path: '/transaction/tracking/progress-comment',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionTrackingKycTrackingRoute =
-  TransactionTrackingKycTrackingRouteImport.update({
-    id: '/transaction/tracking/kyc-tracking',
-    path: '/transaction/tracking/kyc-tracking',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionTrackingForwardingUpdationRoute =
-  TransactionTrackingForwardingUpdationRouteImport.update({
-    id: '/transaction/tracking/forwarding-updation',
-    path: '/transaction/tracking/forwarding-updation',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionTrackingAwbQueryRoute =
-  TransactionTrackingAwbQueryRouteImport.update({
-    id: '/transaction/tracking/awb-query',
-    path: '/transaction/tracking/awb-query',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionReceiptReceiptEntryRoute =
-  TransactionReceiptReceiptEntryRouteImport.update({
-    id: '/transaction/receipt/receipt-entry',
-    path: '/transaction/receipt/receipt-entry',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionReceiptExpenseEntryRoute =
-  TransactionReceiptExpenseEntryRouteImport.update({
-    id: '/transaction/receipt/expense-entry',
-    path: '/transaction/receipt/expense-entry',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionReceiptExpenseAuthorizeRoute =
-  TransactionReceiptExpenseAuthorizeRouteImport.update({
-    id: '/transaction/receipt/expense-authorize',
-    path: '/transaction/receipt/expense-authorize',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionReceiptDebitNoteRoute =
-  TransactionReceiptDebitNoteRouteImport.update({
-    id: '/transaction/receipt/debit-note',
-    path: '/transaction/receipt/debit-note',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionReceiptCustomerPaymentRoute =
-  TransactionReceiptCustomerPaymentRouteImport.update({
-    id: '/transaction/receipt/customer-payment',
-    path: '/transaction/receipt/customer-payment',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionReceiptCreditNoteRoute =
-  TransactionReceiptCreditNoteRouteImport.update({
-    id: '/transaction/receipt/credit-note',
-    path: '/transaction/receipt/credit-note',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionRateCompareVendorRateCompareRoute =
-  TransactionRateCompareVendorRateCompareRouteImport.update({
-    id: '/transaction/rate-compare/vendor-rate-compare',
-    path: '/transaction/rate-compare/vendor-rate-compare',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionRateCompareCustomerRateCompareRoute =
-  TransactionRateCompareCustomerRateCompareRouteImport.update({
-    id: '/transaction/rate-compare/customer-rate-compare',
-    path: '/transaction/rate-compare/customer-rate-compare',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionOutScanObcEntryRoute =
-  TransactionOutScanObcEntryRouteImport.update({
-    id: '/transaction/out-scan/obc-entry',
-    path: '/transaction/out-scan/obc-entry',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const TransactionBulkImportPodToExcelRoute =
-  TransactionBulkImportPodToExcelRouteImport.update({
-    id: '/transaction/bulk-import/pod-to-excel',
-    path: '/transaction/bulk-import/pod-to-excel',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ReportsRunReportKeyRoute = ReportsRunReportKeyRouteImport.update({
-  id: '/reports/run/$reportKey',
-  path: '/reports/run/$reportKey',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterVendorVendorContractRoute =
-  MasterVendorVendorContractRouteImport.update({
-    id: '/master/vendor/vendor-contract',
-    path: '/master/vendor/vendor-contract',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const MasterVendorVendorRoute = MasterVendorVendorRouteImport.update({
-  id: '/master/vendor/vendor',
-  path: '/master/vendor/vendor',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesZoneRoute = MasterSalesZoneRouteImport.update({
-  id: '/master/sales/zone',
-  path: '/master/sales/zone',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesStateRoute = MasterSalesStateRouteImport.update({
-  id: '/master/sales/state',
-  path: '/master/sales/state',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesServiceCenterRoute =
-  MasterSalesServiceCenterRouteImport.update({
-    id: '/master/sales/service-center',
-    path: '/master/sales/service-center',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const MasterSalesSalesExecutiveRoute =
-  MasterSalesSalesExecutiveRouteImport.update({
-    id: '/master/sales/sales-executive',
-    path: '/master/sales/sales-executive',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const MasterSalesProductTypeRoute = MasterSalesProductTypeRouteImport.update({
-  id: '/master/sales/product-type',
-  path: '/master/sales/product-type',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesProductRoute = MasterSalesProductRouteImport.update({
-  id: '/master/sales/product',
-  path: '/master/sales/product',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesLocalBranchRoute = MasterSalesLocalBranchRouteImport.update({
-  id: '/master/sales/local-branch',
-  path: '/master/sales/local-branch',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesInstructionRoute = MasterSalesInstructionRouteImport.update({
-  id: '/master/sales/instruction',
-  path: '/master/sales/instruction',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesIndustryRoute = MasterSalesIndustryRouteImport.update({
-  id: '/master/sales/industry',
-  path: '/master/sales/industry',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesFlightRoute = MasterSalesFlightRouteImport.update({
-  id: '/master/sales/flight',
-  path: '/master/sales/flight',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesDestinationRoute = MasterSalesDestinationRouteImport.update({
-  id: '/master/sales/destination',
-  path: '/master/sales/destination',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesCountryRoute = MasterSalesCountryRouteImport.update({
-  id: '/master/sales/country',
-  path: '/master/sales/country',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesContentRoute = MasterSalesContentRouteImport.update({
-  id: '/master/sales/content',
-  path: '/master/sales/content',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterSalesChargesMasterRoute =
-  MasterSalesChargesMasterRouteImport.update({
-    id: '/master/sales/charges-master',
-    path: '/master/sales/charges-master',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const MasterSalesBankMasterRoute = MasterSalesBankMasterRouteImport.update({
-  id: '/master/sales/bank-master',
-  path: '/master/sales/bank-master',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterOperationServiceMappingRoute =
-  MasterOperationServiceMappingRouteImport.update({
-    id: '/master/operation/service-mapping',
-    path: '/master/operation/service-mapping',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const MasterOperationPinCodeRoute = MasterOperationPinCodeRouteImport.update({
-  id: '/master/operation/pin-code',
-  path: '/master/operation/pin-code',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterOperationFieldExecutiveRoute =
-  MasterOperationFieldExecutiveRouteImport.update({
-    id: '/master/operation/field-executive',
-    path: '/master/operation/field-executive',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const MasterOperationExceptionRoute =
-  MasterOperationExceptionRouteImport.update({
-    id: '/master/operation/exception',
-    path: '/master/operation/exception',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const MasterOperationCountryPincodesRoute =
-  MasterOperationCountryPincodesRouteImport.update({
-    id: '/master/operation/country-pincodes',
-    path: '/master/operation/country-pincodes',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const MasterOperationAreaRoute = MasterOperationAreaRouteImport.update({
-  id: '/master/operation/area',
-  path: '/master/operation/area',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterOperationAirlineRoute = MasterOperationAirlineRouteImport.update({
-  id: '/master/operation/airline',
-  path: '/master/operation/airline',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterCustomerShipperRoute = MasterCustomerShipperRouteImport.update({
-  id: '/master/customer/shipper',
-  path: '/master/customer/shipper',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterCustomerExpenseRoute = MasterCustomerExpenseRouteImport.update({
-  id: '/master/customer/expense',
-  path: '/master/customer/expense',
+const MasterCustomerCustomerRoute = MasterCustomerCustomerRouteImport.update({
+  id: '/master/customer/customer',
+  path: '/master/customer/customer',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MasterCustomerCustomerRateRoute =
@@ -669,59 +391,342 @@ const MasterCustomerCustomerRateRoute =
     path: '/master/customer/customer-rate',
     getParentRoute: () => rootRouteImport,
   } as any)
-const MasterCustomerCustomerRoute = MasterCustomerCustomerRouteImport.update({
-  id: '/master/customer/customer',
-  path: '/master/customer/customer',
+const MasterCustomerExpenseRoute = MasterCustomerExpenseRouteImport.update({
+  id: '/master/customer/expense',
+  path: '/master/customer/expense',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MasterCustomerConsigneeRoute = MasterCustomerConsigneeRouteImport.update({
-  id: '/master/customer/consignee',
-  path: '/master/customer/consignee',
+const MasterCustomerShipperRoute = MasterCustomerShipperRouteImport.update({
+  id: '/master/customer/shipper',
+  path: '/master/customer/shipper',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiShipmentsRateRoute = ApiShipmentsRateRouteImport.update({
-  id: '/api/shipments/rate',
-  path: '/api/shipments/rate',
+const MasterOperationAirlineRoute = MasterOperationAirlineRouteImport.update({
+  id: '/master/operation/airline',
+  path: '/master/operation/airline',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAwbEntryStatusRoute = ApiAwbEntryStatusRouteImport.update({
-  id: '/api/awb-entry/status',
-  path: '/api/awb-entry/status',
+const MasterOperationAreaRoute = MasterOperationAreaRouteImport.update({
+  id: '/master/operation/area',
+  path: '/master/operation/area',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthResetPasswordRoute = ApiAuthResetPasswordRouteImport.update({
-  id: '/api/auth/reset-password',
-  path: '/api/auth/reset-password',
+const MasterOperationCountryPincodesRoute =
+  MasterOperationCountryPincodesRouteImport.update({
+    id: '/master/operation/country-pincodes',
+    path: '/master/operation/country-pincodes',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterOperationExceptionRoute =
+  MasterOperationExceptionRouteImport.update({
+    id: '/master/operation/exception',
+    path: '/master/operation/exception',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterOperationFieldExecutiveRoute =
+  MasterOperationFieldExecutiveRouteImport.update({
+    id: '/master/operation/field-executive',
+    path: '/master/operation/field-executive',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterOperationPinCodeRoute = MasterOperationPinCodeRouteImport.update({
+  id: '/master/operation/pin-code',
+  path: '/master/operation/pin-code',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthOtpVerifyRoute = ApiAuthOtpVerifyRouteImport.update({
-  id: '/api/auth/otp-verify',
-  path: '/api/auth/otp-verify',
+const MasterOperationServiceMappingRoute =
+  MasterOperationServiceMappingRouteImport.update({
+    id: '/master/operation/service-mapping',
+    path: '/master/operation/service-mapping',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterSalesBankMasterRoute = MasterSalesBankMasterRouteImport.update({
+  id: '/master/sales/bank-master',
+  path: '/master/sales/bank-master',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthOtpRequestRoute = ApiAuthOtpRequestRouteImport.update({
-  id: '/api/auth/otp-request',
-  path: '/api/auth/otp-request',
+const MasterSalesChargesMasterRoute =
+  MasterSalesChargesMasterRouteImport.update({
+    id: '/master/sales/charges-master',
+    path: '/master/sales/charges-master',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterSalesContentRoute = MasterSalesContentRouteImport.update({
+  id: '/master/sales/content',
+  path: '/master/sales/content',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthLoginRoute = ApiAuthLoginRouteImport.update({
-  id: '/api/auth/login',
-  path: '/api/auth/login',
+const MasterSalesCountryRoute = MasterSalesCountryRouteImport.update({
+  id: '/master/sales/country',
+  path: '/master/sales/country',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthForgotPasswordRoute = ApiAuthForgotPasswordRouteImport.update({
-  id: '/api/auth/forgot-password',
-  path: '/api/auth/forgot-password',
+const MasterSalesDestinationRoute = MasterSalesDestinationRouteImport.update({
+  id: '/master/sales/destination',
+  path: '/master/sales/destination',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthForceLogoutRoute = ApiAuthForceLogoutRouteImport.update({
-  id: '/api/auth/force-logout',
-  path: '/api/auth/force-logout',
+const MasterSalesFlightRoute = MasterSalesFlightRouteImport.update({
+  id: '/master/sales/flight',
+  path: '/master/sales/flight',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthActivateRoute = ApiAuthActivateRouteImport.update({
-  id: '/api/auth/activate',
-  path: '/api/auth/activate',
+const MasterSalesIndustryRoute = MasterSalesIndustryRouteImport.update({
+  id: '/master/sales/industry',
+  path: '/master/sales/industry',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterSalesInstructionRoute = MasterSalesInstructionRouteImport.update({
+  id: '/master/sales/instruction',
+  path: '/master/sales/instruction',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterSalesLocalBranchRoute = MasterSalesLocalBranchRouteImport.update({
+  id: '/master/sales/local-branch',
+  path: '/master/sales/local-branch',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterSalesProductRoute = MasterSalesProductRouteImport.update({
+  id: '/master/sales/product',
+  path: '/master/sales/product',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterSalesProductTypeRoute = MasterSalesProductTypeRouteImport.update({
+  id: '/master/sales/product-type',
+  path: '/master/sales/product-type',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterSalesSalesExecutiveRoute =
+  MasterSalesSalesExecutiveRouteImport.update({
+    id: '/master/sales/sales-executive',
+    path: '/master/sales/sales-executive',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterSalesServiceCenterRoute =
+  MasterSalesServiceCenterRouteImport.update({
+    id: '/master/sales/service-center',
+    path: '/master/sales/service-center',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const MasterSalesStateRoute = MasterSalesStateRouteImport.update({
+  id: '/master/sales/state',
+  path: '/master/sales/state',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterSalesZoneRoute = MasterSalesZoneRouteImport.update({
+  id: '/master/sales/zone',
+  path: '/master/sales/zone',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterVendorVendorRoute = MasterVendorVendorRouteImport.update({
+  id: '/master/vendor/vendor',
+  path: '/master/vendor/vendor',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MasterVendorVendorContractRoute =
+  MasterVendorVendorContractRouteImport.update({
+    id: '/master/vendor/vendor-contract',
+    path: '/master/vendor/vendor-contract',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ReportsRunIndexRoute = ReportsRunIndexRouteImport.update({
+  id: '/reports/run/',
+  path: '/reports/run/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsRunReportKeyRoute = ReportsRunReportKeyRouteImport.update({
+  id: '/reports/run/$reportKey',
+  path: '/reports/run/$reportKey',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionBulkImportPodToExcelRoute =
+  TransactionBulkImportPodToExcelRouteImport.update({
+    id: '/transaction/bulk-import/pod-to-excel',
+    path: '/transaction/bulk-import/pod-to-excel',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionOutScanObcEntryRoute =
+  TransactionOutScanObcEntryRouteImport.update({
+    id: '/transaction/out-scan/obc-entry',
+    path: '/transaction/out-scan/obc-entry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionRateCompareCustomerRateCompareRoute =
+  TransactionRateCompareCustomerRateCompareRouteImport.update({
+    id: '/transaction/rate-compare/customer-rate-compare',
+    path: '/transaction/rate-compare/customer-rate-compare',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionRateCompareVendorRateCompareRoute =
+  TransactionRateCompareVendorRateCompareRouteImport.update({
+    id: '/transaction/rate-compare/vendor-rate-compare',
+    path: '/transaction/rate-compare/vendor-rate-compare',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionReceiptCreditNoteRoute =
+  TransactionReceiptCreditNoteRouteImport.update({
+    id: '/transaction/receipt/credit-note',
+    path: '/transaction/receipt/credit-note',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionReceiptCustomerPaymentRoute =
+  TransactionReceiptCustomerPaymentRouteImport.update({
+    id: '/transaction/receipt/customer-payment',
+    path: '/transaction/receipt/customer-payment',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionReceiptDebitNoteRoute =
+  TransactionReceiptDebitNoteRouteImport.update({
+    id: '/transaction/receipt/debit-note',
+    path: '/transaction/receipt/debit-note',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionReceiptExpenseAuthorizeRoute =
+  TransactionReceiptExpenseAuthorizeRouteImport.update({
+    id: '/transaction/receipt/expense-authorize',
+    path: '/transaction/receipt/expense-authorize',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionReceiptExpenseEntryRoute =
+  TransactionReceiptExpenseEntryRouteImport.update({
+    id: '/transaction/receipt/expense-entry',
+    path: '/transaction/receipt/expense-entry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionReceiptReceiptEntryRoute =
+  TransactionReceiptReceiptEntryRouteImport.update({
+    id: '/transaction/receipt/receipt-entry',
+    path: '/transaction/receipt/receipt-entry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionTrackingAwbQueryRoute =
+  TransactionTrackingAwbQueryRouteImport.update({
+    id: '/transaction/tracking/awb-query',
+    path: '/transaction/tracking/awb-query',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionTrackingForwardingUpdationRoute =
+  TransactionTrackingForwardingUpdationRouteImport.update({
+    id: '/transaction/tracking/forwarding-updation',
+    path: '/transaction/tracking/forwarding-updation',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionTrackingKycTrackingRoute =
+  TransactionTrackingKycTrackingRouteImport.update({
+    id: '/transaction/tracking/kyc-tracking',
+    path: '/transaction/tracking/kyc-tracking',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionTrackingProgressCommentRoute =
+  TransactionTrackingProgressCommentRouteImport.update({
+    id: '/transaction/tracking/progress-comment',
+    path: '/transaction/tracking/progress-comment',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TransactionTrackingUpdateEntryRoute =
+  TransactionTrackingUpdateEntryRouteImport.update({
+    id: '/transaction/tracking/update-entry',
+    path: '/transaction/tracking/update-entry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityExcelImportAwbMergingRoute =
+  UtilityExcelImportAwbMergingRouteImport.update({
+    id: '/utility/excel-import/awb-merging',
+    path: '/utility/excel-import/awb-merging',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityExcelImportDataImportRoute =
+  UtilityExcelImportDataImportRouteImport.update({
+    id: '/utility/excel-import/data-import',
+    path: '/utility/excel-import/data-import',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityExcelImportDataUpdationRoute =
+  UtilityExcelImportDataUpdationRouteImport.update({
+    id: '/utility/excel-import/data-updation',
+    path: '/utility/excel-import/data-updation',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityExcelImportForwardingMergingRoute =
+  UtilityExcelImportForwardingMergingRouteImport.update({
+    id: '/utility/excel-import/forwarding-merging',
+    path: '/utility/excel-import/forwarding-merging',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityExcelImportPodMergingRoute =
+  UtilityExcelImportPodMergingRouteImport.update({
+    id: '/utility/excel-import/pod-merging',
+    path: '/utility/excel-import/pod-merging',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityRateZoneUpdateRateImportRoute =
+  UtilityRateZoneUpdateRateImportRouteImport.update({
+    id: '/utility/rate-zone-update/rate-import',
+    path: '/utility/rate-zone-update/rate-import',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityRateZoneUpdateRateUpdateRoute =
+  UtilityRateZoneUpdateRateUpdateRouteImport.update({
+    id: '/utility/rate-zone-update/rate-update',
+    path: '/utility/rate-zone-update/rate-update',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityRateZoneUpdateRateUpdateJobsRoute =
+  UtilityRateZoneUpdateRateUpdateJobsRouteImport.update({
+    id: '/utility/rate-zone-update/rate-update-jobs',
+    path: '/utility/rate-zone-update/rate-update-jobs',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityRateZoneUpdateZoneUpdateRoute =
+  UtilityRateZoneUpdateZoneUpdateRouteImport.update({
+    id: '/utility/rate-zone-update/zone-update',
+    path: '/utility/rate-zone-update/zone-update',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityRateZoneUpdateZoneUpdateJobsRoute =
+  UtilityRateZoneUpdateZoneUpdateJobsRouteImport.update({
+    id: '/utility/rate-zone-update/zone-update-jobs',
+    path: '/utility/rate-zone-update/zone-update-jobs',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityTaxChargesSetupFuelSetupRoute =
+  UtilityTaxChargesSetupFuelSetupRouteImport.update({
+    id: '/utility/tax-charges-setup/fuel-setup',
+    path: '/utility/tax-charges-setup/fuel-setup',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityTaxChargesSetupSetupRoute =
+  UtilityTaxChargesSetupSetupRouteImport.update({
+    id: '/utility/tax-charges-setup/setup',
+    path: '/utility/tax-charges-setup/setup',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityTaxChargesSetupTaxSetupRoute =
+  UtilityTaxChargesSetupTaxSetupRouteImport.update({
+    id: '/utility/tax-charges-setup/tax-setup',
+    path: '/utility/tax-charges-setup/tax-setup',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityUsersAccessRightsRoute =
+  UtilityUsersAccessRightsRouteImport.update({
+    id: '/utility/users/access-rights',
+    path: '/utility/users/access-rights',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityUsersLoggedinUsersRoute =
+  UtilityUsersLoggedinUsersRouteImport.update({
+    id: '/utility/users/loggedin-users',
+    path: '/utility/users/loggedin-users',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UtilityUsersUserSetupRoute = UtilityUsersUserSetupRouteImport.update({
+  id: '/utility/users/user-setup',
+  path: '/utility/users/user-setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiShippingUpsBookRoute = ApiShippingUpsBookRouteImport.update({
+  id: '/api/shipping/ups/book',
+  path: '/api/shipping/ups/book',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiShippingWorldFirstBookRoute =
@@ -730,11 +735,6 @@ const ApiShippingWorldFirstBookRoute =
     path: '/api/shipping/world-first/book',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiShippingUpsBookRoute = ApiShippingUpsBookRouteImport.update({
-  id: '/api/shipping/ups/book',
-  path: '/api/shipping/ups/book',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -1548,39 +1548,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/forgot-password': {
-      id: '/forgot-password'
-      path: '/forgot-password'
-      fullPath: '/forgot-password'
-      preLoaderRoute: typeof ForgotPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/demo': {
-      id: '/demo'
-      path: '/demo'
-      fullPath: '/demo'
-      preLoaderRoute: typeof DemoRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dashboard': {
-      id: '/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof DashboardRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/activate': {
@@ -1590,235 +1562,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ActivateRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/serviceable-pincode': {
-      id: '/utility/serviceable-pincode'
-      path: '/utility/serviceable-pincode'
-      fullPath: '/utility/serviceable-pincode'
-      preLoaderRoute: typeof UtilityServiceablePincodeRouteImport
+    '/demo': {
+      id: '/demo'
+      path: '/demo'
+      fullPath: '/demo'
+      preLoaderRoute: typeof DemoRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/notification': {
-      id: '/utility/notification'
-      path: '/utility/notification'
-      fullPath: '/utility/notification'
-      preLoaderRoute: typeof UtilityNotificationRouteImport
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/integration-configuration': {
-      id: '/utility/integration-configuration'
-      path: '/utility/integration-configuration'
-      fullPath: '/utility/integration-configuration'
-      preLoaderRoute: typeof UtilityIntegrationConfigurationRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/access-rights': {
-      id: '/utility/access-rights'
-      path: '/utility/access-rights'
-      fullPath: '/utility/access-rights'
-      preLoaderRoute: typeof UtilityAccessRightsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/utility/$': {
-      id: '/utility/$'
-      path: '/utility/$'
-      fullPath: '/utility/$'
-      preLoaderRoute: typeof UtilitySplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/utilities/access-rights': {
-      id: '/utilities/access-rights'
-      path: '/utilities/access-rights'
-      fullPath: '/utilities/access-rights'
-      preLoaderRoute: typeof UtilitiesAccessRightsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/un-delivery-scan': {
-      id: '/transaction/un-delivery-scan'
-      path: '/transaction/un-delivery-scan'
-      fullPath: '/transaction/un-delivery-scan'
-      preLoaderRoute: typeof TransactionUnDeliveryScanRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/transfer-run': {
-      id: '/transaction/transfer-run'
-      path: '/transaction/transfer-run'
-      fullPath: '/transaction/transfer-run'
-      preLoaderRoute: typeof TransactionTransferRunRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/pickup-inscan': {
-      id: '/transaction/pickup-inscan'
-      path: '/transaction/pickup-inscan'
-      fullPath: '/transaction/pickup-inscan'
-      preLoaderRoute: typeof TransactionPickupInscanRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/pickup': {
-      id: '/transaction/pickup'
-      path: '/transaction/pickup'
-      fullPath: '/transaction/pickup'
-      preLoaderRoute: typeof TransactionPickupRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/miss-route-scan': {
-      id: '/transaction/miss-route-scan'
-      path: '/transaction/miss-route-scan'
-      fullPath: '/transaction/miss-route-scan'
-      preLoaderRoute: typeof TransactionMissRouteScanRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/manifest-view': {
-      id: '/transaction/manifest-view'
-      path: '/transaction/manifest-view'
-      fullPath: '/transaction/manifest-view'
-      preLoaderRoute: typeof TransactionManifestViewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/manifest-scan': {
-      id: '/transaction/manifest-scan'
-      path: '/transaction/manifest-scan'
-      fullPath: '/transaction/manifest-scan'
-      preLoaderRoute: typeof TransactionManifestScanRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/manifest-in-scan': {
-      id: '/transaction/manifest-in-scan'
-      path: '/transaction/manifest-in-scan'
-      fullPath: '/transaction/manifest-in-scan'
-      preLoaderRoute: typeof TransactionManifestInScanRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/drs-scan': {
-      id: '/transaction/drs-scan'
-      path: '/transaction/drs-scan'
-      fullPath: '/transaction/drs-scan'
-      preLoaderRoute: typeof TransactionDrsScanRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/bagging': {
-      id: '/transaction/bagging'
-      path: '/transaction/bagging'
-      fullPath: '/transaction/bagging'
-      preLoaderRoute: typeof TransactionBaggingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/awb-entry': {
-      id: '/transaction/awb-entry'
-      path: '/transaction/awb-entry'
-      fullPath: '/transaction/awb-entry'
-      preLoaderRoute: typeof TransactionAwbEntryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/transaction/$': {
-      id: '/transaction/$'
-      path: '/transaction/$'
-      fullPath: '/transaction/$'
-      preLoaderRoute: typeof TransactionSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports/statements': {
-      id: '/reports/statements'
-      path: '/reports/statements'
-      fullPath: '/reports/statements'
-      preLoaderRoute: typeof ReportsStatementsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports/scan': {
-      id: '/reports/scan'
-      path: '/reports/scan'
-      fullPath: '/reports/scan'
-      preLoaderRoute: typeof ReportsScanRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports/operations': {
-      id: '/reports/operations'
-      path: '/reports/operations'
-      fullPath: '/reports/operations'
-      preLoaderRoute: typeof ReportsOperationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports/jobs': {
-      id: '/reports/jobs'
-      path: '/reports/jobs'
-      fullPath: '/reports/jobs'
-      preLoaderRoute: typeof ReportsJobsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports/awb': {
-      id: '/reports/awb'
-      path: '/reports/awb'
-      fullPath: '/reports/awb'
-      preLoaderRoute: typeof ReportsAwbRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports/ar-report': {
-      id: '/reports/ar-report'
-      path: '/reports/ar-report'
-      fullPath: '/reports/ar-report'
-      preLoaderRoute: typeof ReportsArReportRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports/$': {
-      id: '/reports/$'
-      path: '/reports/$'
-      fullPath: '/reports/$'
-      preLoaderRoute: typeof ReportsSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/public/track': {
-      id: '/public/track'
-      path: '/public/track'
-      fullPath: '/public/track'
-      preLoaderRoute: typeof PublicTrackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/$': {
-      id: '/master/$'
-      path: '/master/$'
-      fullPath: '/master/$'
-      preLoaderRoute: typeof MasterSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/documents/invoice-print': {
-      id: '/documents/invoice-print'
-      path: '/documents/invoice-print'
-      fullPath: '/documents/invoice-print'
-      preLoaderRoute: typeof DocumentsInvoicePrintRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/documents/invoice-generation': {
-      id: '/documents/invoice-generation'
-      path: '/documents/invoice-generation'
-      fullPath: '/documents/invoice-generation'
-      preLoaderRoute: typeof DocumentsInvoiceGenerationRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/documents/invoice-finalise': {
-      id: '/documents/invoice-finalise'
-      path: '/documents/invoice-finalise'
-      fullPath: '/documents/invoice-finalise'
-      preLoaderRoute: typeof DocumentsInvoiceFinaliseRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/users': {
-      id: '/api/users'
-      path: '/api/users'
-      fullPath: '/api/users'
-      preLoaderRoute: typeof ApiUsersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/pincodes': {
-      id: '/api/pincodes'
-      path: '/api/pincodes'
-      fullPath: '/api/pincodes'
-      preLoaderRoute: typeof ApiPincodesRouteImport
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/RunNo_Entry/RunNo_Entry': {
@@ -1828,494 +1604,228 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RunNo_EntryRunNo_EntryRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/reports/run/': {
-      id: '/reports/run/'
-      path: '/reports/run'
-      fullPath: '/reports/run/'
-      preLoaderRoute: typeof ReportsRunIndexRouteImport
+    '/api/pincodes': {
+      id: '/api/pincodes'
+      path: '/api/pincodes'
+      fullPath: '/api/pincodes'
+      preLoaderRoute: typeof ApiPincodesRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/users/user-setup': {
-      id: '/utility/users/user-setup'
-      path: '/utility/users/user-setup'
-      fullPath: '/utility/users/user-setup'
-      preLoaderRoute: typeof UtilityUsersUserSetupRouteImport
+    '/api/users': {
+      id: '/api/users'
+      path: '/api/users'
+      fullPath: '/api/users'
+      preLoaderRoute: typeof ApiUsersRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/users/loggedin-users': {
-      id: '/utility/users/loggedin-users'
-      path: '/utility/users/loggedin-users'
-      fullPath: '/utility/users/loggedin-users'
-      preLoaderRoute: typeof UtilityUsersLoggedinUsersRouteImport
+    '/documents/invoice-finalise': {
+      id: '/documents/invoice-finalise'
+      path: '/documents/invoice-finalise'
+      fullPath: '/documents/invoice-finalise'
+      preLoaderRoute: typeof DocumentsInvoiceFinaliseRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/users/access-rights': {
-      id: '/utility/users/access-rights'
-      path: '/utility/users/access-rights'
-      fullPath: '/utility/users/access-rights'
-      preLoaderRoute: typeof UtilityUsersAccessRightsRouteImport
+    '/documents/invoice-generation': {
+      id: '/documents/invoice-generation'
+      path: '/documents/invoice-generation'
+      fullPath: '/documents/invoice-generation'
+      preLoaderRoute: typeof DocumentsInvoiceGenerationRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/tax-charges-setup/tax-setup': {
-      id: '/utility/tax-charges-setup/tax-setup'
-      path: '/utility/tax-charges-setup/tax-setup'
-      fullPath: '/utility/tax-charges-setup/tax-setup'
-      preLoaderRoute: typeof UtilityTaxChargesSetupTaxSetupRouteImport
+    '/documents/invoice-print': {
+      id: '/documents/invoice-print'
+      path: '/documents/invoice-print'
+      fullPath: '/documents/invoice-print'
+      preLoaderRoute: typeof DocumentsInvoicePrintRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/tax-charges-setup/setup': {
-      id: '/utility/tax-charges-setup/setup'
-      path: '/utility/tax-charges-setup/setup'
-      fullPath: '/utility/tax-charges-setup/setup'
-      preLoaderRoute: typeof UtilityTaxChargesSetupSetupRouteImport
+    '/master/$': {
+      id: '/master/$'
+      path: '/master/$'
+      fullPath: '/master/$'
+      preLoaderRoute: typeof MasterSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/tax-charges-setup/fuel-setup': {
-      id: '/utility/tax-charges-setup/fuel-setup'
-      path: '/utility/tax-charges-setup/fuel-setup'
-      fullPath: '/utility/tax-charges-setup/fuel-setup'
-      preLoaderRoute: typeof UtilityTaxChargesSetupFuelSetupRouteImport
+    '/public/track': {
+      id: '/public/track'
+      path: '/public/track'
+      fullPath: '/public/track'
+      preLoaderRoute: typeof PublicTrackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/rate-zone-update/zone-update-jobs': {
-      id: '/utility/rate-zone-update/zone-update-jobs'
-      path: '/utility/rate-zone-update/zone-update-jobs'
-      fullPath: '/utility/rate-zone-update/zone-update-jobs'
-      preLoaderRoute: typeof UtilityRateZoneUpdateZoneUpdateJobsRouteImport
+    '/reports/$': {
+      id: '/reports/$'
+      path: '/reports/$'
+      fullPath: '/reports/$'
+      preLoaderRoute: typeof ReportsSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/rate-zone-update/zone-update': {
-      id: '/utility/rate-zone-update/zone-update'
-      path: '/utility/rate-zone-update/zone-update'
-      fullPath: '/utility/rate-zone-update/zone-update'
-      preLoaderRoute: typeof UtilityRateZoneUpdateZoneUpdateRouteImport
+    '/reports/ar-report': {
+      id: '/reports/ar-report'
+      path: '/reports/ar-report'
+      fullPath: '/reports/ar-report'
+      preLoaderRoute: typeof ReportsArReportRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/rate-zone-update/rate-update-jobs': {
-      id: '/utility/rate-zone-update/rate-update-jobs'
-      path: '/utility/rate-zone-update/rate-update-jobs'
-      fullPath: '/utility/rate-zone-update/rate-update-jobs'
-      preLoaderRoute: typeof UtilityRateZoneUpdateRateUpdateJobsRouteImport
+    '/reports/awb': {
+      id: '/reports/awb'
+      path: '/reports/awb'
+      fullPath: '/reports/awb'
+      preLoaderRoute: typeof ReportsAwbRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/rate-zone-update/rate-update': {
-      id: '/utility/rate-zone-update/rate-update'
-      path: '/utility/rate-zone-update/rate-update'
-      fullPath: '/utility/rate-zone-update/rate-update'
-      preLoaderRoute: typeof UtilityRateZoneUpdateRateUpdateRouteImport
+    '/reports/jobs': {
+      id: '/reports/jobs'
+      path: '/reports/jobs'
+      fullPath: '/reports/jobs'
+      preLoaderRoute: typeof ReportsJobsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/rate-zone-update/rate-import': {
-      id: '/utility/rate-zone-update/rate-import'
-      path: '/utility/rate-zone-update/rate-import'
-      fullPath: '/utility/rate-zone-update/rate-import'
-      preLoaderRoute: typeof UtilityRateZoneUpdateRateImportRouteImport
+    '/reports/operations': {
+      id: '/reports/operations'
+      path: '/reports/operations'
+      fullPath: '/reports/operations'
+      preLoaderRoute: typeof ReportsOperationsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/excel-import/pod-merging': {
-      id: '/utility/excel-import/pod-merging'
-      path: '/utility/excel-import/pod-merging'
-      fullPath: '/utility/excel-import/pod-merging'
-      preLoaderRoute: typeof UtilityExcelImportPodMergingRouteImport
+    '/reports/scan': {
+      id: '/reports/scan'
+      path: '/reports/scan'
+      fullPath: '/reports/scan'
+      preLoaderRoute: typeof ReportsScanRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/excel-import/forwarding-merging': {
-      id: '/utility/excel-import/forwarding-merging'
-      path: '/utility/excel-import/forwarding-merging'
-      fullPath: '/utility/excel-import/forwarding-merging'
-      preLoaderRoute: typeof UtilityExcelImportForwardingMergingRouteImport
+    '/reports/statements': {
+      id: '/reports/statements'
+      path: '/reports/statements'
+      fullPath: '/reports/statements'
+      preLoaderRoute: typeof ReportsStatementsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/excel-import/data-updation': {
-      id: '/utility/excel-import/data-updation'
-      path: '/utility/excel-import/data-updation'
-      fullPath: '/utility/excel-import/data-updation'
-      preLoaderRoute: typeof UtilityExcelImportDataUpdationRouteImport
+    '/transaction/$': {
+      id: '/transaction/$'
+      path: '/transaction/$'
+      fullPath: '/transaction/$'
+      preLoaderRoute: typeof TransactionSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/excel-import/data-import': {
-      id: '/utility/excel-import/data-import'
-      path: '/utility/excel-import/data-import'
-      fullPath: '/utility/excel-import/data-import'
-      preLoaderRoute: typeof UtilityExcelImportDataImportRouteImport
+    '/transaction/awb-entry': {
+      id: '/transaction/awb-entry'
+      path: '/transaction/awb-entry'
+      fullPath: '/transaction/awb-entry'
+      preLoaderRoute: typeof TransactionAwbEntryRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/excel-import/awb-merging': {
-      id: '/utility/excel-import/awb-merging'
-      path: '/utility/excel-import/awb-merging'
-      fullPath: '/utility/excel-import/awb-merging'
-      preLoaderRoute: typeof UtilityExcelImportAwbMergingRouteImport
+    '/transaction/bagging': {
+      id: '/transaction/bagging'
+      path: '/transaction/bagging'
+      fullPath: '/transaction/bagging'
+      preLoaderRoute: typeof TransactionBaggingRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/tracking/update-entry': {
-      id: '/transaction/tracking/update-entry'
-      path: '/transaction/tracking/update-entry'
-      fullPath: '/transaction/tracking/update-entry'
-      preLoaderRoute: typeof TransactionTrackingUpdateEntryRouteImport
+    '/transaction/drs-scan': {
+      id: '/transaction/drs-scan'
+      path: '/transaction/drs-scan'
+      fullPath: '/transaction/drs-scan'
+      preLoaderRoute: typeof TransactionDrsScanRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/tracking/progress-comment': {
-      id: '/transaction/tracking/progress-comment'
-      path: '/transaction/tracking/progress-comment'
-      fullPath: '/transaction/tracking/progress-comment'
-      preLoaderRoute: typeof TransactionTrackingProgressCommentRouteImport
+    '/transaction/manifest-in-scan': {
+      id: '/transaction/manifest-in-scan'
+      path: '/transaction/manifest-in-scan'
+      fullPath: '/transaction/manifest-in-scan'
+      preLoaderRoute: typeof TransactionManifestInScanRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/tracking/kyc-tracking': {
-      id: '/transaction/tracking/kyc-tracking'
-      path: '/transaction/tracking/kyc-tracking'
-      fullPath: '/transaction/tracking/kyc-tracking'
-      preLoaderRoute: typeof TransactionTrackingKycTrackingRouteImport
+    '/transaction/manifest-scan': {
+      id: '/transaction/manifest-scan'
+      path: '/transaction/manifest-scan'
+      fullPath: '/transaction/manifest-scan'
+      preLoaderRoute: typeof TransactionManifestScanRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/tracking/forwarding-updation': {
-      id: '/transaction/tracking/forwarding-updation'
-      path: '/transaction/tracking/forwarding-updation'
-      fullPath: '/transaction/tracking/forwarding-updation'
-      preLoaderRoute: typeof TransactionTrackingForwardingUpdationRouteImport
+    '/transaction/manifest-view': {
+      id: '/transaction/manifest-view'
+      path: '/transaction/manifest-view'
+      fullPath: '/transaction/manifest-view'
+      preLoaderRoute: typeof TransactionManifestViewRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/tracking/awb-query': {
-      id: '/transaction/tracking/awb-query'
-      path: '/transaction/tracking/awb-query'
-      fullPath: '/transaction/tracking/awb-query'
-      preLoaderRoute: typeof TransactionTrackingAwbQueryRouteImport
+    '/transaction/miss-route-scan': {
+      id: '/transaction/miss-route-scan'
+      path: '/transaction/miss-route-scan'
+      fullPath: '/transaction/miss-route-scan'
+      preLoaderRoute: typeof TransactionMissRouteScanRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/receipt/receipt-entry': {
-      id: '/transaction/receipt/receipt-entry'
-      path: '/transaction/receipt/receipt-entry'
-      fullPath: '/transaction/receipt/receipt-entry'
-      preLoaderRoute: typeof TransactionReceiptReceiptEntryRouteImport
+    '/transaction/pickup': {
+      id: '/transaction/pickup'
+      path: '/transaction/pickup'
+      fullPath: '/transaction/pickup'
+      preLoaderRoute: typeof TransactionPickupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/receipt/expense-entry': {
-      id: '/transaction/receipt/expense-entry'
-      path: '/transaction/receipt/expense-entry'
-      fullPath: '/transaction/receipt/expense-entry'
-      preLoaderRoute: typeof TransactionReceiptExpenseEntryRouteImport
+    '/transaction/pickup-inscan': {
+      id: '/transaction/pickup-inscan'
+      path: '/transaction/pickup-inscan'
+      fullPath: '/transaction/pickup-inscan'
+      preLoaderRoute: typeof TransactionPickupInscanRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/receipt/expense-authorize': {
-      id: '/transaction/receipt/expense-authorize'
-      path: '/transaction/receipt/expense-authorize'
-      fullPath: '/transaction/receipt/expense-authorize'
-      preLoaderRoute: typeof TransactionReceiptExpenseAuthorizeRouteImport
+    '/transaction/transfer-run': {
+      id: '/transaction/transfer-run'
+      path: '/transaction/transfer-run'
+      fullPath: '/transaction/transfer-run'
+      preLoaderRoute: typeof TransactionTransferRunRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/receipt/debit-note': {
-      id: '/transaction/receipt/debit-note'
-      path: '/transaction/receipt/debit-note'
-      fullPath: '/transaction/receipt/debit-note'
-      preLoaderRoute: typeof TransactionReceiptDebitNoteRouteImport
+    '/transaction/un-delivery-scan': {
+      id: '/transaction/un-delivery-scan'
+      path: '/transaction/un-delivery-scan'
+      fullPath: '/transaction/un-delivery-scan'
+      preLoaderRoute: typeof TransactionUnDeliveryScanRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/receipt/customer-payment': {
-      id: '/transaction/receipt/customer-payment'
-      path: '/transaction/receipt/customer-payment'
-      fullPath: '/transaction/receipt/customer-payment'
-      preLoaderRoute: typeof TransactionReceiptCustomerPaymentRouteImport
+    '/utilities/access-rights': {
+      id: '/utilities/access-rights'
+      path: '/utilities/access-rights'
+      fullPath: '/utilities/access-rights'
+      preLoaderRoute: typeof UtilitiesAccessRightsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/receipt/credit-note': {
-      id: '/transaction/receipt/credit-note'
-      path: '/transaction/receipt/credit-note'
-      fullPath: '/transaction/receipt/credit-note'
-      preLoaderRoute: typeof TransactionReceiptCreditNoteRouteImport
+    '/utility/$': {
+      id: '/utility/$'
+      path: '/utility/$'
+      fullPath: '/utility/$'
+      preLoaderRoute: typeof UtilitySplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/rate-compare/vendor-rate-compare': {
-      id: '/transaction/rate-compare/vendor-rate-compare'
-      path: '/transaction/rate-compare/vendor-rate-compare'
-      fullPath: '/transaction/rate-compare/vendor-rate-compare'
-      preLoaderRoute: typeof TransactionRateCompareVendorRateCompareRouteImport
+    '/utility/access-rights': {
+      id: '/utility/access-rights'
+      path: '/utility/access-rights'
+      fullPath: '/utility/access-rights'
+      preLoaderRoute: typeof UtilityAccessRightsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/rate-compare/customer-rate-compare': {
-      id: '/transaction/rate-compare/customer-rate-compare'
-      path: '/transaction/rate-compare/customer-rate-compare'
-      fullPath: '/transaction/rate-compare/customer-rate-compare'
-      preLoaderRoute: typeof TransactionRateCompareCustomerRateCompareRouteImport
+    '/utility/integration-configuration': {
+      id: '/utility/integration-configuration'
+      path: '/utility/integration-configuration'
+      fullPath: '/utility/integration-configuration'
+      preLoaderRoute: typeof UtilityIntegrationConfigurationRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/out-scan/obc-entry': {
-      id: '/transaction/out-scan/obc-entry'
-      path: '/transaction/out-scan/obc-entry'
-      fullPath: '/transaction/out-scan/obc-entry'
-      preLoaderRoute: typeof TransactionOutScanObcEntryRouteImport
+    '/utility/notification': {
+      id: '/utility/notification'
+      path: '/utility/notification'
+      fullPath: '/utility/notification'
+      preLoaderRoute: typeof UtilityNotificationRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transaction/bulk-import/pod-to-excel': {
-      id: '/transaction/bulk-import/pod-to-excel'
-      path: '/transaction/bulk-import/pod-to-excel'
-      fullPath: '/transaction/bulk-import/pod-to-excel'
-      preLoaderRoute: typeof TransactionBulkImportPodToExcelRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports/run/$reportKey': {
-      id: '/reports/run/$reportKey'
-      path: '/reports/run/$reportKey'
-      fullPath: '/reports/run/$reportKey'
-      preLoaderRoute: typeof ReportsRunReportKeyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/vendor/vendor-contract': {
-      id: '/master/vendor/vendor-contract'
-      path: '/master/vendor/vendor-contract'
-      fullPath: '/master/vendor/vendor-contract'
-      preLoaderRoute: typeof MasterVendorVendorContractRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/vendor/vendor': {
-      id: '/master/vendor/vendor'
-      path: '/master/vendor/vendor'
-      fullPath: '/master/vendor/vendor'
-      preLoaderRoute: typeof MasterVendorVendorRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/zone': {
-      id: '/master/sales/zone'
-      path: '/master/sales/zone'
-      fullPath: '/master/sales/zone'
-      preLoaderRoute: typeof MasterSalesZoneRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/state': {
-      id: '/master/sales/state'
-      path: '/master/sales/state'
-      fullPath: '/master/sales/state'
-      preLoaderRoute: typeof MasterSalesStateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/service-center': {
-      id: '/master/sales/service-center'
-      path: '/master/sales/service-center'
-      fullPath: '/master/sales/service-center'
-      preLoaderRoute: typeof MasterSalesServiceCenterRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/sales-executive': {
-      id: '/master/sales/sales-executive'
-      path: '/master/sales/sales-executive'
-      fullPath: '/master/sales/sales-executive'
-      preLoaderRoute: typeof MasterSalesSalesExecutiveRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/product-type': {
-      id: '/master/sales/product-type'
-      path: '/master/sales/product-type'
-      fullPath: '/master/sales/product-type'
-      preLoaderRoute: typeof MasterSalesProductTypeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/product': {
-      id: '/master/sales/product'
-      path: '/master/sales/product'
-      fullPath: '/master/sales/product'
-      preLoaderRoute: typeof MasterSalesProductRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/local-branch': {
-      id: '/master/sales/local-branch'
-      path: '/master/sales/local-branch'
-      fullPath: '/master/sales/local-branch'
-      preLoaderRoute: typeof MasterSalesLocalBranchRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/instruction': {
-      id: '/master/sales/instruction'
-      path: '/master/sales/instruction'
-      fullPath: '/master/sales/instruction'
-      preLoaderRoute: typeof MasterSalesInstructionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/industry': {
-      id: '/master/sales/industry'
-      path: '/master/sales/industry'
-      fullPath: '/master/sales/industry'
-      preLoaderRoute: typeof MasterSalesIndustryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/flight': {
-      id: '/master/sales/flight'
-      path: '/master/sales/flight'
-      fullPath: '/master/sales/flight'
-      preLoaderRoute: typeof MasterSalesFlightRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/destination': {
-      id: '/master/sales/destination'
-      path: '/master/sales/destination'
-      fullPath: '/master/sales/destination'
-      preLoaderRoute: typeof MasterSalesDestinationRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/country': {
-      id: '/master/sales/country'
-      path: '/master/sales/country'
-      fullPath: '/master/sales/country'
-      preLoaderRoute: typeof MasterSalesCountryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/content': {
-      id: '/master/sales/content'
-      path: '/master/sales/content'
-      fullPath: '/master/sales/content'
-      preLoaderRoute: typeof MasterSalesContentRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/charges-master': {
-      id: '/master/sales/charges-master'
-      path: '/master/sales/charges-master'
-      fullPath: '/master/sales/charges-master'
-      preLoaderRoute: typeof MasterSalesChargesMasterRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/sales/bank-master': {
-      id: '/master/sales/bank-master'
-      path: '/master/sales/bank-master'
-      fullPath: '/master/sales/bank-master'
-      preLoaderRoute: typeof MasterSalesBankMasterRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/operation/service-mapping': {
-      id: '/master/operation/service-mapping'
-      path: '/master/operation/service-mapping'
-      fullPath: '/master/operation/service-mapping'
-      preLoaderRoute: typeof MasterOperationServiceMappingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/operation/pin-code': {
-      id: '/master/operation/pin-code'
-      path: '/master/operation/pin-code'
-      fullPath: '/master/operation/pin-code'
-      preLoaderRoute: typeof MasterOperationPinCodeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/operation/field-executive': {
-      id: '/master/operation/field-executive'
-      path: '/master/operation/field-executive'
-      fullPath: '/master/operation/field-executive'
-      preLoaderRoute: typeof MasterOperationFieldExecutiveRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/operation/exception': {
-      id: '/master/operation/exception'
-      path: '/master/operation/exception'
-      fullPath: '/master/operation/exception'
-      preLoaderRoute: typeof MasterOperationExceptionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/operation/country-pincodes': {
-      id: '/master/operation/country-pincodes'
-      path: '/master/operation/country-pincodes'
-      fullPath: '/master/operation/country-pincodes'
-      preLoaderRoute: typeof MasterOperationCountryPincodesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/operation/area': {
-      id: '/master/operation/area'
-      path: '/master/operation/area'
-      fullPath: '/master/operation/area'
-      preLoaderRoute: typeof MasterOperationAreaRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/operation/airline': {
-      id: '/master/operation/airline'
-      path: '/master/operation/airline'
-      fullPath: '/master/operation/airline'
-      preLoaderRoute: typeof MasterOperationAirlineRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/customer/shipper': {
-      id: '/master/customer/shipper'
-      path: '/master/customer/shipper'
-      fullPath: '/master/customer/shipper'
-      preLoaderRoute: typeof MasterCustomerShipperRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/customer/expense': {
-      id: '/master/customer/expense'
-      path: '/master/customer/expense'
-      fullPath: '/master/customer/expense'
-      preLoaderRoute: typeof MasterCustomerExpenseRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/customer/customer-rate': {
-      id: '/master/customer/customer-rate'
-      path: '/master/customer/customer-rate'
-      fullPath: '/master/customer/customer-rate'
-      preLoaderRoute: typeof MasterCustomerCustomerRateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/customer/customer': {
-      id: '/master/customer/customer'
-      path: '/master/customer/customer'
-      fullPath: '/master/customer/customer'
-      preLoaderRoute: typeof MasterCustomerCustomerRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master/customer/consignee': {
-      id: '/master/customer/consignee'
-      path: '/master/customer/consignee'
-      fullPath: '/master/customer/consignee'
-      preLoaderRoute: typeof MasterCustomerConsigneeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/shipments/rate': {
-      id: '/api/shipments/rate'
-      path: '/api/shipments/rate'
-      fullPath: '/api/shipments/rate'
-      preLoaderRoute: typeof ApiShipmentsRateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/awb-entry/status': {
-      id: '/api/awb-entry/status'
-      path: '/api/awb-entry/status'
-      fullPath: '/api/awb-entry/status'
-      preLoaderRoute: typeof ApiAwbEntryStatusRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/reset-password': {
-      id: '/api/auth/reset-password'
-      path: '/api/auth/reset-password'
-      fullPath: '/api/auth/reset-password'
-      preLoaderRoute: typeof ApiAuthResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/otp-verify': {
-      id: '/api/auth/otp-verify'
-      path: '/api/auth/otp-verify'
-      fullPath: '/api/auth/otp-verify'
-      preLoaderRoute: typeof ApiAuthOtpVerifyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/otp-request': {
-      id: '/api/auth/otp-request'
-      path: '/api/auth/otp-request'
-      fullPath: '/api/auth/otp-request'
-      preLoaderRoute: typeof ApiAuthOtpRequestRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/login': {
-      id: '/api/auth/login'
-      path: '/api/auth/login'
-      fullPath: '/api/auth/login'
-      preLoaderRoute: typeof ApiAuthLoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/forgot-password': {
-      id: '/api/auth/forgot-password'
-      path: '/api/auth/forgot-password'
-      fullPath: '/api/auth/forgot-password'
-      preLoaderRoute: typeof ApiAuthForgotPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/force-logout': {
-      id: '/api/auth/force-logout'
-      path: '/api/auth/force-logout'
-      fullPath: '/api/auth/force-logout'
-      preLoaderRoute: typeof ApiAuthForceLogoutRouteImport
+    '/utility/serviceable-pincode': {
+      id: '/utility/serviceable-pincode'
+      path: '/utility/serviceable-pincode'
+      fullPath: '/utility/serviceable-pincode'
+      preLoaderRoute: typeof UtilityServiceablePincodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/activate': {
@@ -2325,11 +1835,494 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthActivateRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/shipping/world-first/book': {
-      id: '/api/shipping/world-first/book'
-      path: '/api/shipping/world-first/book'
-      fullPath: '/api/shipping/world-first/book'
-      preLoaderRoute: typeof ApiShippingWorldFirstBookRouteImport
+    '/api/auth/force-logout': {
+      id: '/api/auth/force-logout'
+      path: '/api/auth/force-logout'
+      fullPath: '/api/auth/force-logout'
+      preLoaderRoute: typeof ApiAuthForceLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/forgot-password': {
+      id: '/api/auth/forgot-password'
+      path: '/api/auth/forgot-password'
+      fullPath: '/api/auth/forgot-password'
+      preLoaderRoute: typeof ApiAuthForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/login': {
+      id: '/api/auth/login'
+      path: '/api/auth/login'
+      fullPath: '/api/auth/login'
+      preLoaderRoute: typeof ApiAuthLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/otp-request': {
+      id: '/api/auth/otp-request'
+      path: '/api/auth/otp-request'
+      fullPath: '/api/auth/otp-request'
+      preLoaderRoute: typeof ApiAuthOtpRequestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/otp-verify': {
+      id: '/api/auth/otp-verify'
+      path: '/api/auth/otp-verify'
+      fullPath: '/api/auth/otp-verify'
+      preLoaderRoute: typeof ApiAuthOtpVerifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/reset-password': {
+      id: '/api/auth/reset-password'
+      path: '/api/auth/reset-password'
+      fullPath: '/api/auth/reset-password'
+      preLoaderRoute: typeof ApiAuthResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/awb-entry/status': {
+      id: '/api/awb-entry/status'
+      path: '/api/awb-entry/status'
+      fullPath: '/api/awb-entry/status'
+      preLoaderRoute: typeof ApiAwbEntryStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/shipments/rate': {
+      id: '/api/shipments/rate'
+      path: '/api/shipments/rate'
+      fullPath: '/api/shipments/rate'
+      preLoaderRoute: typeof ApiShipmentsRateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/customer/consignee': {
+      id: '/master/customer/consignee'
+      path: '/master/customer/consignee'
+      fullPath: '/master/customer/consignee'
+      preLoaderRoute: typeof MasterCustomerConsigneeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/customer/customer': {
+      id: '/master/customer/customer'
+      path: '/master/customer/customer'
+      fullPath: '/master/customer/customer'
+      preLoaderRoute: typeof MasterCustomerCustomerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/customer/customer-rate': {
+      id: '/master/customer/customer-rate'
+      path: '/master/customer/customer-rate'
+      fullPath: '/master/customer/customer-rate'
+      preLoaderRoute: typeof MasterCustomerCustomerRateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/customer/expense': {
+      id: '/master/customer/expense'
+      path: '/master/customer/expense'
+      fullPath: '/master/customer/expense'
+      preLoaderRoute: typeof MasterCustomerExpenseRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/customer/shipper': {
+      id: '/master/customer/shipper'
+      path: '/master/customer/shipper'
+      fullPath: '/master/customer/shipper'
+      preLoaderRoute: typeof MasterCustomerShipperRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/airline': {
+      id: '/master/operation/airline'
+      path: '/master/operation/airline'
+      fullPath: '/master/operation/airline'
+      preLoaderRoute: typeof MasterOperationAirlineRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/area': {
+      id: '/master/operation/area'
+      path: '/master/operation/area'
+      fullPath: '/master/operation/area'
+      preLoaderRoute: typeof MasterOperationAreaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/country-pincodes': {
+      id: '/master/operation/country-pincodes'
+      path: '/master/operation/country-pincodes'
+      fullPath: '/master/operation/country-pincodes'
+      preLoaderRoute: typeof MasterOperationCountryPincodesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/exception': {
+      id: '/master/operation/exception'
+      path: '/master/operation/exception'
+      fullPath: '/master/operation/exception'
+      preLoaderRoute: typeof MasterOperationExceptionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/field-executive': {
+      id: '/master/operation/field-executive'
+      path: '/master/operation/field-executive'
+      fullPath: '/master/operation/field-executive'
+      preLoaderRoute: typeof MasterOperationFieldExecutiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/pin-code': {
+      id: '/master/operation/pin-code'
+      path: '/master/operation/pin-code'
+      fullPath: '/master/operation/pin-code'
+      preLoaderRoute: typeof MasterOperationPinCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/operation/service-mapping': {
+      id: '/master/operation/service-mapping'
+      path: '/master/operation/service-mapping'
+      fullPath: '/master/operation/service-mapping'
+      preLoaderRoute: typeof MasterOperationServiceMappingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/bank-master': {
+      id: '/master/sales/bank-master'
+      path: '/master/sales/bank-master'
+      fullPath: '/master/sales/bank-master'
+      preLoaderRoute: typeof MasterSalesBankMasterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/charges-master': {
+      id: '/master/sales/charges-master'
+      path: '/master/sales/charges-master'
+      fullPath: '/master/sales/charges-master'
+      preLoaderRoute: typeof MasterSalesChargesMasterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/content': {
+      id: '/master/sales/content'
+      path: '/master/sales/content'
+      fullPath: '/master/sales/content'
+      preLoaderRoute: typeof MasterSalesContentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/country': {
+      id: '/master/sales/country'
+      path: '/master/sales/country'
+      fullPath: '/master/sales/country'
+      preLoaderRoute: typeof MasterSalesCountryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/destination': {
+      id: '/master/sales/destination'
+      path: '/master/sales/destination'
+      fullPath: '/master/sales/destination'
+      preLoaderRoute: typeof MasterSalesDestinationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/flight': {
+      id: '/master/sales/flight'
+      path: '/master/sales/flight'
+      fullPath: '/master/sales/flight'
+      preLoaderRoute: typeof MasterSalesFlightRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/industry': {
+      id: '/master/sales/industry'
+      path: '/master/sales/industry'
+      fullPath: '/master/sales/industry'
+      preLoaderRoute: typeof MasterSalesIndustryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/instruction': {
+      id: '/master/sales/instruction'
+      path: '/master/sales/instruction'
+      fullPath: '/master/sales/instruction'
+      preLoaderRoute: typeof MasterSalesInstructionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/local-branch': {
+      id: '/master/sales/local-branch'
+      path: '/master/sales/local-branch'
+      fullPath: '/master/sales/local-branch'
+      preLoaderRoute: typeof MasterSalesLocalBranchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/product': {
+      id: '/master/sales/product'
+      path: '/master/sales/product'
+      fullPath: '/master/sales/product'
+      preLoaderRoute: typeof MasterSalesProductRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/product-type': {
+      id: '/master/sales/product-type'
+      path: '/master/sales/product-type'
+      fullPath: '/master/sales/product-type'
+      preLoaderRoute: typeof MasterSalesProductTypeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/sales-executive': {
+      id: '/master/sales/sales-executive'
+      path: '/master/sales/sales-executive'
+      fullPath: '/master/sales/sales-executive'
+      preLoaderRoute: typeof MasterSalesSalesExecutiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/service-center': {
+      id: '/master/sales/service-center'
+      path: '/master/sales/service-center'
+      fullPath: '/master/sales/service-center'
+      preLoaderRoute: typeof MasterSalesServiceCenterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/state': {
+      id: '/master/sales/state'
+      path: '/master/sales/state'
+      fullPath: '/master/sales/state'
+      preLoaderRoute: typeof MasterSalesStateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/sales/zone': {
+      id: '/master/sales/zone'
+      path: '/master/sales/zone'
+      fullPath: '/master/sales/zone'
+      preLoaderRoute: typeof MasterSalesZoneRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/vendor/vendor': {
+      id: '/master/vendor/vendor'
+      path: '/master/vendor/vendor'
+      fullPath: '/master/vendor/vendor'
+      preLoaderRoute: typeof MasterVendorVendorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master/vendor/vendor-contract': {
+      id: '/master/vendor/vendor-contract'
+      path: '/master/vendor/vendor-contract'
+      fullPath: '/master/vendor/vendor-contract'
+      preLoaderRoute: typeof MasterVendorVendorContractRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports/run/': {
+      id: '/reports/run/'
+      path: '/reports/run'
+      fullPath: '/reports/run/'
+      preLoaderRoute: typeof ReportsRunIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports/run/$reportKey': {
+      id: '/reports/run/$reportKey'
+      path: '/reports/run/$reportKey'
+      fullPath: '/reports/run/$reportKey'
+      preLoaderRoute: typeof ReportsRunReportKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/bulk-import/pod-to-excel': {
+      id: '/transaction/bulk-import/pod-to-excel'
+      path: '/transaction/bulk-import/pod-to-excel'
+      fullPath: '/transaction/bulk-import/pod-to-excel'
+      preLoaderRoute: typeof TransactionBulkImportPodToExcelRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/out-scan/obc-entry': {
+      id: '/transaction/out-scan/obc-entry'
+      path: '/transaction/out-scan/obc-entry'
+      fullPath: '/transaction/out-scan/obc-entry'
+      preLoaderRoute: typeof TransactionOutScanObcEntryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/rate-compare/customer-rate-compare': {
+      id: '/transaction/rate-compare/customer-rate-compare'
+      path: '/transaction/rate-compare/customer-rate-compare'
+      fullPath: '/transaction/rate-compare/customer-rate-compare'
+      preLoaderRoute: typeof TransactionRateCompareCustomerRateCompareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/rate-compare/vendor-rate-compare': {
+      id: '/transaction/rate-compare/vendor-rate-compare'
+      path: '/transaction/rate-compare/vendor-rate-compare'
+      fullPath: '/transaction/rate-compare/vendor-rate-compare'
+      preLoaderRoute: typeof TransactionRateCompareVendorRateCompareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/receipt/credit-note': {
+      id: '/transaction/receipt/credit-note'
+      path: '/transaction/receipt/credit-note'
+      fullPath: '/transaction/receipt/credit-note'
+      preLoaderRoute: typeof TransactionReceiptCreditNoteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/receipt/customer-payment': {
+      id: '/transaction/receipt/customer-payment'
+      path: '/transaction/receipt/customer-payment'
+      fullPath: '/transaction/receipt/customer-payment'
+      preLoaderRoute: typeof TransactionReceiptCustomerPaymentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/receipt/debit-note': {
+      id: '/transaction/receipt/debit-note'
+      path: '/transaction/receipt/debit-note'
+      fullPath: '/transaction/receipt/debit-note'
+      preLoaderRoute: typeof TransactionReceiptDebitNoteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/receipt/expense-authorize': {
+      id: '/transaction/receipt/expense-authorize'
+      path: '/transaction/receipt/expense-authorize'
+      fullPath: '/transaction/receipt/expense-authorize'
+      preLoaderRoute: typeof TransactionReceiptExpenseAuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/receipt/expense-entry': {
+      id: '/transaction/receipt/expense-entry'
+      path: '/transaction/receipt/expense-entry'
+      fullPath: '/transaction/receipt/expense-entry'
+      preLoaderRoute: typeof TransactionReceiptExpenseEntryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/receipt/receipt-entry': {
+      id: '/transaction/receipt/receipt-entry'
+      path: '/transaction/receipt/receipt-entry'
+      fullPath: '/transaction/receipt/receipt-entry'
+      preLoaderRoute: typeof TransactionReceiptReceiptEntryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/tracking/awb-query': {
+      id: '/transaction/tracking/awb-query'
+      path: '/transaction/tracking/awb-query'
+      fullPath: '/transaction/tracking/awb-query'
+      preLoaderRoute: typeof TransactionTrackingAwbQueryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/tracking/forwarding-updation': {
+      id: '/transaction/tracking/forwarding-updation'
+      path: '/transaction/tracking/forwarding-updation'
+      fullPath: '/transaction/tracking/forwarding-updation'
+      preLoaderRoute: typeof TransactionTrackingForwardingUpdationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/tracking/kyc-tracking': {
+      id: '/transaction/tracking/kyc-tracking'
+      path: '/transaction/tracking/kyc-tracking'
+      fullPath: '/transaction/tracking/kyc-tracking'
+      preLoaderRoute: typeof TransactionTrackingKycTrackingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/tracking/progress-comment': {
+      id: '/transaction/tracking/progress-comment'
+      path: '/transaction/tracking/progress-comment'
+      fullPath: '/transaction/tracking/progress-comment'
+      preLoaderRoute: typeof TransactionTrackingProgressCommentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transaction/tracking/update-entry': {
+      id: '/transaction/tracking/update-entry'
+      path: '/transaction/tracking/update-entry'
+      fullPath: '/transaction/tracking/update-entry'
+      preLoaderRoute: typeof TransactionTrackingUpdateEntryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/excel-import/awb-merging': {
+      id: '/utility/excel-import/awb-merging'
+      path: '/utility/excel-import/awb-merging'
+      fullPath: '/utility/excel-import/awb-merging'
+      preLoaderRoute: typeof UtilityExcelImportAwbMergingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/excel-import/data-import': {
+      id: '/utility/excel-import/data-import'
+      path: '/utility/excel-import/data-import'
+      fullPath: '/utility/excel-import/data-import'
+      preLoaderRoute: typeof UtilityExcelImportDataImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/excel-import/data-updation': {
+      id: '/utility/excel-import/data-updation'
+      path: '/utility/excel-import/data-updation'
+      fullPath: '/utility/excel-import/data-updation'
+      preLoaderRoute: typeof UtilityExcelImportDataUpdationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/excel-import/forwarding-merging': {
+      id: '/utility/excel-import/forwarding-merging'
+      path: '/utility/excel-import/forwarding-merging'
+      fullPath: '/utility/excel-import/forwarding-merging'
+      preLoaderRoute: typeof UtilityExcelImportForwardingMergingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/excel-import/pod-merging': {
+      id: '/utility/excel-import/pod-merging'
+      path: '/utility/excel-import/pod-merging'
+      fullPath: '/utility/excel-import/pod-merging'
+      preLoaderRoute: typeof UtilityExcelImportPodMergingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/rate-zone-update/rate-import': {
+      id: '/utility/rate-zone-update/rate-import'
+      path: '/utility/rate-zone-update/rate-import'
+      fullPath: '/utility/rate-zone-update/rate-import'
+      preLoaderRoute: typeof UtilityRateZoneUpdateRateImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/rate-zone-update/rate-update': {
+      id: '/utility/rate-zone-update/rate-update'
+      path: '/utility/rate-zone-update/rate-update'
+      fullPath: '/utility/rate-zone-update/rate-update'
+      preLoaderRoute: typeof UtilityRateZoneUpdateRateUpdateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/rate-zone-update/rate-update-jobs': {
+      id: '/utility/rate-zone-update/rate-update-jobs'
+      path: '/utility/rate-zone-update/rate-update-jobs'
+      fullPath: '/utility/rate-zone-update/rate-update-jobs'
+      preLoaderRoute: typeof UtilityRateZoneUpdateRateUpdateJobsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/rate-zone-update/zone-update': {
+      id: '/utility/rate-zone-update/zone-update'
+      path: '/utility/rate-zone-update/zone-update'
+      fullPath: '/utility/rate-zone-update/zone-update'
+      preLoaderRoute: typeof UtilityRateZoneUpdateZoneUpdateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/rate-zone-update/zone-update-jobs': {
+      id: '/utility/rate-zone-update/zone-update-jobs'
+      path: '/utility/rate-zone-update/zone-update-jobs'
+      fullPath: '/utility/rate-zone-update/zone-update-jobs'
+      preLoaderRoute: typeof UtilityRateZoneUpdateZoneUpdateJobsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/tax-charges-setup/fuel-setup': {
+      id: '/utility/tax-charges-setup/fuel-setup'
+      path: '/utility/tax-charges-setup/fuel-setup'
+      fullPath: '/utility/tax-charges-setup/fuel-setup'
+      preLoaderRoute: typeof UtilityTaxChargesSetupFuelSetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/tax-charges-setup/setup': {
+      id: '/utility/tax-charges-setup/setup'
+      path: '/utility/tax-charges-setup/setup'
+      fullPath: '/utility/tax-charges-setup/setup'
+      preLoaderRoute: typeof UtilityTaxChargesSetupSetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/tax-charges-setup/tax-setup': {
+      id: '/utility/tax-charges-setup/tax-setup'
+      path: '/utility/tax-charges-setup/tax-setup'
+      fullPath: '/utility/tax-charges-setup/tax-setup'
+      preLoaderRoute: typeof UtilityTaxChargesSetupTaxSetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/users/access-rights': {
+      id: '/utility/users/access-rights'
+      path: '/utility/users/access-rights'
+      fullPath: '/utility/users/access-rights'
+      preLoaderRoute: typeof UtilityUsersAccessRightsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/users/loggedin-users': {
+      id: '/utility/users/loggedin-users'
+      path: '/utility/users/loggedin-users'
+      fullPath: '/utility/users/loggedin-users'
+      preLoaderRoute: typeof UtilityUsersLoggedinUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/utility/users/user-setup': {
+      id: '/utility/users/user-setup'
+      path: '/utility/users/user-setup'
+      fullPath: '/utility/users/user-setup'
+      preLoaderRoute: typeof UtilityUsersUserSetupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/shipping/ups/book': {
@@ -2337,6 +2330,13 @@ declare module '@tanstack/react-router' {
       path: '/api/shipping/ups/book'
       fullPath: '/api/shipping/ups/book'
       preLoaderRoute: typeof ApiShippingUpsBookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/shipping/world-first/book': {
+      id: '/api/shipping/world-first/book'
+      path: '/api/shipping/world-first/book'
+      fullPath: '/api/shipping/world-first/book'
+      preLoaderRoute: typeof ApiShippingWorldFirstBookRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
