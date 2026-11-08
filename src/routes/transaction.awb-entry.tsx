@@ -104,8 +104,9 @@ import {
 } from "@/lib/transactions/awbEntryRules";
 import { downloadAwbMtsTemplate, mtsPiecesFromRows } from "@/lib/transactions/awbMtsImport";
 import {
-  proformaImportErrorText,
+  proformaErrorReportCsv,
   recalculateProformaAmounts,
+  validateProformaEntry,
   type ProformaImportError,
 } from "@/lib/transactions/proformaImport";
 import { parseTabularFile } from "@/lib/io/tableIo";
@@ -286,6 +287,7 @@ type ProformaLine = {
   amount: string;
   igstPercent: string;
   igstAmount: string;
+  source?: "Manual" | "Import";
 };
 
 type ProformaData = {
@@ -1688,7 +1690,11 @@ function AwbEntryPage() {
   const proformaFileRef = useRef<HTMLInputElement | null>(null);
   const [proformaImportErrors, setProformaImportErrors] = useState<ProformaImportError[]>([]);
   const [proformaImportPending, setProformaImportPending] = useState<ProformaLine[] | null>(null);
-  const [proformaImportWarnings, setProformaImportWarnings] = useState<string[]>([]);
+  const [proformaPreview, setProformaPreview] = useState<{
+    lines: ProformaLine[];
+    warnings: string[];
+  } | null>(null);
+  const [proformaUploading, setProformaUploading] = useState(false);
   const awbFormNavRef = useRef<HTMLDivElement>(null);
   const [navInvalidOrders, setNavInvalidOrders] = useState<Set<number>>(() => new Set());
   const [vendorChargePrereqErrors, setVendorChargePrereqErrors] = useState<string[] | null>(null);
@@ -4591,36 +4597,28 @@ function AwbEntryPage() {
   };
 
   const addProformaLine = (): boolean => {
-    if (!hsnIsValid(proformaDraft.hsnCode)) {
-      toast.error("HSN must be exactly 8 digits");
-      return false;
-    }
-    if (!proformaDraft.description.trim()) {
-      toast.error("Description is required");
-      return false;
-    }
-    if (!proformaDraft.rate.trim()) {
-      toast.error("Rate is required");
-      return false;
-    }
-    const amount = updateProformaDraftAmount(proformaDraft);
-    const igstPct = Number.parseFloat(proformaDraft.igstPercent) || 0;
-    const igstAmount = ((Number.parseFloat(amount) || 0) * igstPct) / 100;
-    const line: ProformaLine = {
-      id: crypto.randomUUID(),
+    const checked = validateProformaEntry({
       boxNo: proformaDraft.boxNo,
       packages: proformaDraft.packages,
-      description: proformaDraft.description.trim(),
-      hsCode: proformaDraft.hsnCode,
+      description: proformaDraft.description,
+      hsnCode: proformaDraft.hsnCode,
       quantity: proformaDraft.quantity,
       weight: proformaDraft.weight,
       unit: proformaDraft.unit,
       rate: proformaDraft.rate,
-      amount,
       igstPercent: proformaDraft.igstPercent,
-      igstAmount: igstAmount.toFixed(2),
-    };
-    setForm((f) => ({ ...f, proforma: { ...f.proforma, lines: [...f.proforma.lines, line] } }));
+      units: proformaUnits,
+    });
+    if (!checked.line) {
+      toast.error(checked.errors[0]?.message ?? "Proforma line is not valid");
+      return false;
+    }
+    const line: ProformaLine = { ...checked.line, id: crypto.randomUUID(), source: "Manual" };
+    setForm((f) => {
+      const lines = [...f.proforma.lines, line];
+      warnProformaInvoice(lines, f.shipmentValue, f.shipmentCurrency, f.proforma.currency);
+      return { ...f, proforma: { ...f.proforma, lines } };
+    });
     setProformaDraft(emptyProformaDraft());
     toast.success("Proforma line added");
     return true;
@@ -4641,7 +4639,13 @@ function AwbEntryPage() {
     }));
   };
 
-  const warnProformaInvoice = (lines: ProformaLine[], shipmentValue: string) => {
+  const warnProformaInvoice = (
+    lines: ProformaLine[],
+    shipmentValue: string,
+    shipmentCurrency: string,
+    proformaCurrency: string,
+  ) => {
+    if (shipmentCurrency.trim().toUpperCase() !== proformaCurrency.trim().toUpperCase()) return;
     const invoice = Number.parseFloat(shipmentValue);
     if (!Number.isFinite(invoice) || invoice <= 0) return;
     const amount = lines.reduce((sum, line) => sum + (Number.parseFloat(line.amount) || 0), 0);
@@ -4650,6 +4654,23 @@ function AwbEntryPage() {
         `Proforma amount ${amount.toFixed(2)} does not match Shipment Value ${invoice.toFixed(2)}`,
       );
     }
+  };
+
+  const placeImportedProforma = (incoming: ProformaLine[]) => {
+    if (form.proforma.lines.length > 0) {
+      setProformaImportPending(incoming);
+      return;
+    }
+    setForm((current) => {
+      warnProformaInvoice(
+        incoming,
+        current.shipmentValue,
+        current.shipmentCurrency,
+        current.proforma.currency,
+      );
+      return { ...current, proforma: { ...current.proforma, lines: incoming } };
+    });
+    toast.success(`${incoming.length} proforma line${incoming.length === 1 ? "" : "s"} imported`);
   };
 
   const applyImportedProforma = (mode: "append" | "replace", incoming: ProformaLine[]) => {
@@ -4661,23 +4682,30 @@ function AwbEntryPage() {
         lines: mode === "replace" ? incoming : [...current.proforma.lines, ...incoming],
       },
     }));
-    warnProformaInvoice(lines, form.shipmentValue);
-    if (proformaImportWarnings.length > 0) {
-      toast.warning(proformaImportWarnings.join("\n"));
-    }
+    warnProformaInvoice(lines, form.shipmentValue, form.shipmentCurrency, form.proforma.currency);
     toast.success(`${incoming.length} proforma line${incoming.length === 1 ? "" : "s"} imported`);
     setProformaImportPending(null);
-    setProformaImportWarnings([]);
   };
 
   const uploadProformaFile = async () => {
+    if (entryLocked) {
+      toast.error("This AWB is locked and cannot be changed");
+      return;
+    }
+    if (proformaUploading) return;
     const file = proformaFileRef.current?.files?.[0];
     if (!file) {
-      toast.error("Select an Excel file");
+      toast.error("Please select a file");
       return;
     }
     const name = file.name.toLowerCase();
-    if (!name.endsWith(".xls") && !name.endsWith(".xlsx")) {
+    const mime = file.type.toLowerCase();
+    const mimeOk =
+      mime === "" ||
+      mime === "application/octet-stream" ||
+      mime.includes("excel") ||
+      mime.includes("spreadsheet");
+    if ((!name.endsWith(".xls") && !name.endsWith(".xlsx")) || !mimeOk) {
       toast.error("Only .xls and .xlsx files can be imported");
       return;
     }
@@ -4685,6 +4713,7 @@ function AwbEntryPage() {
       toast.error("File must be 5 MB or smaller");
       return;
     }
+    setProformaUploading(true);
     try {
       const body = new FormData();
       body.set("file", file);
@@ -4694,6 +4723,7 @@ function AwbEntryPage() {
       const { authorizedFetch } = await import("@/lib/security/authorized-fetch");
       const res = await authorizedFetch("/api/awb-entry/proforma-import", { method: "POST", body });
       const data = (await res.json()) as {
+        rows?: ProformaLine[];
         lines?: ProformaLine[];
         warnings?: string[];
         errors?: ProformaImportError[];
@@ -4706,26 +4736,21 @@ function AwbEntryPage() {
         );
         return;
       }
-      const lines = data.lines ?? [];
+      const lines = (data.rows ?? data.lines ?? []).map((line) => ({ ...line, source: "Import" as const }));
       if (lines.length === 0) {
         toast.error("The file has no proforma rows");
         return;
       }
-      setProformaImportWarnings(data.warnings ?? []);
-      if (form.proforma.lines.length > 0) {
-        setProformaImportPending(lines);
+      if (proformaFileRef.current) proformaFileRef.current.value = "";
+      if (data.warnings?.length) {
+        setProformaPreview({ lines, warnings: data.warnings });
         return;
       }
-      setForm((current) => {
-        warnProformaInvoice(lines, current.shipmentValue);
-        return { ...current, proforma: { ...current.proforma, lines } };
-      });
-      if (data.warnings?.length) toast.warning(data.warnings.join("\n"));
-      toast.success(`${lines.length} proforma line${lines.length === 1 ? "" : "s"} imported`);
+      placeImportedProforma(lines);
     } catch (error) {
       toast.error(toErrorMessage(error));
     } finally {
-      if (proformaFileRef.current) proformaFileRef.current.value = "";
+      setProformaUploading(false);
     }
   };
 
@@ -6254,8 +6279,8 @@ function AwbEntryPage() {
                               {...erpNavSkip()}
                               onClick={() => {
                                 const link = document.createElement("a");
-                                link.href = "/ExcelFormat/AWBPerforma.xlsx?v=1.4";
-                                link.download = "AWBPerforma.xlsx";
+                                link.href = "/ExcelFormat/AWBPerforma.xls?v=1.3";
+                                link.download = "AWBPerforma.xls";
                                 link.click();
                               }}
                             >
@@ -6276,9 +6301,14 @@ function AwbEntryPage() {
                                 size="sm"
                                 className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
                                 {...erpNavSkip()}
+                                disabled={proformaUploading || entryLocked}
                                 onClick={() => void uploadProformaFile()}
                               >
-                                <Upload className="h-3.5 w-3.5" />
+                                {proformaUploading ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Upload className="h-3.5 w-3.5" />
+                                )}
                                 Upload
                               </Button>
                             </div>
@@ -7526,15 +7556,85 @@ function AwbEntryPage() {
           if (!open) setProformaImportErrors([]);
         }}
       >
-        <AlertDialogContent className="max-w-lg">
+        <AlertDialogContent className="max-w-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle>Proforma import</AlertDialogTitle>
-            <AlertDialogDescription className="whitespace-pre-wrap text-left text-destructive">
-              {proformaImportErrors.map(proformaImportErrorText).join("\n")}
+            <AlertDialogDescription>Fix these rows and upload the file again.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="max-h-72 overflow-auto rounded border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="px-2 py-1">Row #</th>
+                  <th className="px-2 py-1">Column</th>
+                  <th className="px-2 py-1">Value</th>
+                  <th className="px-2 py-1">Message</th>
+                </tr>
+              </thead>
+              <tbody>
+                {proformaImportErrors.map((error, index) => (
+                  <tr key={`${error.row}-${error.column}-${index}`} className="border-b">
+                    <td className="px-2 py-1">{error.row}</td>
+                    <td className="px-2 py-1">{error.column}</td>
+                    <td className="px-2 py-1">{error.value}</td>
+                    <td className="px-2 py-1">{error.message}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                const blob = new Blob([proformaErrorReportCsv(proformaImportErrors)], {
+                  type: "text/csv;charset=utf-8",
+                });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = "proforma-import-errors.csv";
+                link.click();
+                URL.revokeObjectURL(link.href);
+              }}
+            >
+              Download error report
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => setProformaImportErrors([])}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={proformaPreview != null}
+        onOpenChange={(open) => {
+          if (!open) setProformaPreview(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm proforma import</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-wrap text-left">
+              {proformaPreview?.warnings.join("\n")}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <p className="text-sm">
+            {proformaPreview?.lines.length ?? 0} rows are ready. Amount{" "}
+            {(proformaPreview?.lines ?? [])
+              .reduce((sum, line) => sum + (Number.parseFloat(line.amount) || 0), 0)
+              .toFixed(2)}
+            .
+          </p>
           <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setProformaImportErrors([])}>OK</AlertDialogAction>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!proformaPreview) return;
+                const lines = proformaPreview.lines;
+                setProformaPreview(null);
+                placeImportedProforma(lines);
+              }}
+            >
+              Confirm
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

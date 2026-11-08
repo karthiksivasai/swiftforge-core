@@ -10,7 +10,8 @@
  * is what to show for it (the screens keep the label alongside the id so the
  * trigger stays populated on edit without an extra fetch).
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronsUpDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,13 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { useLookup, LOOKUP_MAX_LIMIT, type LookupItem, type LookupKey } from "@/lib/masters/core/lookup";
+import {
+  lookupQueryOptions,
+  useLookup,
+  LOOKUP_DEFAULT_LIMIT,
+  type LookupItem,
+  type LookupKey,
+} from "@/lib/masters/core/lookup";
 import {
   lookupHitSearchFields,
   rankLookupResults,
@@ -50,11 +57,23 @@ export function LookupCombobox({
   disabled?: boolean;
   className?: string;
 }) {
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const { data, isFetching } = useLookup(lookupKey, query, {
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 120);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    void queryClient.prefetchQuery(lookupQueryOptions(lookupKey, "", LOOKUP_DEFAULT_LIMIT));
+  }, [lookupKey, queryClient]);
+
+  const { data, isFetching } = useLookup(lookupKey, debouncedQuery, {
     enabled: open,
-    limit: LOOKUP_MAX_LIMIT,
+    limit: LOOKUP_DEFAULT_LIMIT,
   });
   const items = useMemo(
     () =>

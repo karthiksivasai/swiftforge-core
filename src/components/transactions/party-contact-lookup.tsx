@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Loader2, Search } from "lucide-react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -253,6 +253,8 @@ export function PartyContactLookup({
   void _emptySearchMessage;
   void _noResultsMessage;
   const { isAuthenticated: live } = useAuth();
+  const queryClient = useQueryClient();
+  const browseLimit = 30;
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const explicitSearchSeqRef = useRef(0);
@@ -293,12 +295,24 @@ export function PartyContactLookup({
     staleTime: 30_000,
   });
 
+  const popupQueryKey = ["party-contacts", role, "popup", debouncedPopup.trim() || null] as const;
+
+  useEffect(() => {
+    if (!live) return;
+    void queryClient.prefetchQuery({
+      queryKey: ["party-contacts", role, "popup", null],
+      queryFn: () => searchPartyContacts(role, null, browseLimit),
+      staleTime: 5 * 60_000,
+    });
+  }, [browseLimit, live, queryClient, role]);
+
   const { data: livePopup, isFetching: popupFetching } = useQuery({
-    queryKey: ["party-contacts", role, "popup", debouncedPopup.trim() || null],
-    queryFn: () => searchPartyContacts(role, debouncedPopup.trim() || null, 100),
+    queryKey: popupQueryKey,
+    queryFn: () => searchPartyContacts(role, debouncedPopup.trim() || null, browseLimit),
     enabled: Boolean(live && popupOpen && manualPopupHits === null),
     placeholderData: keepPreviousData,
-    staleTime: 30_000,
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 
   const inlineHits: PartyContactHit[] = useMemo(() => {

@@ -5,6 +5,7 @@
  *  - magnifying-glass popup (live RPC dialog or demo MasterLookupDialog)
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,8 +14,9 @@ import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
 import {
   lookup,
+  lookupQueryOptions,
   useLookup,
-  LOOKUP_MAX_LIMIT,
+  LOOKUP_DEFAULT_LIMIT,
   type LookupItem,
   type LookupKey as LiveLookupKey,
 } from "@/lib/masters/core/lookup";
@@ -104,7 +106,7 @@ async function fetchLookupHits(
   q: string,
 ): Promise<SearchHit[]> {
   if (live && liveKey) {
-    const rows = await lookup(liveKey, q, LOOKUP_MAX_LIMIT);
+    const rows = await lookup(liveKey, q, LOOKUP_DEFAULT_LIMIT);
     const hits = rows.map((r: LookupItem) => ({
       id: r.id,
       code: r.code,
@@ -185,6 +187,7 @@ export function SearchableLookupPair({
   void _noResultsMessage;
   const resultLimit = displayLimit ?? (manualSearch ? AWB_LOOKUP_RESULT_LIMIT : 50);
   const { isAuthenticated: live } = useAuth();
+  const queryClient = useQueryClient();
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const explicitSearchSeqRef = useRef(0);
@@ -211,17 +214,24 @@ export function SearchableLookupPair({
   const cacheKey = `${live && liveKey ? `live:${liveKey}` : `demo:${lookupKey}`}::${debouncedInline.trim().toLowerCase()}`;
   const cached = canInlineSearch ? cacheGet(cacheKey) : undefined;
 
+  const debouncedPopupQuery = useDebouncedValue(popupQuery, 120);
+
+  useEffect(() => {
+    if (!live || !liveKey) return;
+    void queryClient.prefetchQuery(lookupQueryOptions(liveKey, "", LOOKUP_DEFAULT_LIMIT));
+  }, [live, liveKey, queryClient]);
+
   const { data: liveInlineRows } = useLookup(liveKey ?? "branch", debouncedInline, {
     enabled: Boolean(live && liveKey && inlineOpen && canInlineSearch && !cached && !manualSearch),
-    limit: LOOKUP_MAX_LIMIT,
+    limit: LOOKUP_DEFAULT_LIMIT,
   });
 
   const { data: livePopupRows, isFetching: popupFetching } = useLookup(
     liveKey ?? "branch",
-    popupQuery,
+    debouncedPopupQuery,
     {
       enabled: Boolean(live && liveKey && popupOpen && manualPopupRows === null),
-      limit: LOOKUP_MAX_LIMIT,
+      limit: LOOKUP_DEFAULT_LIMIT,
     },
   );
 
@@ -629,8 +639,8 @@ export function SearchableLookupPair({
       name: r.name,
       hint: r.hint,
     }));
-    return rankSearchHits(hits, popupQuery);
-  }, [livePopupRows, manualPopupRows, popupQuery]);
+    return rankSearchHits(hits, debouncedPopupQuery);
+  }, [livePopupRows, manualPopupRows, debouncedPopupQuery]);
 
   return (
     <>

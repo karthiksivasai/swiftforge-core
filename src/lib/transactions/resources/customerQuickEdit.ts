@@ -208,7 +208,7 @@ export function validateCustomerQuickEdit(
 
 export async function searchCustomersForHelp(term: string): Promise<Array<{ id: string; code: string; name: string }>> {
   const q = term.trim();
-  const rows = await lookup("customer", q, 20);
+  const rows = await lookup("customer", q, 50);
   return rows.map((r) => ({ id: r.id, code: r.code, name: r.name }));
 }
 

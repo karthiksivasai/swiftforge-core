@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Loader2, Search } from "lucide-react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -84,6 +84,7 @@ export function VendorServiceLookup({
   void _emptySearchMessage;
   void _noResultsMessage;
   const { isAuthenticated: live } = useAuth();
+  const queryClient = useQueryClient();
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const explicitSearchSeqRef = useRef(0);
@@ -137,25 +138,53 @@ export function VendorServiceLookup({
     staleTime: 60_000,
   });
 
+  const popupQueryKey = [
+    "vendor-services",
+    "popup",
+    vendorArgs.vendorId,
+    vendorArgs.vendorCode,
+    debouncedPopup.trim(),
+    productId ?? null,
+    destinationId ?? null,
+  ] as const;
+
+  useEffect(() => {
+    if (!live || !hasVendor) return;
+    void queryClient.prefetchQuery({
+      queryKey: [
+        "vendor-services",
+        "popup",
+        vendorArgs.vendorId,
+        vendorArgs.vendorCode,
+        "",
+        productId ?? null,
+        destinationId ?? null,
+      ],
+      queryFn: () => listVendorServices({ ...vendorArgs, q: null, limit: 40 }),
+      staleTime: 5 * 60_000,
+    });
+  }, [
+    destinationId,
+    hasVendor,
+    live,
+    productId,
+    queryClient,
+    vendorArgs.vendorCode,
+    vendorArgs.vendorId,
+  ]);
+
   const { data: livePopup, isFetching: popupFetching } = useQuery({
-    queryKey: [
-      "vendor-services",
-      "popup",
-      vendorArgs.vendorId,
-      vendorArgs.vendorCode,
-      debouncedPopup.trim(),
-      productId ?? null,
-      destinationId ?? null,
-    ],
+    queryKey: popupQueryKey,
     queryFn: () =>
       listVendorServices({
         ...vendorArgs,
         q: debouncedPopup.trim() || null,
-        limit: 100,
+        limit: 40,
       }),
     enabled: Boolean(live && hasVendor && popupOpen && manualPopupHits === null),
     placeholderData: keepPreviousData,
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 
   const inlineHits: VendorServiceHit[] = useMemo(() => {

@@ -59,8 +59,17 @@ export type LookupItem = {
 
 export const LOOKUP_MAX_LIMIT = 200;
 export const LOOKUP_DEFAULT_LIMIT = 50;
+const LOOKUP_CACHE_MS = 5 * 60_000;
 
-/** Call the lookup RPC once. Returns [] for empty results. */
+type LookupCacheEntry = { at: number; rows: LookupItem[] };
+const lookupResultCache = new Map<string, LookupCacheEntry>();
+const lookupInflight = new Map<string, Promise<LookupItem[]>>();
+
+function lookupCacheId(key: LookupKey, q: string | null, limit: number): string {
+  return `${key}::${q ?? ""}::${limit}`;
+}
+
+/** Call the lookup RPC once. Repeat calls for the same list reuse the last result. */
 export async function lookup(
   key: LookupKey,
   q?: string,
@@ -68,20 +77,40 @@ export async function lookup(
 ): Promise<LookupItem[]> {
   const trimmed = q && q.trim() ? q.trim() : null;
   const cappedLimit = Math.min(Math.max(1, limit), LOOKUP_MAX_LIMIT);
+  const cacheId = lookupCacheId(key, trimmed, cappedLimit);
+  const cached = lookupResultCache.get(cacheId);
+  if (cached && Date.now() - cached.at < LOOKUP_CACHE_MS) return cached.rows;
+  const pending = lookupInflight.get(cacheId);
+  if (pending) return pending;
 
-  if (key === "international-destination") {
-    const { data, error } = await supabase.rpc("lookup_international_destinations", {
-      p_q: trimmed,
-      p_limit: cappedLimit,
-    });
-    if (error) throw new Error(error.message);
-    return (data ?? []) as LookupItem[];
-  }
+  const request = (async () => {
+    const rows =
+      key === "international-destination"
+        ? await lookupInternational(trimmed, cappedLimit)
+        : await lookupCatalog(key, trimmed, cappedLimit);
+    lookupResultCache.set(cacheId, { at: Date.now(), rows });
+    return rows;
+  })().finally(() => {
+    lookupInflight.delete(cacheId);
+  });
+  lookupInflight.set(cacheId, request);
+  return request;
+}
 
+async function lookupInternational(q: string | null, limit: number): Promise<LookupItem[]> {
+  const { data, error } = await supabase.rpc("lookup_international_destinations", {
+    p_q: q,
+    p_limit: limit,
+  });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as LookupItem[];
+}
+
+async function lookupCatalog(key: LookupKey, q: string | null, limit: number): Promise<LookupItem[]> {
   const { data, error } = await supabase.rpc("lookup", {
     p_key: key,
-    p_q: trimmed,
-    p_limit: cappedLimit,
+    p_q: q,
+    p_limit: limit,
   });
   if (error) throw new Error(error.message);
   return (data ?? []) as LookupItem[];
@@ -98,7 +127,9 @@ export function lookupQueryOptions(
     queryFn: () => lookup(key, q, limit),
     // Autocomplete UX: keep the old list visible while the next query resolves.
     placeholderData: keepPreviousData,
-    staleTime: 60_000,
+    staleTime: LOOKUP_CACHE_MS,
+    gcTime: LOOKUP_CACHE_MS * 2,
+    retry: false as const,
   };
 }
 
