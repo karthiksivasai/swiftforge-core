@@ -254,28 +254,6 @@ export function awbNoLookupCandidates(raw: string): string[] {
   return [safe];
 }
 
-export type ShipmentAwbBrief = {
-  id: string;
-  awb_no: string;
-  row_version: number;
-  current_status: string;
-};
-
-const AWB_BRIEF_COLUMNS = "id, awb_no, row_version, current_status";
-
-/** Highest live AWB number, shown as Last AWB No on the entry form. */
-export async function getLatestShipmentAwb(): Promise<ShipmentAwbBrief | null> {
-  const { data, error } = await supabase
-    .from("shipments")
-    .select(AWB_BRIEF_COLUMNS)
-    .is("deleted_at", null)
-    .order("awb_no", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw translateDbError(error);
-  return (data as ShipmentAwbBrief | null) ?? null;
-}
-
 /** Resolve a previous booking by AWB / forwarding / delivery / reference no. */
 export async function findShipmentBySearch(args: {
   query: string;

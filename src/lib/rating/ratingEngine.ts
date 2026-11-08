@@ -23,11 +23,22 @@ export interface CustomerRateRecord {
   product_code?: string | null;
   vendor_code?: string | null;
   origin_code?: string | null;
+  origin_name?: string | null;
   destination_code?: string | null;
+  destination_name?: string | null;
+  country_code?: string | null;
+  country_name?: string | null;
   zone_id?: string | null;
+  zone_code?: string | null;
   weight_slab_from?: number | null;
   weight_slab_to?: number | null;
+  /** Floor applied before PER_KG multiplication. */
+  min_weight?: number | null;
   rate_per_kg: number;
+  /** FLAT uses rate_per_kg as a fixed amount. MINIMUM uses it as a floor. */
+  rate_type?: "FLAT" | "PER_KG" | "PER_SLAB" | "MINIMUM" | null;
+  fuel_pct?: number | null;
+  other_charges?: number | null;
   status: "ACTIVE" | "INACTIVE";
   from_date: string; // ISO date string YYYY-MM-DD
   to_date?: string | null;
@@ -58,7 +69,10 @@ export interface RateQueryInput {
   serviceCode?: string;
   serviceName?: string;
   originCode?: string;
+  originName?: string;
   destinationCode?: string;
+  destinationName?: string;
+  destinationCountry?: string;
   zoneId?: string;
   bookDate: string;
   pieces: PieceItemInput[];
@@ -88,6 +102,7 @@ export interface RatingCalculationResult {
   sgst: number;
   igst: number;
   totalAmount: number;
+  zoneCode?: string | null;
   matchedRateId?: string;
   isExportZeroRated: boolean;
 }
@@ -187,6 +202,21 @@ export function validateServiceWeight(input: {
   return { valid: true, min: min_weight, max: max_weight, serviceName: service_name };
 }
 
+function norm(value?: string | null): string {
+  return (value ?? "").trim().toUpperCase();
+}
+
+function laneMatches(
+  rateValues: Array<string | null | undefined>,
+  queryValues: Array<string | null | undefined>,
+): boolean {
+  const rateTokens = rateValues.map(norm).filter(Boolean);
+  if (rateTokens.length === 0) return true;
+  const queryTokens = queryValues.map(norm).filter(Boolean);
+  if (queryTokens.length === 0) return true;
+  return rateTokens.some((token) => queryTokens.includes(token));
+}
+
 /**
  * Resolves customer rate from rate card using scored specificity matching:
  * Destination (16) > Zone (8) > Origin (4) > Product (2) > Vendor (1).
@@ -200,7 +230,10 @@ export function resolveCustomerRate(
     productCode?: string;
     vendorCode?: string;
     originCode?: string;
+    originName?: string;
     destinationCode?: string;
+    destinationName?: string;
+    destinationCountry?: string;
     zoneId?: string;
     bookDate: string;
     chargeableWeight: number;
@@ -211,7 +244,9 @@ export function resolveCustomerRate(
   const activeCandidates = rates.filter((r) => {
     if (r.status !== "ACTIVE") return false;
     if (r.customer_code.toUpperCase() !== query.customerCode.toUpperCase()) return false;
-    if (r.contract_no.toUpperCase() !== query.contractNo.toUpperCase()) return false;
+    const rateContract = (r.contract_no || "").trim().toUpperCase();
+    const queryContract = (query.contractNo || "").trim().toUpperCase();
+    if (rateContract && queryContract && rateContract !== queryContract) return false;
 
     // Date range check
     const fromObj = new Date(r.from_date);
@@ -233,24 +268,12 @@ export function resolveCustomerRate(
     ) {
       return false;
     }
+    if (!laneMatches([r.origin_code, r.origin_name], [query.originCode, query.originName])) return false;
     if (
-      r.vendor_code &&
-      query.vendorCode &&
-      r.vendor_code.toUpperCase() !== query.vendorCode.toUpperCase()
-    ) {
-      return false;
-    }
-    if (
-      r.origin_code &&
-      query.originCode &&
-      r.origin_code.toUpperCase() !== query.originCode.toUpperCase()
-    ) {
-      return false;
-    }
-    if (
-      r.destination_code &&
-      query.destinationCode &&
-      r.destination_code.toUpperCase() !== query.destinationCode.toUpperCase()
+      !laneMatches(
+        [r.destination_code, r.destination_name, r.country_code, r.country_name],
+        [query.destinationCode, query.destinationName, query.destinationCountry],
+      )
     ) {
       return false;
     }
@@ -270,7 +293,13 @@ export function resolveCustomerRate(
     if (r.zone_id) score += 8;
     if (r.origin_code) score += 4;
     if (r.product_code) score += 2;
-    if (r.vendor_code) score += 1;
+    if (
+      r.vendor_code &&
+      query.vendorCode &&
+      r.vendor_code.toUpperCase() === query.vendorCode.toUpperCase()
+    ) {
+      score += 1;
+    }
     return { record: r, score, fromTime: new Date(r.from_date).getTime() };
   });
 
@@ -340,23 +369,34 @@ export function computeShipmentRating(
     productCode: query.productCode,
     vendorCode: query.vendorCode,
     originCode: query.originCode,
+    originName: query.originName,
     destinationCode: query.destinationCode,
+    destinationName: query.destinationName,
+    destinationCountry: query.destinationCountry,
     zoneId: query.zoneId,
     bookDate: query.bookDate,
     chargeableWeight,
   });
 
   if (!matchedRate) {
-    const matchKey = `Customer: ${query.customerCode}, Contract: ${query.contractNo}, Product: ${query.productCode || "*"}, Origin: ${query.originCode || "*"}, Destination: ${query.destinationCode || "*"}`;
-    throw new Error(`NO_RATE_FOUND: Could not resolve rate for key [${matchKey}]`);
+    const lane = `${query.originCode || query.originName || "*"} to ${query.destinationCode || query.destinationName || "*"}`;
+    const product = query.productCode ? ` for product ${query.productCode}` : "";
+    throw new Error(`NO_RATE_FOUND: No customer rate for ${query.customerCode} from ${lane}${product}`);
   }
 
+  const billableWeight = Math.max(chargeableWeight, matchedRate.min_weight ?? 0);
   const ratePerKg = matchedRate.rate_per_kg;
-  const contractCharges = ratePerKg * chargeableWeight;
-  const otherCharges = query.otherCharges || 0;
+  const rateType = matchedRate.rate_type ?? "PER_KG";
+  const contractCharges =
+    rateType === "FLAT"
+      ? ratePerKg
+      : rateType === "MINIMUM"
+        ? Math.max(ratePerKg * billableWeight, ratePerKg)
+        : ratePerKg * billableWeight;
+  const otherCharges = (query.otherCharges || 0) + (matchedRate.other_charges || 0);
   const subTotal = contractCharges + otherCharges;
 
-  const fuelPct = query.fuelPct ?? 0;
+  const fuelPct = (query.fuelPct ?? 0) > 0 ? (query.fuelPct ?? 0) : (matchedRate.fuel_pct ?? 0);
   const fuelAmount = subTotal * (fuelPct / 100);
 
   const taxable = subTotal + fuelAmount;
@@ -388,7 +428,8 @@ export function computeShipmentRating(
 
   return {
     customerCode: query.customerCode,
-    contractNo: query.contractNo,
+    contractNo: matchedRate.contract_no || query.contractNo,
+    zoneCode: matchedRate.zone_code || null,
     ratePerKg,
     chargeableWeight,
     contractCharges,

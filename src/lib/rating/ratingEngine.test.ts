@@ -133,6 +133,38 @@ describe("Courier Charge Details Rating Engine", () => {
     expect(chargeableWeight).toBe(58.2);
   });
 
+  it("matches a rate by destination name when the form code differs, and ignores a different contract number", () => {
+    const card: CustomerRateRecord[] = [
+      {
+        id: "cw001-usa",
+        customer_code: "CW001",
+        contract_no: "CW-CONTRACT",
+        product_code: "SPX",
+        origin_code: "HYD",
+        origin_name: "Hyderabad",
+        destination_code: "USA",
+        destination_name: "USA",
+        rate_per_kg: 120,
+        status: "ACTIVE",
+        from_date: "2024-01-01",
+      },
+    ];
+    const matched = resolveCustomerRate(card, {
+      customerCode: "CW001",
+      contractNo: "",
+      productCode: "SPX",
+      vendorCode: "DHL1",
+      originCode: "HYD",
+      originName: "Hyderabad",
+      destinationCode: "US",
+      destinationName: "USA",
+      destinationCountry: "United States of America",
+      bookDate: "2026-11-07",
+      chargeableWeight: 12,
+    });
+    expect(matched?.id).toBe("cw001-usa");
+  });
+
   it("resolves the most specific rate row (destination > generic wildcard)", () => {
     const matched = resolveCustomerRate(sampleRateCard, {
       customerCode: "CKING",
@@ -159,7 +191,7 @@ describe("Courier Charge Details Rating Engine", () => {
     };
 
     expect(() => computeShipmentRating(query, sampleRateCard, sampleRules)).toThrowError(
-      /NO_RATE_FOUND: Could not resolve rate for key/,
+      /NO_RATE_FOUND: No customer rate for NONEXISTENT/,
     );
   });
 

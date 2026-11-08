@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+import { loadCustomerRateCard } from "@/lib/rating/pricingCatalog.server";
 import { requireApiAuth } from "@/lib/security/require-api-auth.server";
 import {
   calculatePieceWeights,
@@ -26,7 +27,7 @@ export const Route = createFileRoute("/api/shipments/rate")({
 
           // Required field checks
           const customerCode = (body.customerCode || "").trim();
-          const contractNo = (body.contractNo || "243792").trim();
+          const contractNo = (body.contractNo || "").trim();
 
           if (!customerCode) {
             return Response.json(
@@ -51,7 +52,10 @@ export const Route = createFileRoute("/api/shipments/rate")({
             serviceCode: body.serviceCode,
             serviceName: body.serviceName || body.serviceCode,
             originCode: body.originCode,
+            originName: body.originName,
             destinationCode: body.destinationCode,
+            destinationName: body.destinationName,
+            destinationCountry: body.destinationCountry,
             zoneId: body.zoneId,
             bookDate: body.bookDate || new Date().toISOString().slice(0, 10),
             pieces,
@@ -111,40 +115,24 @@ export const Route = createFileRoute("/api/shipments/rate")({
             );
           }
 
-          // Database rate lookup with seed fallback
-          let dbRates: CustomerRateRecord[] = [...SEED_CUSTOMER_RATES];
+          let dbRates: CustomerRateRecord[] = [];
           try {
-            const { data } = await auth.supabase
-              .from("customer_rates")
-              .select(
-                "id, customer_code, customer_id, contract_no, product_code, vendor_code, origin_code, destination_code, zone_id, weight_slab_from, weight_slab_to, rate_per_kg, from_date, to_date",
-              )
-              .eq("tenant_id", auth.tenantId)
-              .eq("status", "ACTIVE")
-              .is("deleted_at", null);
-
-            if (Array.isArray(data) && data.length > 0) {
-              const mappedDb: CustomerRateRecord[] = data.map((r: Record<string, unknown>) => ({
-                id: String(r.id),
-                customer_code: String(r.customer_code || r.customer_id || "CKING"),
-                contract_no: String(r.contract_no || "243792"),
-                product_code: r.product_code ? String(r.product_code) : null,
-                vendor_code: r.vendor_code ? String(r.vendor_code) : null,
-                origin_code: r.origin_code ? String(r.origin_code) : null,
-                destination_code: r.destination_code ? String(r.destination_code) : null,
-                zone_id: r.zone_id ? String(r.zone_id) : null,
-                weight_slab_from: r.weight_slab_from != null ? Number(r.weight_slab_from) : null,
-                weight_slab_to: r.weight_slab_to != null ? Number(r.weight_slab_to) : null,
-                rate_per_kg: Number(r.rate_per_kg ?? 0),
-                status: "ACTIVE",
-                from_date: String(r.from_date || "2020-01-01"),
-                to_date: r.to_date ? String(r.to_date) : null,
-              }));
-
-              dbRates = [...mappedDb, ...SEED_CUSTOMER_RATES];
-            }
-          } catch {
+            dbRates = await loadCustomerRateCard(auth.supabase, auth.tenantId, customerCode);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return Response.json({ error: "SERVER_ERROR", message }, { status: 500 });
+          }
+          if (dbRates.length === 0 && customerCode.toUpperCase() === "CKING") {
             dbRates = [...SEED_CUSTOMER_RATES];
+          }
+          if (dbRates.length === 0) {
+            return Response.json(
+              {
+                error: "NO_RATE_FOUND",
+                message: `No customer rate is set for ${customerCode}. Add this client's rate for the origin and destination.`,
+              },
+              { status: 422 },
+            );
           }
 
           const result = computeShipmentRating(query, dbRates, serviceRules);

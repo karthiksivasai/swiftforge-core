@@ -56,8 +56,11 @@ import { Route as ApiAuthLoginRouteImport } from './routes/api/auth.login'
 import { Route as ApiAuthOtpRequestRouteImport } from './routes/api/auth.otp-request'
 import { Route as ApiAuthOtpVerifyRouteImport } from './routes/api/auth.otp-verify'
 import { Route as ApiAuthResetPasswordRouteImport } from './routes/api/auth.reset-password'
+import { Route as ApiAwbEntryProformaImportRouteImport } from './routes/api/awb-entry.proforma-import'
 import { Route as ApiAwbEntryStatusRouteImport } from './routes/api/awb-entry.status'
 import { Route as ApiShipmentsRateRouteImport } from './routes/api/shipments.rate'
+import { Route as ApiShipmentsRateCompareRouteImport } from './routes/api/shipments.rate-compare'
+import { Route as ApiShipmentsVendorRateRouteImport } from './routes/api/shipments.vendor-rate'
 import { Route as MasterCustomerConsigneeRouteImport } from './routes/master.customer.consignee'
 import { Route as MasterCustomerCustomerRouteImport } from './routes/master.customer.customer'
 import { Route as MasterCustomerCustomerRateRouteImport } from './routes/master.customer.customer-rate'
@@ -365,6 +368,12 @@ const ApiAuthResetPasswordRoute = ApiAuthResetPasswordRouteImport.update({
   path: '/api/auth/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAwbEntryProformaImportRoute =
+  ApiAwbEntryProformaImportRouteImport.update({
+    id: '/api/awb-entry/proforma-import',
+    path: '/api/awb-entry/proforma-import',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAwbEntryStatusRoute = ApiAwbEntryStatusRouteImport.update({
   id: '/api/awb-entry/status',
   path: '/api/awb-entry/status',
@@ -373,6 +382,16 @@ const ApiAwbEntryStatusRoute = ApiAwbEntryStatusRouteImport.update({
 const ApiShipmentsRateRoute = ApiShipmentsRateRouteImport.update({
   id: '/api/shipments/rate',
   path: '/api/shipments/rate',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiShipmentsRateCompareRoute = ApiShipmentsRateCompareRouteImport.update({
+  id: '/api/shipments/rate-compare',
+  path: '/api/shipments/rate-compare',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiShipmentsVendorRateRoute = ApiShipmentsVendorRateRouteImport.update({
+  id: '/api/shipments/vendor-rate',
+  path: '/api/shipments/vendor-rate',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MasterCustomerConsigneeRoute = MasterCustomerConsigneeRouteImport.update({
@@ -784,8 +803,11 @@ export interface FileRoutesByFullPath {
   '/api/auth/otp-request': typeof ApiAuthOtpRequestRoute
   '/api/auth/otp-verify': typeof ApiAuthOtpVerifyRoute
   '/api/auth/reset-password': typeof ApiAuthResetPasswordRoute
+  '/api/awb-entry/proforma-import': typeof ApiAwbEntryProformaImportRoute
   '/api/awb-entry/status': typeof ApiAwbEntryStatusRoute
   '/api/shipments/rate': typeof ApiShipmentsRateRoute
+  '/api/shipments/rate-compare': typeof ApiShipmentsRateCompareRoute
+  '/api/shipments/vendor-rate': typeof ApiShipmentsVendorRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -899,8 +921,11 @@ export interface FileRoutesByTo {
   '/api/auth/otp-request': typeof ApiAuthOtpRequestRoute
   '/api/auth/otp-verify': typeof ApiAuthOtpVerifyRoute
   '/api/auth/reset-password': typeof ApiAuthResetPasswordRoute
+  '/api/awb-entry/proforma-import': typeof ApiAwbEntryProformaImportRoute
   '/api/awb-entry/status': typeof ApiAwbEntryStatusRoute
   '/api/shipments/rate': typeof ApiShipmentsRateRoute
+  '/api/shipments/rate-compare': typeof ApiShipmentsRateCompareRoute
+  '/api/shipments/vendor-rate': typeof ApiShipmentsVendorRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -1015,8 +1040,11 @@ export interface FileRoutesById {
   '/api/auth/otp-request': typeof ApiAuthOtpRequestRoute
   '/api/auth/otp-verify': typeof ApiAuthOtpVerifyRoute
   '/api/auth/reset-password': typeof ApiAuthResetPasswordRoute
+  '/api/awb-entry/proforma-import': typeof ApiAwbEntryProformaImportRoute
   '/api/awb-entry/status': typeof ApiAwbEntryStatusRoute
   '/api/shipments/rate': typeof ApiShipmentsRateRoute
+  '/api/shipments/rate-compare': typeof ApiShipmentsRateCompareRoute
+  '/api/shipments/vendor-rate': typeof ApiShipmentsVendorRateRoute
   '/master/customer/consignee': typeof MasterCustomerConsigneeRoute
   '/master/customer/customer': typeof MasterCustomerCustomerRoute
   '/master/customer/customer-rate': typeof MasterCustomerCustomerRateRoute
@@ -1132,8 +1160,11 @@ export interface FileRouteTypes {
     | '/api/auth/otp-request'
     | '/api/auth/otp-verify'
     | '/api/auth/reset-password'
+    | '/api/awb-entry/proforma-import'
     | '/api/awb-entry/status'
     | '/api/shipments/rate'
+    | '/api/shipments/rate-compare'
+    | '/api/shipments/vendor-rate'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -1247,8 +1278,11 @@ export interface FileRouteTypes {
     | '/api/auth/otp-request'
     | '/api/auth/otp-verify'
     | '/api/auth/reset-password'
+    | '/api/awb-entry/proforma-import'
     | '/api/awb-entry/status'
     | '/api/shipments/rate'
+    | '/api/shipments/rate-compare'
+    | '/api/shipments/vendor-rate'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -1362,8 +1396,11 @@ export interface FileRouteTypes {
     | '/api/auth/otp-request'
     | '/api/auth/otp-verify'
     | '/api/auth/reset-password'
+    | '/api/awb-entry/proforma-import'
     | '/api/awb-entry/status'
     | '/api/shipments/rate'
+    | '/api/shipments/rate-compare'
+    | '/api/shipments/vendor-rate'
     | '/master/customer/consignee'
     | '/master/customer/customer'
     | '/master/customer/customer-rate'
@@ -1478,8 +1515,11 @@ export interface RootRouteChildren {
   ApiAuthOtpRequestRoute: typeof ApiAuthOtpRequestRoute
   ApiAuthOtpVerifyRoute: typeof ApiAuthOtpVerifyRoute
   ApiAuthResetPasswordRoute: typeof ApiAuthResetPasswordRoute
+  ApiAwbEntryProformaImportRoute: typeof ApiAwbEntryProformaImportRoute
   ApiAwbEntryStatusRoute: typeof ApiAwbEntryStatusRoute
   ApiShipmentsRateRoute: typeof ApiShipmentsRateRoute
+  ApiShipmentsRateCompareRoute: typeof ApiShipmentsRateCompareRoute
+  ApiShipmentsVendorRateRoute: typeof ApiShipmentsVendorRateRoute
   MasterCustomerConsigneeRoute: typeof MasterCustomerConsigneeRoute
   MasterCustomerCustomerRoute: typeof MasterCustomerCustomerRoute
   MasterCustomerCustomerRateRoute: typeof MasterCustomerCustomerRateRoute
@@ -1877,6 +1917,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/awb-entry/proforma-import': {
+      id: '/api/awb-entry/proforma-import'
+      path: '/api/awb-entry/proforma-import'
+      fullPath: '/api/awb-entry/proforma-import'
+      preLoaderRoute: typeof ApiAwbEntryProformaImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/awb-entry/status': {
       id: '/api/awb-entry/status'
       path: '/api/awb-entry/status'
@@ -1889,6 +1936,20 @@ declare module '@tanstack/react-router' {
       path: '/api/shipments/rate'
       fullPath: '/api/shipments/rate'
       preLoaderRoute: typeof ApiShipmentsRateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/shipments/rate-compare': {
+      id: '/api/shipments/rate-compare'
+      path: '/api/shipments/rate-compare'
+      fullPath: '/api/shipments/rate-compare'
+      preLoaderRoute: typeof ApiShipmentsRateCompareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/shipments/vendor-rate': {
+      id: '/api/shipments/vendor-rate'
+      path: '/api/shipments/vendor-rate'
+      fullPath: '/api/shipments/vendor-rate'
+      preLoaderRoute: typeof ApiShipmentsVendorRateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/master/customer/consignee': {
@@ -2390,8 +2451,11 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthOtpRequestRoute: ApiAuthOtpRequestRoute,
   ApiAuthOtpVerifyRoute: ApiAuthOtpVerifyRoute,
   ApiAuthResetPasswordRoute: ApiAuthResetPasswordRoute,
+  ApiAwbEntryProformaImportRoute: ApiAwbEntryProformaImportRoute,
   ApiAwbEntryStatusRoute: ApiAwbEntryStatusRoute,
   ApiShipmentsRateRoute: ApiShipmentsRateRoute,
+  ApiShipmentsRateCompareRoute: ApiShipmentsRateCompareRoute,
+  ApiShipmentsVendorRateRoute: ApiShipmentsVendorRateRoute,
   MasterCustomerConsigneeRoute: MasterCustomerConsigneeRoute,
   MasterCustomerCustomerRoute: MasterCustomerCustomerRoute,
   MasterCustomerCustomerRateRoute: MasterCustomerCustomerRateRoute,

@@ -1,10 +1,11 @@
-import { createFileRoute, useBlocker } from "@tanstack/react-router";
+import { createFileRoute, Link, useBlocker } from "@tanstack/react-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Download,
   Filter,
   RefreshCw,
+  Pencil,
   Plus,
   Search,
   Trash2,
@@ -28,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -101,6 +102,13 @@ import {
   type FuelSurchargeRow,
   type VolumetricFactor,
 } from "@/lib/transactions/awbEntryRules";
+import { downloadAwbMtsTemplate, mtsPiecesFromRows } from "@/lib/transactions/awbMtsImport";
+import {
+  proformaImportErrorText,
+  recalculateProformaAmounts,
+  type ProformaImportError,
+} from "@/lib/transactions/proformaImport";
+import { parseTabularFile } from "@/lib/io/tableIo";
 import { toErrorMessage } from "@/lib/masters/screen";
 import { rememberPartiesAfterAwbSave } from "@/lib/transactions/resources/partyContacts";
 import {
@@ -132,7 +140,6 @@ import {
   confirmBooking,
   fetchShipmentChildren,
   findShipmentBySearch,
-  getLatestShipmentAwb,
   getShipmentById,
   listShipments,
   saveShipment,
@@ -180,6 +187,8 @@ import {
   ratingToSummary,
   type RatingSummary,
 } from "@/lib/transactions/ratingUiMap";
+import type { RatingCalculationResult } from "@/lib/rating/ratingEngine";
+import type { VendorQuote } from "@/lib/rating/vendorTariff";
 import {
   dbShipmentToFormPatch,
   dbShipmentToListRow,
@@ -1305,11 +1314,14 @@ function summarizePieceLines(lines: PiecesLine[]): {
   };
 }
 
-/** Box numbers 1..N — one box per row added in AWB Pieces details. */
+/** Box-1..Box-N, one box for each piece across the pieces rows. */
 function deriveAwbBoxNumbers(piecesLines: PiecesLine[]): string[] {
-  const total = piecesLines.length;
+  const total = piecesLines.reduce((sum, line) => {
+    const pieces = Number.parseInt(line.pieces, 10);
+    return sum + (Number.isFinite(pieces) && pieces > 0 ? pieces : 0);
+  }, 0);
   if (total <= 0) return [];
-  return Array.from({ length: total }, (_, index) => String(index + 1));
+  return Array.from({ length: total }, (_, index) => `Box-${index + 1}`);
 }
 
 const formatListWeightDisplay = (value: string): string => {
@@ -1648,11 +1660,18 @@ function AwbEntryPage() {
   const [editing, setEditing] = useState<AwbRow | null>(null);
   const [form, setForm] = useState<AwbFullForm>(emptyForm());
   const [ratingSummary, setRatingSummary] = useState<RatingSummary | null>(null);
+  const [chargeRefs, setChargeRefs] = useState({
+    customerContract: "",
+    vendorContract: "",
+    customerZone: "",
+    vendorZone: "",
+  });
   const [deleteTarget, setDeleteTarget] = useState<AwbRow | null>(null);
   const [activeTab, setActiveTab] = useState("awb");
   const [piecesOpen, setPiecesOpen] = useState(true);
   const [chargesOpen, setChargesOpen] = useState(true);
   const [piecesDraft, setPiecesDraft] = useState<PiecesDraft>(emptyPiecesDraft);
+  const [editingPiecesId, setEditingPiecesId] = useState<string | null>(null);
   const [chargeDraft, setChargeDraft] = useState<ChargeDraft>(emptyChargeDraft);
   const [proformaDraft, setProformaDraft] = useState<ProformaDraft>(emptyProformaDraft);
   const [proformaUnits, setProformaUnits] = useState<string[]>([...PROFORMA_UNITS]);
@@ -1665,6 +1684,11 @@ function AwbEntryPage() {
   const [kycSearchField, setKycSearchField] = useState<SearchField>("awbNo");
   const [kycSearchInput, setKycSearchInput] = useState("");
   const kycFileRef = useRef<HTMLInputElement | null>(null);
+  const mtsFileRef = useRef<HTMLInputElement | null>(null);
+  const proformaFileRef = useRef<HTMLInputElement | null>(null);
+  const [proformaImportErrors, setProformaImportErrors] = useState<ProformaImportError[]>([]);
+  const [proformaImportPending, setProformaImportPending] = useState<ProformaLine[] | null>(null);
+  const [proformaImportWarnings, setProformaImportWarnings] = useState<string[]>([]);
   const awbFormNavRef = useRef<HTMLDivElement>(null);
   const [navInvalidOrders, setNavInvalidOrders] = useState<Set<number>>(() => new Set());
   const [vendorChargePrereqErrors, setVendorChargePrereqErrors] = useState<string[] | null>(null);
@@ -1672,6 +1696,10 @@ function AwbEntryPage() {
     open: false,
     message: "",
   });
+  const [rateCompareOpen, setRateCompareOpen] = useState(false);
+  const [rateCompareRows, setRateCompareRows] = useState<VendorQuote[]>([]);
+  const [rateCompareMessage, setRateCompareMessage] = useState("");
+  const [ratingBusy, setRatingBusy] = useState<"customer" | "vendor" | "compare" | null>(null);
   const [formSetupOpen, setFormSetupOpen] = useState(false);
   const [formSetupSettings, setFormSetupSettings] =
     useState<AwbFormSetupSettings>(defaultAwbFormSetup);
@@ -1773,12 +1801,6 @@ function AwbEntryPage() {
     withResolver: true,
   });
 
-  const latestAwbQuery = useQuery({
-    queryKey: ["shipments", "latest-awb"],
-    queryFn: getLatestShipmentAwb,
-    enabled: authed && showForm,
-  });
-
   const liveQuery = useQuery({
     queryKey: ["shipments", "list", appliedSearch?.field, appliedSearch?.query],
     queryFn: () =>
@@ -1846,11 +1868,6 @@ function AwbEntryPage() {
     })
     : demoRows;
 
-  const latestAwbNo = authed
-    ? (latestAwbQuery.data?.awb_no ?? "")
-    : ([...rows].sort((a, b) => a.awbNo.localeCompare(b.awbNo, undefined, { numeric: true })).at(-1)
-      ?.awbNo ?? "");
-
   const refreshLive = async () => {
     await queryClient.invalidateQueries({ queryKey: ["shipments"] });
     await queryClient.refetchQueries({ queryKey: ["shipments"] });
@@ -1877,7 +1894,8 @@ function AwbEntryPage() {
       ecommerce: String(p.ecommerce ?? base.ecommerce),
       meis: String(p.meis ?? base.meis),
       invoiceType: String(p.invoiceType ?? base.invoiceType),
-      lines: linesRaw.map((line, i) => {
+      lines: recalculateProformaAmounts({
+        lines: linesRaw.map((line, i) => {
         const l = line && typeof line === "object" ? (line as Record<string, unknown>) : {};
         return {
           id: String(l.id ?? `pf-${i}`),
@@ -1894,6 +1912,7 @@ function AwbEntryPage() {
           igstAmount: String(l.igstAmount ?? "0"),
         };
       }),
+      }).lines,
     };
   };
 
@@ -2178,10 +2197,10 @@ function AwbEntryPage() {
     toast.success(`Opened AWB ${awbNo}`);
   };
 
-  const handleFormToolbarSearch = async (awbNo?: string) => {
-    const q = (awbNo ?? formToolbarSearch).trim();
+  const handleFormToolbarSearch = async () => {
+    const q = formToolbarSearch.trim();
     if (!q) return;
-    const field: AwbLookupField = awbNo ? "awb_no" : toolbarSearchField;
+    const field: AwbLookupField = toolbarSearchField;
     const missing =
       AWB_LOOKUP_FIELDS.find((item) => item.value === field)?.missing ?? "No AWB found";
     if (authed) {
@@ -2234,6 +2253,7 @@ function AwbEntryPage() {
     setEditing(null);
     setRatingSummary(null);
     setPiecesDraft(emptyPiecesDraft());
+    setEditingPiecesId(null);
     setChargeDraft(emptyChargeDraft());
     setProformaDraft(emptyProformaDraft());
     setVendorChargeDraft(emptyVendorChargeDraft());
@@ -2521,72 +2541,110 @@ function AwbEntryPage() {
     }
   }, [navBlocker.status]);
 
-  const handleCheckRateCombination = async (options?: { silent?: boolean }) => {
-    try {
-      const piecesPayload = form.piecesLines.map((l) => ({
-        actualWeight: Number.parseFloat(l.actualWeightPerPc) || 0,
-        pieces: Number.parseInt(l.pieces, 10) || 1,
-        length: Number.parseFloat(l.length) || 0,
-        width: Number.parseFloat(l.breadth) || 0,
-        height: Number.parseFloat(l.height) || 0,
-      }));
-
-      if (piecesPayload.length === 0) {
-        if (!options?.silent) {
-          toast.error("Please add at least one piece row before calculating rates");
-        }
-        return;
+  const shipmentRatingInput = () => {
+    const pieces = form.piecesLines.map((line) => ({
+      actualWeight: Number.parseFloat(line.actualWeightPerPc) || 0,
+      pieces: Number.parseInt(line.pieces, 10) || 1,
+      length: Number.parseFloat(line.length) || 0,
+      width: Number.parseFloat(line.breadth) || 0,
+      height: Number.parseFloat(line.height) || 0,
+    }));
+    if (pieces.length === 0) {
+      const draftPieces = Number.parseInt(piecesDraft.noOfPieces, 10) || 0;
+      const draftWeight = Number.parseFloat(piecesDraft.actualWeightPerPc) || 0;
+      const draftLength = Number.parseFloat(piecesDraft.length) || 0;
+      const draftWidth = Number.parseFloat(piecesDraft.width) || 0;
+      const draftHeight = Number.parseFloat(piecesDraft.height) || 0;
+      if (draftPieces > 0 || draftWeight > 0 || draftLength * draftWidth * draftHeight > 0) {
+        pieces.push({
+          actualWeight: draftWeight,
+          pieces: draftPieces || 1,
+          length: draftLength,
+          width: draftWidth,
+          height: draftHeight,
+        });
       }
+    }
+    if (pieces.length === 0) return null;
 
-      const otherChargesSum = form.chargeLines
-        .filter((c) => c.description.toUpperCase() !== "FREIGHT")
-        .reduce((sum, c) => sum + (Number.parseFloat(c.amount) || 0), 0);
+    const otherChargesSum = form.chargeLines
+      .filter((line) => line.description.toUpperCase() !== "FREIGHT")
+      .reduce((sum, line) => sum + (Number.parseFloat(line.amount) || 0), 0);
 
-      const payload = {
-        customerCode: form.clientName.code || "CKING",
-        contractNo: form.referenceNo || "243792",
-        productCode: form.product.code || "SPX",
-        vendorCode: form.vendor.code || "DTAU",
-        serviceCode: form.service.code || form.service.name || "COURIER PLEASE",
-        originCode: form.shipper.origin.code || "HYD",
-        destinationCode: form.consignee.origin.code || form.consignee.origin.name || "AUSTRALIA",
-        bookDate: form.bookDate || todayIso(),
-        pieces: piecesPayload,
-        division: Number.parseFloat(form.piecesLines[0]?.division || piecesDraft.division) || 5000,
-        roundHalfKg: vendorRoundOff,
-        fuelPct: fuelPercentFor({
-          rows: fuelRows,
-          vendorCode: form.vendor.code,
-          vendorName: form.vendor.name,
-          productCode: form.product.code,
-          productName: form.product.name,
-          destinationCode: form.consignee.origin.code,
-          destinationName: form.consignee.origin.name,
-          bookDate: form.bookDate,
-        }),
-        gstPct: awbGstPercent({ commercial: form.commercial, csbType: form.proforma.csbType }),
-        otherCharges: otherChargesSum,
-        customerBillingStateCode: form.shipper.state || "TELANGANA",
-        branchStateCode: "TELANGANA",
-      };
+    return {
+      customerCode: form.clientName.code || "",
+      contractNo: "",
+      productCode: form.product.code || form.product.name || "",
+      vendorCode: form.vendor.code || "",
+      serviceCode: form.service.code || form.service.name || "",
+      originCode: form.shipper.origin.code || "",
+      originName: form.shipper.origin.name || "",
+      destinationCode: form.consignee.origin.code || "",
+      destinationName: form.consignee.origin.name || "",
+      destinationCountry: form.consignee.country || "",
+      bookDate: form.bookDate || todayIso(),
+      pieces,
+      division: Number.parseFloat(form.piecesLines[0]?.division || piecesDraft.division) || 5000,
+      roundHalfKg: vendorRoundOff,
+      fuelPct: fuelPercentFor({
+        rows: fuelRows,
+        vendorCode: form.vendor.code,
+        vendorName: form.vendor.name,
+        productCode: form.product.code,
+        productName: form.product.name,
+        destinationCode: form.consignee.origin.code,
+        destinationName: form.consignee.origin.name,
+        bookDate: form.bookDate,
+      }),
+      gstPct: awbGstPercent({ commercial: form.commercial, csbType: form.proforma.csbType }),
+      otherCharges: otherChargesSum,
+      customerBillingStateCode: form.shipper.state || "TELANGANA",
+      branchStateCode: "TELANGANA",
+    };
+  };
 
-      const { authorizedFetch } = await import("@/lib/security/authorized-fetch");
-      const res = await authorizedFetch("/api/shipments/rate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+  const postRating = async (path: string, payload: unknown) => {
+    const { authorizedFetch } = await import("@/lib/security/authorized-fetch");
+    const res = await authorizedFetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = (await res.json()) as RatingCalculationResult & {
+      code?: string;
+      message?: string;
+      error?: string;
+      rows?: VendorQuote[];
+    };
+    return { ok: res.ok, data };
+  };
 
-      const data = await res.json();
+  const handleCheckRateCombination = async (options?: { silent?: boolean }) => {
+    const payload = shipmentRatingInput();
+    if (!payload) {
+      if (!options?.silent) {
+        toast.error("Please add at least one piece row before calculating rates");
+      }
+      return;
+    }
+    if (!form.clientName.code.trim() && !options?.silent) {
+      toast.error("Select a customer before calculating customer charges");
+      return;
+    }
 
-      if (!res.ok) {
+    try {
+      if (!options?.silent) setRatingBusy("customer");
+
+      const { ok, data } = await postRating("/api/shipments/rate", payload);
+
+      if (!ok) {
         if (
           data.code === "WEIGHT_OUT_OF_RANGE" ||
           (data.message && data.message.includes("weight allowed between"))
         ) {
           setWeightErrorModal({
             open: true,
-            message: data.message || data.error,
+            message: String(data.message || data.error || ""),
           });
           setRatingSummary(null);
           setForm((f) => ({
@@ -2597,7 +2655,14 @@ function AwbEntryPage() {
           return;
         }
 
-        if (!options?.silent) {
+        if (options?.silent) {
+          setChargeRefs((current) => ({ ...current, customerContract: "", customerZone: "" }));
+          setForm((current) => ({
+            ...current,
+            customerChargesTotal: "0.00",
+            balanceAmount: "0.00",
+          }));
+        } else {
           toast.error(data.message || "Failed to calculate rating");
         }
         return;
@@ -2607,6 +2672,11 @@ function AwbEntryPage() {
       const chargeLines = apiRatingToChargeLines(data);
 
       setRatingSummary(summary);
+      setChargeRefs((current) => ({
+        ...current,
+        customerContract: data.contractNo || "",
+        customerZone: data.zoneCode || "",
+      }));
       setForm((f) => ({
         ...f,
         customerChargesTotal: summary.totalAmount,
@@ -2623,7 +2693,101 @@ function AwbEntryPage() {
       if (!options?.silent) {
         toast.error(toErrorMessage(err, "Rate calculation request failed"));
       }
+    } finally {
+      if (!options?.silent) setRatingBusy(null);
     }
+  };
+
+  const handleVendorCharges = async (options?: { silent?: boolean }) => {
+    const payload = shipmentRatingInput();
+    if (!payload) {
+      if (!options?.silent) toast.error("Please add at least one piece row before calculating rates");
+      return;
+    }
+    if (!payload.vendorCode) {
+      if (!options?.silent) toast.error("Select a vendor before calculating vendor charges");
+      return;
+    }
+
+    try {
+      if (!options?.silent) setRatingBusy("vendor");
+      const { ok, data } = await postRating("/api/shipments/vendor-rate", payload);
+      if (!ok) {
+        if (options?.silent) {
+          setChargeRefs((current) => ({ ...current, vendorContract: "", vendorZone: "" }));
+          setForm((current) => ({ ...current, vendorChargesTotal: "0.00" }));
+          return;
+        }
+        toast.error(data.message || "No vendor tariff for this shipment");
+        return;
+      }
+      const total = Number(data.totalAmount);
+      if (!Number.isFinite(total)) {
+        if (!options?.silent) toast.error("Vendor tariff did not return an amount");
+        return;
+      }
+      setChargeRefs((current) => ({
+        ...current,
+        vendorContract: data.contractNo || "",
+        vendorZone: data.zoneCode || "",
+      }));
+      setForm((current) => ({ ...current, vendorChargesTotal: total.toFixed(2) }));
+      if (!options?.silent) toast.success(`Vendor cost ₹${total.toFixed(2)}`);
+    } catch (err) {
+      if (!options?.silent) toast.error(toErrorMessage(err, "Vendor charge calculation failed"));
+    } finally {
+      if (!options?.silent) setRatingBusy(null);
+    }
+  };
+
+  const handleRateCompare = async () => {
+    const payload = shipmentRatingInput();
+    if (!payload) {
+      toast.error("Please add at least one piece row before comparing rates");
+      return;
+    }
+
+    setRateCompareRows([]);
+    setRateCompareMessage("");
+    setRateCompareOpen(true);
+    try {
+      setRatingBusy("compare");
+      const { ok, data } = await postRating("/api/shipments/rate-compare", {
+        ...payload,
+        serviceCode: "",
+      });
+      if (!ok) {
+        setRateCompareMessage(data.message || "Rate compare failed");
+        return;
+      }
+      const rows = data.rows ?? [];
+      setRateCompareRows(rows);
+      if (rows.length === 0) {
+        setRateCompareMessage("No vendor tariff covers this origin, destination, product, and weight.");
+      }
+    } catch (err) {
+      setRateCompareMessage(toErrorMessage(err, "Rate compare failed"));
+    } finally {
+      setRatingBusy(null);
+    }
+  };
+
+  const selectComparedVendor = (row: VendorQuote) => {
+    setForm((current) => ({
+      ...current,
+      vendor: { id: row.vendorId, code: row.vendorCode, name: row.vendorName },
+      service: row.service
+        ? { ...current.service, code: row.service, name: row.service }
+        : current.service,
+      vendorChargesTotal: row.totalAmount.toFixed(2),
+    }));
+    setChargeRefs((current) => ({
+      ...current,
+      vendorContract: row.contractNo || "",
+      vendorZone: row.zoneCode || "",
+    }));
+    setRateCompareOpen(false);
+    toast.success(`${row.vendorName} selected. Vendor cost ₹${row.totalAmount.toFixed(2)}`);
   };
 
   useEffect(() => {
@@ -2799,28 +2963,62 @@ function AwbEntryPage() {
     });
   }, [vendorRoundOff]);
 
-  // Automatic reactive rate calculation whenever piece rows or shipment parameters change
-  useEffect(() => {
-    if (!showForm || form.piecesLines.length === 0) return;
-    const timer = setTimeout(() => {
-      void handleCheckRateCombination({ silent: true });
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [
-    showForm,
-    form.piecesLines,
+  const rateCustomerRef = useRef(handleCheckRateCombination);
+  rateCustomerRef.current = handleCheckRateCombination;
+  const rateVendorRef = useRef(handleVendorCharges);
+  rateVendorRef.current = handleVendorCharges;
+
+  const customerRateKey = [
+    authed ? "1" : "0",
+    showForm ? "1" : "0",
+    entryLocked ? "1" : "0",
     form.clientName.code,
     form.product.code,
+    form.product.name,
     form.vendor.code,
     form.service.code,
     form.service.name,
     form.shipper.origin.code,
+    form.shipper.origin.name,
+    form.shipper.state,
     form.consignee.origin.code,
     form.consignee.origin.name,
-    form.referenceNo,
+    form.consignee.country,
     form.bookDate,
-    form.shipper.state,
-  ]);
+    form.commercial ? "1" : "0",
+    form.proforma.csbType,
+    piecesDraft.actualWeightPerPc,
+    piecesDraft.noOfPieces,
+    piecesDraft.length,
+    piecesDraft.width,
+    piecesDraft.height,
+    piecesDraft.division,
+    form.piecesLines
+      .map((line) =>
+        [
+          line.actualWeightPerPc,
+          line.pieces,
+          line.length,
+          line.breadth,
+          line.height,
+          line.division ?? "",
+        ].join(":"),
+      )
+      .join(","),
+  ].join("|");
+
+  // Fill Customer Charges as soon as the client, lane, and weight are known.
+  useEffect(() => {
+    if (!authed || !showForm || entryLocked) return;
+    if (!form.clientName.code.trim()) return;
+    if (!form.shipper.origin.code.trim() && !form.shipper.origin.name.trim()) return;
+    if (!form.consignee.origin.code.trim() && !form.consignee.origin.name.trim()) return;
+    const timer = window.setTimeout(() => {
+      void rateCustomerRef.current({ silent: true });
+      if (form.vendor.code.trim()) void rateVendorRef.current({ silent: true });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [customerRateKey]);
 
   const openAdd = () => {
     const existing = restoreDraft ?? readLocalAwbDraft(userKey);
@@ -2889,6 +3087,7 @@ function AwbEntryPage() {
           /* draft without rating yet */
         }
         setPiecesDraft(emptyPiecesDraft());
+        setEditingPiecesId(null);
         setChargeDraft(emptyChargeDraft());
         setProformaDraft(emptyProformaDraft());
         setVendorChargeDraft(emptyVendorChargeDraft());
@@ -2946,6 +3145,7 @@ function AwbEntryPage() {
     const { id: _id, rowVersion: _rv, status: _st, ...rest } = row;
     setForm(normalizeForm(rest));
     setPiecesDraft(emptyPiecesDraft());
+    setEditingPiecesId(null);
     setChargeDraft(emptyChargeDraft());
     setProformaDraft(emptyProformaDraft());
     setVendorChargeDraft(emptyVendorChargeDraft());
@@ -2962,6 +3162,7 @@ function AwbEntryPage() {
     setBookingErrors([]);
     setActiveTab("awb");
     setPiecesDraft(emptyPiecesDraft());
+    setEditingPiecesId(null);
     setChargeDraft(emptyChargeDraft());
     setProformaDraft(emptyProformaDraft());
     setVendorChargeDraft(emptyVendorChargeDraft());
@@ -4177,23 +4378,109 @@ function AwbEntryPage() {
     });
   };
 
+  const downloadMtsTemplate = () => {
+    void downloadAwbMtsTemplate()
+      .then(() => toast.success("AWBMtsFormat.xlsx downloaded"))
+      .catch((error) => toast.error(toErrorMessage(error, "Could not download the MTS template")));
+  };
+
+  const uploadMtsFile = async () => {
+    const file = mtsFileRef.current?.files?.[0];
+    if (!file) {
+      toast.error("Select an Excel or CSV file");
+      return;
+    }
+    try {
+      const parsed = await parseTabularFile(file);
+      const inchDivisor = Number.parseFloat(
+        resolveDivision({
+          measurementUnit: "Inch",
+          productCode: form.product.code,
+          productName: form.product.name,
+          vendorCode: form.vendor.code,
+          vendorName: form.vendor.name,
+          serviceCode: form.service.code,
+          serviceName: form.service.name,
+          rows: volumetricRows,
+        }),
+      );
+      const { lines, errors } = mtsPiecesFromRows(parsed.rows, {
+        inchDivisor: inchDivisor > 0 && inchDivisor !== 5000 ? inchDivisor : undefined,
+      });
+      if (lines.length === 0) {
+        toast.error(errors[0] ?? "No piece rows found in the file");
+        return;
+      }
+      setForm((current) => ({ ...current, piecesLines: [...current.piecesLines, ...lines] }));
+      if (mtsFileRef.current) mtsFileRef.current.value = "";
+      if (errors.length > 0) {
+        toast.warning(`Added ${lines.length} piece row${lines.length === 1 ? "" : "s"}. ${errors[0]}`);
+        return;
+      }
+      toast.success(`Added ${lines.length} piece row${lines.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      toast.error(toErrorMessage(error, "Could not read the MTS file"));
+    }
+  };
+
   const addPiecesLine = () => {
     if (!piecesDraft.noOfPieces.trim()) return toast.error("No. Of Pieces is required");
-    const line: PiecesLine = {
-      id: crypto.randomUUID(),
-      childAwb: "",
-      actualWeightPerPc: piecesDraft.actualWeightPerPc,
-      pieces: piecesDraft.noOfPieces,
-      length: piecesDraft.length,
-      breadth: piecesDraft.width,
-      height: piecesDraft.height,
-      volWeight: piecesDraft.volWeight,
-      chargeWeight: piecesDraft.chargeWeight,
-      division: piecesDraft.division,
-    };
-    setForm((f) => ({ ...f, piecesLines: [...f.piecesLines, line] }));
+    const editedId = editingPiecesId;
+    const updating = editedId != null && form.piecesLines.some((line) => line.id === editedId);
+    setForm((f) => {
+      if (updating && editedId) {
+        return {
+          ...f,
+          piecesLines: f.piecesLines.map((line) =>
+            line.id === editedId
+              ? {
+                  ...line,
+                  actualWeightPerPc: piecesDraft.actualWeightPerPc,
+                  pieces: piecesDraft.noOfPieces,
+                  length: piecesDraft.length,
+                  breadth: piecesDraft.width,
+                  height: piecesDraft.height,
+                  volWeight: piecesDraft.volWeight,
+                  chargeWeight: piecesDraft.chargeWeight,
+                  division: piecesDraft.division,
+                }
+              : line,
+          ),
+        };
+      }
+      const line: PiecesLine = {
+        id: crypto.randomUUID(),
+        childAwb: "",
+        actualWeightPerPc: piecesDraft.actualWeightPerPc,
+        pieces: piecesDraft.noOfPieces,
+        length: piecesDraft.length,
+        breadth: piecesDraft.width,
+        height: piecesDraft.height,
+        volWeight: piecesDraft.volWeight,
+        chargeWeight: piecesDraft.chargeWeight,
+        division: piecesDraft.division,
+      };
+      return { ...f, piecesLines: [...f.piecesLines, line] };
+    });
+    setEditingPiecesId(null);
     setPiecesDraft(emptyPiecesDraft());
-    toast.success("Piece line added");
+    toast.success(updating ? "Piece line updated" : "Piece line added");
+  };
+
+  const editPiecesLine = (line: PiecesLine) => {
+    const next: PiecesDraft = {
+      measurementUnit: piecesDraft.measurementUnit,
+      actualWeightPerPc: line.actualWeightPerPc,
+      noOfPieces: line.pieces,
+      length: line.length,
+      width: line.breadth,
+      height: line.height,
+      division: line.division || piecesDraft.division,
+      volWeight: line.volWeight,
+      chargeWeight: line.chargeWeight,
+    };
+    setPiecesDraft(next);
+    setEditingPiecesId(line.id);
   };
 
   const commitPiecesLine = () => {
@@ -4204,12 +4491,16 @@ function AwbEntryPage() {
     addPiecesLine();
     scheduleErpFocusAdvance(() => {
       const container = awbFormNavRef.current;
-      if (container) focusErpFieldByOrder(container, AWB_NAV.PIECES_MEASUREMENT_UNIT);
+      if (container) focusErpFieldByOrder(container, AWB_NAV.PIECES_ACTUAL_WEIGHT_PCS);
     });
   };
 
   const removePiecesLine = (id: string) => {
     setForm((f) => ({ ...f, piecesLines: f.piecesLines.filter((l) => l.id !== id) }));
+    if (editingPiecesId === id) {
+      setEditingPiecesId(null);
+      setPiecesDraft(emptyPiecesDraft());
+    }
   };
 
   const priceChargeDraft = (draft: ChargeDraft) => {
@@ -4348,6 +4639,94 @@ function AwbEntryPage() {
       ...f,
       proforma: { ...f.proforma, lines: f.proforma.lines.filter((l) => l.id !== id) },
     }));
+  };
+
+  const warnProformaInvoice = (lines: ProformaLine[], shipmentValue: string) => {
+    const invoice = Number.parseFloat(shipmentValue);
+    if (!Number.isFinite(invoice) || invoice <= 0) return;
+    const amount = lines.reduce((sum, line) => sum + (Number.parseFloat(line.amount) || 0), 0);
+    if (Math.abs(amount - invoice) > 0.009) {
+      toast.warning(
+        `Proforma amount ${amount.toFixed(2)} does not match Shipment Value ${invoice.toFixed(2)}`,
+      );
+    }
+  };
+
+  const applyImportedProforma = (mode: "append" | "replace", incoming: ProformaLine[]) => {
+    const lines = mode === "replace" ? incoming : [...form.proforma.lines, ...incoming];
+    setForm((current) => ({
+      ...current,
+      proforma: {
+        ...current.proforma,
+        lines: mode === "replace" ? incoming : [...current.proforma.lines, ...incoming],
+      },
+    }));
+    warnProformaInvoice(lines, form.shipmentValue);
+    if (proformaImportWarnings.length > 0) {
+      toast.warning(proformaImportWarnings.join("\n"));
+    }
+    toast.success(`${incoming.length} proforma line${incoming.length === 1 ? "" : "s"} imported`);
+    setProformaImportPending(null);
+    setProformaImportWarnings([]);
+  };
+
+  const uploadProformaFile = async () => {
+    const file = proformaFileRef.current?.files?.[0];
+    if (!file) {
+      toast.error("Select an Excel file");
+      return;
+    }
+    const name = file.name.toLowerCase();
+    if (!name.endsWith(".xls") && !name.endsWith(".xlsx")) {
+      toast.error("Only .xls and .xlsx files can be imported");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("File must be 5 MB or smaller");
+      return;
+    }
+    try {
+      const body = new FormData();
+      body.set("file", file);
+      body.set("currency", form.proforma.currency);
+      body.set("awbNo", form.awbNo);
+      body.set("units", proformaUnits.join(","));
+      const { authorizedFetch } = await import("@/lib/security/authorized-fetch");
+      const res = await authorizedFetch("/api/awb-entry/proforma-import", { method: "POST", body });
+      const data = (await res.json()) as {
+        lines?: ProformaLine[];
+        warnings?: string[];
+        errors?: ProformaImportError[];
+      };
+      if (!res.ok || data.errors?.length) {
+        setProformaImportErrors(
+          data.errors?.length
+            ? data.errors
+            : [{ row: 0, column: "File", value: "", message: "Proforma import failed" }],
+        );
+        return;
+      }
+      const lines = data.lines ?? [];
+      if (lines.length === 0) {
+        toast.error("The file has no proforma rows");
+        return;
+      }
+      setProformaImportWarnings(data.warnings ?? []);
+      if (form.proforma.lines.length > 0) {
+        setProformaImportPending(lines);
+        return;
+      }
+      setForm((current) => {
+        warnProformaInvoice(lines, current.shipmentValue);
+        return { ...current, proforma: { ...current.proforma, lines } };
+      });
+      if (data.warnings?.length) toast.warning(data.warnings.join("\n"));
+      toast.success(`${lines.length} proforma line${lines.length === 1 ? "" : "s"} imported`);
+    } catch (error) {
+      toast.error(toErrorMessage(error));
+    } finally {
+      if (proformaFileRef.current) proformaFileRef.current.value = "";
+    }
   };
 
   const ensureVendorChargePrerequisites = useCallback((): boolean => {
@@ -4653,7 +5032,7 @@ function AwbEntryPage() {
                   <TabsTrigger
                     key={tab}
                     value={tab}
-                    className="rounded-full border-0 bg-transparent px-4 py-1.5 text-base font-bold text-muted-foreground shadow-none hover:text-foreground data-[state=active]:bg-sidebar data-[state=active]:text-sidebar-foreground data-[state=active]:shadow-none"
+                    className="rounded-full border-0 bg-transparent px-4 py-1.5 text-base font-normal text-muted-foreground shadow-none hover:text-foreground data-[state=active]:bg-sidebar data-[state=active]:font-bold data-[state=active]:text-sidebar-foreground data-[state=active]:shadow-none"
                   >
                     {tab === "awb"
                       ? "AWB"
@@ -4671,17 +5050,6 @@ function AwbEntryPage() {
                   <IconButton label="Clone Entry" onClick={openEntry}>
                     <Copy className="h-4 w-4" />
                   </IconButton>
-                  <span className="whitespace-nowrap text-xs text-muted-foreground">
-                    Last AWB No.{" "}
-                    <button
-                      type="button"
-                      className="font-medium text-foreground hover:underline disabled:no-underline disabled:opacity-60"
-                      disabled={!latestAwbNo || saving}
-                      onClick={() => void handleFormToolbarSearch(latestAwbNo)}
-                    >
-                      {latestAwbNo || "—"}
-                    </button>
-                  </span>
                   <Select
                     value={toolbarSearchField}
                     onValueChange={(value) => setToolbarSearchField(value as AwbLookupField)}
@@ -4918,52 +5286,107 @@ function AwbEntryPage() {
                         />
                       </div>
 
-                      <div className="mt-1 grid grid-cols-1 gap-1.5 md:grid-cols-3">
-                        <div className="flex items-end gap-1.5">
+                      <div className="mt-2 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              className="h-8 shrink-0 rounded-full bg-emerald-600 px-4 text-xs text-white hover:bg-emerald-600/90"
+                              {...erpNavSkip()}
+                              disabled={ratingBusy !== null}
+                              onClick={() => {
+                                void handleCheckRateCombination();
+                              }}
+                            >
+                              Customer Charges
+                            </Button>
+                            <span className="text-sm text-foreground">Total Amount</span>
+                            <span className="min-w-16 text-sm font-medium tabular-nums text-foreground">
+                              {Number.parseFloat(form.customerChargesTotal) > 0
+                                ? Number.parseFloat(form.customerChargesTotal).toFixed(2)
+                                : ""}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              className="h-8 shrink-0 rounded-full bg-emerald-600 px-4 text-xs text-white hover:bg-emerald-600/90"
+                              {...erpNavSkip()}
+                              disabled={ratingBusy !== null}
+                              onClick={() => {
+                                void handleVendorCharges();
+                              }}
+                            >
+                              Vendor Charges
+                            </Button>
+                            <span className="text-sm text-foreground">Total Amount</span>
+                            <span className="min-w-16 text-sm font-medium tabular-nums text-foreground">
+                              {Number.parseFloat(form.vendorChargesTotal) > 0
+                                ? Number.parseFloat(form.vendorChargesTotal).toFixed(2)
+                                : ""}
+                            </span>
+                          </div>
                           <Button
                             size="sm"
-                            className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+                            className="h-8 rounded-full bg-emerald-600 px-4 text-xs text-white hover:bg-emerald-600/90"
                             {...erpNavSkip()}
+                            disabled={ratingBusy !== null}
                             onClick={() => {
-                              void handleCheckRateCombination();
+                              void handleRateCompare();
                             }}
-                          >
-                            Customer Charges
-                          </Button>
-                          <Input
-                            value={form.customerChargesTotal}
-                            readOnly
-                            className="h-8 bg-muted/30 px-1.5 text-[13px]"
-                          />
-                        </div>
-                        <div className="flex items-end gap-1.5">
-                          <Button
-                            size="sm"
-                            className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
-                            {...erpNavSkip()}
-                            onClick={() =>
-                              toast.info("Vendor charges will be enabled with backend wiring")
-                            }
-                          >
-                            Vendor Charges
-                          </Button>
-                          <Input
-                            value={form.vendorChargesTotal}
-                            readOnly
-                            className="h-8 bg-muted/30 px-1.5 text-[13px]"
-                          />
-                        </div>
-                        <div className="flex items-end">
-                          <Button
-                            size="sm"
-                            className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
-                            {...erpNavSkip()}
-                            onClick={() =>
-                              toast.info("Rate compare will be enabled with backend wiring")
-                            }
                           >
                             Rate Compare
                           </Button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm text-foreground">
+                          <span>
+                            Customer Contract:{" "}
+                            {chargeRefs.customerContract ? (
+                              <Link
+                                to="/master/customer/customer-rate"
+                                className="text-blue-600 underline"
+                              >
+                                {chargeRefs.customerContract}
+                              </Link>
+                            ) : null}
+                          </span>
+                          <span>
+                            Vendor Contract:{" "}
+                            {chargeRefs.vendorContract ? (
+                              <Link
+                                to="/master/vendor/vendor-contract"
+                                className="text-blue-600 underline"
+                              >
+                                {chargeRefs.vendorContract}
+                              </Link>
+                            ) : null}
+                          </span>
+                          <button
+                            type="button"
+                            className="text-blue-600 underline"
+                            onClick={() => {
+                              void handleCheckRateCombination();
+                              if (form.vendor.code.trim()) void handleVendorCharges();
+                            }}
+                          >
+                            Check Rate Combination
+                          </button>
+                          <span>
+                            Customer Zone:{" "}
+                            {chargeRefs.customerZone ? (
+                              <Link to="/master/sales/zone" className="text-blue-600 underline">
+                                {chargeRefs.customerZone}
+                              </Link>
+                            ) : null}
+                          </span>
+                          <span>
+                            Vendor Zone:{" "}
+                            {chargeRefs.vendorZone ? (
+                              <Link to="/master/sales/zone" className="text-blue-600 underline">
+                                {chargeRefs.vendorZone}
+                              </Link>
+                            ) : null}
+                          </span>
                         </div>
                       </div>
 
@@ -4989,24 +5412,28 @@ function AwbEntryPage() {
                                 size="sm"
                                 className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
                                 {...erpNavSkip()}
-                                onClick={() =>
-                                  toast.info("Excel format download will be enabled with backend wiring")
-                                }
+                                onClick={downloadMtsTemplate}
                               >
                                 <FileSpreadsheet className="h-4 w-4 shrink-0" />
                                 Download Excel File Format
                               </Button>
                               <div className="flex flex-wrap items-center gap-2">
                                 <span className="text-sm text-foreground">Select File</span>
-                                <Input type="file" className="h-8 max-w-[220px] text-[13px]" {...erpNavSkip()} />
+                                <Input
+                                  ref={mtsFileRef}
+                                  type="file"
+                                  accept=".xls,.xlsx,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                                  className="h-8 max-w-[220px] text-[13px]"
+                                  {...erpNavSkip()}
+                                />
                                 <Button
                                   type="button"
                                   size="sm"
                                   className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
                                   {...erpNavSkip()}
-                                  onClick={() =>
-                                    toast.info("Import MTS will be enabled with backend wiring")
-                                  }
+                                  onClick={() => {
+                                    void uploadMtsFile();
+                                  }}
                                 >
                                   Upload
                                 </Button>
@@ -5138,7 +5565,7 @@ function AwbEntryPage() {
                                 onClick={addPiecesLine}
                               >
                                 <Plus className="mr-1 h-4 w-4" />
-                                Add
+                                {editingPiecesId ? "Update" : "Add"}
                               </Button>
                             </div>
                           </div>
@@ -5186,15 +5613,26 @@ function AwbEntryPage() {
                                       <TableCell>{l.volWeight}</TableCell>
                                       <TableCell>{l.chargeWeight}</TableCell>
                                       <TableCell>
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-8 w-8 text-destructive"
-                                          onClick={() => removePiecesLine(l.id)}
-                                          aria-label="Delete piece line"
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
+                                        <div className="flex items-center">
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-8 w-8"
+                                            onClick={() => editPiecesLine(l)}
+                                            aria-label="Edit piece line"
+                                          >
+                                            <Pencil className="h-4 w-4" />
+                                          </Button>
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-8 w-8 text-destructive"
+                                            onClick={() => removePiecesLine(l.id)}
+                                            aria-label="Delete piece line"
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </Button>
+                                        </div>
                                       </TableCell>
                                     </TableRow>
                                   ))
@@ -5814,24 +6252,31 @@ function AwbEntryPage() {
                               size="sm"
                               className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
                               {...erpNavSkip()}
-                              onClick={() =>
-                                toast.info("Excel format download will be enabled with backend wiring")
-                              }
+                              onClick={() => {
+                                const link = document.createElement("a");
+                                link.href = "/ExcelFormat/AWBPerforma.xlsx?v=1.4";
+                                link.download = "AWBPerforma.xlsx";
+                                link.click();
+                              }}
                             >
                               <FileSpreadsheet className="h-4 w-4 shrink-0" />
                               Download Excel File Format
                             </Button>
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-sm text-foreground">Select File</span>
-                              <Input type="file" className="h-8 max-w-[220px] text-[13px]" {...erpNavSkip()} />
+                              <Input
+                                ref={proformaFileRef}
+                                type="file"
+                                accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                className="h-8 max-w-[220px] text-[13px]"
+                                {...erpNavSkip()}
+                              />
                               <Button
                                 type="button"
                                 size="sm"
                                 className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
                                 {...erpNavSkip()}
-                                onClick={() =>
-                                  toast.info("Proforma import will be enabled with backend wiring")
-                                }
+                                onClick={() => void uploadProformaFile()}
                               >
                                 <Upload className="h-3.5 w-3.5" />
                                 Upload
@@ -6581,6 +7026,64 @@ function AwbEntryPage() {
             </div>
           </Tabs>
 
+          <Dialog open={rateCompareOpen} onOpenChange={setRateCompareOpen}>
+            <DialogContent className="max-w-4xl gap-0 overflow-hidden p-0 sm:max-w-4xl">
+              <div className="bg-sidebar px-4 py-3">
+                <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+                  Vendor Rate Compare
+                </DialogTitle>
+              </div>
+              <div className="max-h-[70vh] overflow-auto p-4">
+                {rateCompareMessage ? (
+                  <p className="mb-3 text-sm text-muted-foreground">{rateCompareMessage}</p>
+                ) : null}
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Origin</TableHead>
+                      <TableHead>Vendor Name</TableHead>
+                      <TableHead>Service Type</TableHead>
+                      <TableHead className="text-right">Weight</TableHead>
+                      <TableHead className="text-right">Rate/Kg</TableHead>
+                      <TableHead className="text-right">Final Amount</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rateCompareRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center text-muted-foreground">
+                          {ratingBusy === "compare" ? "Comparing vendor tariffs…" : "No rates to show"}
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      rateCompareRows.map((row) => (
+                        <TableRow key={`${row.contractId}-${row.service}`}>
+                          <TableCell>{row.origin || "—"}</TableCell>
+                          <TableCell>{row.vendorName}</TableCell>
+                          <TableCell>{row.service || "—"}</TableCell>
+                          <TableCell className="text-right">{row.weight.toFixed(3)}</TableCell>
+                          <TableCell className="text-right">{row.ratePerKg.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{row.totalAmount.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-8 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                              onClick={() => selectComparedVendor(row)}
+                            >
+                              Select
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <Dialog open={addUnitOpen} onOpenChange={setAddUnitOpen}>
             <DialogContent className="max-w-sm gap-0 overflow-hidden p-0 sm:max-w-sm">
               <div className="bg-sidebar px-4 py-3">
@@ -7012,6 +7515,58 @@ function AwbEntryPage() {
               className="w-28 bg-primary text-primary-foreground hover:bg-primary/90"
             >
               OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={proformaImportErrors.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setProformaImportErrors([]);
+        }}
+      >
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Proforma import</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-wrap text-left text-destructive">
+              {proformaImportErrors.map(proformaImportErrorText).join("\n")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setProformaImportErrors([])}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={proformaImportPending != null}
+        onOpenChange={(open) => {
+          if (!open) setProformaImportPending(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Proforma lines already exist</AlertDialogTitle>
+            <AlertDialogDescription>
+              Append the imported rows to the grid, or replace the rows that are already there.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (proformaImportPending) applyImportedProforma("append", proformaImportPending);
+              }}
+            >
+              Append
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                if (proformaImportPending) applyImportedProforma("replace", proformaImportPending);
+              }}
+            >
+              Replace
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

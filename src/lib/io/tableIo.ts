@@ -149,7 +149,9 @@ export async function exportTable(opts: {
     for (const r of records) {
       sheet.addRow(columns.map((c) => r[c.key] ?? ""));
     }
-    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true };
+    });
     columns.forEach((_, i) => {
       sheet.getColumn(i + 1).width = Math.min(
         40,

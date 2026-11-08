@@ -10,6 +10,7 @@ import type {
   ShipmentChildren,
   ShipmentRow as ShipmentDbRow,
 } from "@/lib/transactions/resources/shipments";
+import { recalculateProformaAmounts } from "@/lib/transactions/proformaImport";
 
 type LookupPair = { id?: string; code: string; name: string };
 
@@ -270,7 +271,7 @@ export function uiFormToShipmentPayload(
     shipper: partyToJson(form.shipper),
     consignee: partyToJson(form.consignee),
     wizard_extras: {
-      proforma: form.proforma ?? {},
+      proforma: recalculateProformaAmounts((form.proforma ?? { lines: [] }) as { lines?: unknown[] }),
       forwarding: form.forwarding ?? {},
       kyc: form.kyc ?? {},
       masterAwbNo: form.masterAwbNo?.trim() || "",
