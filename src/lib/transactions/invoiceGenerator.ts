@@ -77,6 +77,14 @@ export type InvoiceInput = {
   currency?: string;
   lines: InvoiceLine[];
   pieces?: InvoicePiece[];
+  freight?: string;
+  fuel?: string;
+  igst?: string;
+  cgst?: string;
+  sgst?: string;
+  total?: string;
+  received?: string;
+  balance?: string;
 };
 
 function esc(s: unknown): string {
@@ -495,6 +503,33 @@ export function buildInvoiceHtml(input: InvoiceInput): string {
     </tbody>
   </table>
 
+  <table class="goods" id="freight-charges">
+    <thead>
+      <tr>
+        <th>Freight</th>
+        <th>Fuel</th>
+        <th>IGST</th>
+        <th>CGST</th>
+        <th>SGST</th>
+        <th>Total</th>
+        <th>Received</th>
+        <th>Balance</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="right" id="inv-freight">${esc(num(input.freight, 2))}</td>
+        <td class="right" id="inv-fuel">${esc(num(input.fuel, 2))}</td>
+        <td class="right" id="inv-igst">${esc(num(input.igst, 2))}</td>
+        <td class="right" id="inv-cgst">${esc(num(input.cgst, 2))}</td>
+        <td class="right" id="inv-sgst">${esc(num(input.sgst, 2))}</td>
+        <td class="right" id="inv-total">${esc(num(input.total, 2))}</td>
+        <td class="right" id="inv-received">${esc(num(input.received, 2))}</td>
+        <td class="right" id="inv-balance">${esc(num(input.balance, 2))}</td>
+      </tr>
+    </tbody>
+  </table>
+
   <div class="row">
     <div class="cell grow">
       <span class="label">Amount Chargeable (in words)</span>
@@ -649,7 +684,53 @@ export type InvoiceFormSlice = {
     deliveryAwb: string;
     forwardingAwb: string;
   };
+  chargeLines?: Array<{
+    description?: string;
+    amount?: string;
+    fuelAmt?: string;
+    igst?: string;
+    cgst?: string;
+    sgst?: string;
+  }>;
+  customerChargesTotal?: string;
+  amountReceived?: string;
+  balanceAmount?: string;
 };
+
+function money2(value: string | number | null | undefined): string {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "0.00";
+  return amount.toFixed(2);
+}
+
+function invoiceCharges(form: InvoiceFormSlice): Pick<
+  InvoiceInput,
+  "freight" | "fuel" | "igst" | "cgst" | "sgst" | "total" | "received" | "balance"
+> {
+  const lines = form.chargeLines ?? [];
+  const freightLine = lines.find((line) => /freight/i.test(line.description || ""));
+  const sum = (key: "amount" | "fuelAmt" | "igst" | "cgst" | "sgst") =>
+    lines.reduce((total, line) => total + (Number(line[key]) || 0), 0);
+  const freight = freightLine ? Number(freightLine.amount) || 0 : sum("amount");
+  const fuel = sum("fuelAmt");
+  const igst = sum("igst");
+  const cgst = sum("cgst");
+  const sgst = sum("sgst");
+  const storedTotal = Number(form.customerChargesTotal);
+  const total = Number.isFinite(storedTotal) && form.customerChargesTotal?.trim()
+    ? storedTotal
+    : freight + fuel + igst + cgst + sgst;
+  return {
+    freight: money2(freight),
+    fuel: money2(fuel),
+    igst: money2(igst),
+    cgst: money2(cgst),
+    sgst: money2(sgst),
+    total: money2(total),
+    received: money2(form.amountReceived),
+    balance: money2(form.balanceAmount),
+  };
+}
 
 function giftReference(reason: string): string {
   const r = (reason || "").toUpperCase();
@@ -718,6 +799,7 @@ export function formToInvoiceInput(form: InvoiceFormSlice): InvoiceInput {
     termsOfDelivery: form.proforma.termOfInvoice || "DAP",
     otherReference: giftReference(form.proforma.exportReason),
     currency,
+    ...invoiceCharges(form),
     lines: (form.proforma.lines ?? []).map((l) => ({
       boxNo: l.boxNo,
       description: l.description,

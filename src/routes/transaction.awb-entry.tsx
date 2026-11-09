@@ -93,16 +93,27 @@ import { sendEmail, sendSms } from "@/lib/notifications/delivery";
 import {
   awbGstPercent,
   awbIntraState,
+  awbErrorField,
+  awbTextErrors,
+  clipText,
   balanceDue,
+  consigneeBookingErrors,
+  fillEmptyPartyFields,
   formatChargeWeight,
+  formatMoney2,
+  futureBookDateError,
   fuelPercentFor,
+  istBookDate,
   hsnIsValid,
+  lockedByCaption,
   manualChargeAmounts,
+  rateRefreshDecision,
   resolveDivision,
+  sumPieceCount,
   type FuelSurchargeRow,
   type VolumetricFactor,
 } from "@/lib/transactions/awbEntryRules";
-import { downloadAwbMtsTemplate, mtsPiecesFromRows } from "@/lib/transactions/awbMtsImport";
+import { downloadAwbMtsTemplate, mtsFileAccepted, mtsPiecesFromRows } from "@/lib/transactions/awbMtsImport";
 import {
   proformaErrorReportCsv,
   recalculateProformaAmounts,
@@ -137,13 +148,13 @@ import {
   type AwbEntryDraftPayload,
 } from "@/lib/transactions/awbDraftStorage";
 import {
+  bookAwbShipment,
   cancelShipment,
-  confirmBooking,
   fetchShipmentChildren,
   findShipmentBySearch,
   getShipmentById,
   listShipments,
-  saveShipment,
+  unlockShipment,
 } from "@/lib/transactions/resources/shipments";
 import {
   buildAwbLabelHtml,
@@ -158,7 +169,9 @@ import {
   formToInvoiceInput,
 } from "@/lib/transactions/invoiceGenerator";
 import {
+  documentObjectUrl,
   getShipmentDocument,
+  revokeDocumentObjectUrl,
   saveShipmentDocument,
   type ShipmentDocumentItem,
 } from "@/lib/transactions/shipmentDocuments";
@@ -168,6 +181,7 @@ import {
   recalculateShipmentRating,
 } from "@/lib/transactions/resources/rating";
 import { useActiveBranch } from "@/lib/branch-context";
+import { lookupAwbLabels } from "@/lib/transactions/resources/awbQuery";
 import { getAwbEntryStatus } from "@/lib/transactions/resources/awbStatus";
 import {
   getBranchAwbStockSummary,
@@ -256,6 +270,7 @@ type PiecesLine = {
   volWeight: string;
   chargeWeight: string;
   division?: string;
+  measurementUnit?: string;
 };
 
 type ChargeLine = {
@@ -342,6 +357,9 @@ type KycDocument = {
   fileName: string;
   entryType: string;
   entryDate: string;
+  contentB64?: string;
+  mimeType?: string;
+  uploaded?: boolean;
 };
 
 type KycData = {
@@ -415,7 +433,32 @@ type AwbRow = AwbFullForm & {
   carrierTrackingNo?: string;
   carrierBookingStatus?: string;
   carrierLabelFileId?: string;
+  lockedByName?: string | null;
+  lockedAt?: string | null;
+  serverLocked?: boolean;
 };
+
+async function lockDisplayFor(row: {
+  is_locked?: boolean | null;
+  locked_by?: string | null;
+  locked_at?: string | null;
+}): Promise<{ lockedByName: string | null; lockedAt: string | null }> {
+  if (!row.is_locked || !row.locked_at) return { lockedByName: null, lockedAt: null };
+  let lockedByName: string | null = null;
+  if (row.locked_by) {
+    try {
+      const labels = await lookupAwbLabels({
+        userIds: [row.locked_by],
+        branchIds: [],
+        fileIds: [],
+      });
+      lockedByName = labels.users[row.locked_by] ?? null;
+    } catch {
+      lockedByName = null;
+    }
+  }
+  return { lockedByName, lockedAt: row.locked_at };
+}
 
 type SearchField = "awbNo" | "forwardingNo" | "deliveryNo" | "referenceNo";
 
@@ -906,7 +949,7 @@ async function validateVendorServicePair(form: {
   }
 }
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => istBookDate();
 
 const nowBookTime = () => {
   const d = new Date();
@@ -954,7 +997,7 @@ const emptyChargeDraft = (): ChargeDraft => ({
   description: "",
   itemAmount: "",
   itemFuel: "No",
-  taxOnFuel: "No",
+  taxOnFuel: "Yes",
   tax: "No",
   itemTotal: "0",
 });
@@ -1229,11 +1272,47 @@ const calcVolWeight = (draft: PiecesDraft) => {
   return ((l * w * h * pcs) / div).toFixed(3);
 };
 
-const calcChargeWeight = (draft: PiecesDraft, roundOff = false) => {
+const calcChargeWeight = (draft: PiecesDraft) => {
   const vol = Number.parseFloat(calcVolWeight(draft)) || 0;
   const act =
     (Number.parseFloat(draft.actualWeightPerPc) || 0) * (Number.parseFloat(draft.noOfPieces) || 0);
-  return formatChargeWeight(Math.max(vol, act), roundOff);
+  return formatChargeWeight(Math.max(vol, act), false);
+};
+
+function payableFromLines(form: AwbFullForm): string {
+  if (form.chargeLines.length === 0) return form.customerChargesTotal || "0.00";
+  const sum = form.chargeLines.reduce((sum, line) => sum + (Number.parseFloat(line.total) || 0), 0);
+  return sum.toFixed(2);
+}
+
+const AWB_ERROR_NAV: Record<string, number> = {
+  manualAwb: AWB_NAV.AWB_NO,
+  reference: AWB_NAV.REFERENCE,
+  client: AWB_NAV.CLIENT,
+  origin: AWB_NAV.SHIPPER_ORIGIN,
+  shipperCompany: AWB_NAV.SHIPPER_COMPANY,
+  shipperAddress1: AWB_NAV.SHIPPER_ADDRESS1,
+  shipperPincode: AWB_NAV.SHIPPER_PINCODE,
+  shipperCity: AWB_NAV.SHIPPER_CITY,
+  shipperState: AWB_NAV.SHIPPER_STATE,
+  shipperMobile: AWB_NAV.SHIPPER_MOBILE,
+  shipperEmail: AWB_NAV.SHIPPER_EMAIL,
+  shipperIec: AWB_NAV.SHIPPER_IEC,
+  destination: AWB_NAV.CONSIGNEE_DESTINATION,
+  consigneeCompany: AWB_NAV.CONSIGNEE_COMPANY,
+  consigneeAddress1: AWB_NAV.CONSIGNEE_ADDRESS1,
+  consigneePostcode: AWB_NAV.CONSIGNEE_PINCODE,
+  consigneeCity: AWB_NAV.CONSIGNEE_CITY,
+  consigneeMobile: AWB_NAV.CONSIGNEE_MOBILE,
+  consigneeEmail: AWB_NAV.CONSIGNEE_EMAIL,
+  consigneeIec: AWB_NAV.CONSIGNEE_IEC,
+  product: AWB_NAV.PRODUCT,
+  vendor: AWB_NAV.VENDOR,
+  service: AWB_NAV.SERVICE,
+  cashReceiptNo: AWB_NAV.CASH_RECEIPT_NO,
+  amountReceived: AWB_NAV.AMOUNT_RECEIVED,
+  cashReceiptDate: AWB_NAV.CASH_RECEIPT_DATE,
+  expectedDelivery: AWB_NAV.EXPECTED_DELIVERY,
 };
 
 function collectAwbProductionErrors(form: AwbFullForm): string[] {
@@ -1246,6 +1325,46 @@ function collectAwbProductionErrors(form: AwbFullForm): string[] {
   if (form.proforma.csbType.trim().toUpperCase() === "CSB 5" && !form.proforma.adCode.trim()) {
     errors.push("Ad Code is required when CSB Type is CSB 5");
   }
+  const bookDateError = futureBookDateError(form.bookDate);
+  if (bookDateError) errors.push(bookDateError);
+  errors.push(
+    ...awbTextErrors({
+      referenceNo: form.referenceNo,
+      paymentType: form.paymentType,
+      cashReceiptNo: form.cashReceiptNo,
+      amountReceived: form.amountReceived,
+      cashReceiptDate: form.cashReceiptDate,
+      bookDate: form.bookDate,
+      expectedDeliveryDate: form.expectedDeliveryDate,
+      totalAmount: payableFromLines(form),
+      shipper: {
+        companyName: form.shipper.companyName.name,
+        contactName: form.shipper.contactName,
+        address1: form.shipper.address1,
+        address2: form.shipper.address2,
+        city: form.shipper.city,
+        state: form.shipper.state,
+        telephone: form.shipper.telephone,
+        mobile: form.shipper.mobileNo,
+        email: form.shipper.email,
+        country: form.shipper.country,
+        iecNo: form.shipper.iecNo,
+      },
+      consignee: {
+        companyName: form.consignee.companyName.name,
+        contactName: form.consignee.contactName,
+        address1: form.consignee.address1,
+        address2: form.consignee.address2,
+        city: form.consignee.city,
+        state: form.consignee.state,
+        telephone: form.consignee.telephone,
+        mobile: form.consignee.mobileNo,
+        email: form.consignee.email,
+        country: form.consignee.country,
+        iecNo: form.consignee.iecNo,
+      },
+    }),
+  );
   return errors;
 }
 
@@ -1293,8 +1412,8 @@ async function notifySavedAwb(form: AwbFullForm) {
   if (warnings.length > 0) toast.warning(`Shipment saved. ${warnings[0]}`);
 }
 
-/** Service Details totals: Actual = Σ(weight/pc × pcs), Vol/Charge = Σ of piece-row values. */
-function summarizePieceLines(lines: PiecesLine[]): {
+/** Service Details totals. Charge weight is the sum of the piece rows, then one half-kg step when the vendor flag is on. */
+function summarizePieceLines(lines: PiecesLine[], roundTotal = false): {
   actualWeight: string;
   volWeight: string;
   chargeWeight: string;
@@ -1312,7 +1431,7 @@ function summarizePieceLines(lines: PiecesLine[]): {
   return {
     actualWeight: actual.toFixed(3),
     volWeight: vol.toFixed(3),
-    chargeWeight: charge.toFixed(3),
+    chargeWeight: formatChargeWeight(charge, roundTotal && lines.length > 0),
   };
 }
 
@@ -1649,6 +1768,37 @@ function AwbEntryPage() {
   const { isAuthenticated: authed, profile, hasPermission } = useAuth();
   const { activeBranchId } = useActiveBranch();
   const queryClient = useQueryClient();
+  const taxRateQuery = useQuery({
+    queryKey: ["awb-tax-rate"],
+    enabled: authed,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tax_rates")
+        .select("igst_pct, cgst_pct, sgst_pct")
+        .eq("status", "ACTIVE")
+        .is("deleted_at", null)
+        .is("customer_id", null)
+        .is("product_id", null)
+        .order("from_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+  const branchStateQuery = useQuery({
+    queryKey: ["awb-branch-state", activeBranchId],
+    enabled: authed && Boolean(activeBranchId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("branches")
+        .select("state_code")
+        .eq("id", activeBranchId!)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return data?.state_code ?? "";
+    },
+  });
   const userKey = draftUserKey(profile?.id, profile?.auth_user_id);
   const [demoRows, setDemoRows] = useState<AwbRow[]>(seedRows);
   const [colFilters, setColFilters] = useState(emptyColFilters());
@@ -1687,6 +1837,8 @@ function AwbEntryPage() {
   const [kycSearchInput, setKycSearchInput] = useState("");
   const kycFileRef = useRef<HTMLInputElement | null>(null);
   const mtsFileRef = useRef<HTMLInputElement | null>(null);
+  const loadedAwbIdRef = useRef<string | null>(null);
+  const loadedRateKeyRef = useRef<string | null>(null);
   const proformaFileRef = useRef<HTMLInputElement | null>(null);
   const [proformaImportErrors, setProformaImportErrors] = useState<ProformaImportError[]>([]);
   const [proformaImportPending, setProformaImportPending] = useState<ProformaLine[] | null>(null);
@@ -1750,10 +1902,12 @@ function AwbEntryPage() {
     enabled: authed,
   });
 
-  // Alt+~ / Alt+` shortcut to toggle Auto vs Manual AWB
+  // Alt+~ toggles Auto/Manual. Alt+U and Alt+C open the pieces and charges sections.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.altKey && (e.key === "~" || e.key === "`")) {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.repeat) return;
+      const key = e.key.toLowerCase();
+      if (key === "~" || key === "`") {
         e.preventDefault();
         setAwbMode((m) => {
           const next = m === "AUTO" ? "MANUAL" : "AUTO";
@@ -1763,11 +1917,27 @@ function AwbEntryPage() {
           }
           return next;
         });
+        return;
       }
+      if (!showForm || (key !== "u" && key !== "c" && key !== "w")) return;
+      e.preventDefault();
+      const order =
+        key === "u"
+          ? AWB_NAV.PIECES_ACTUAL_WEIGHT_PCS
+          : key === "c"
+            ? AWB_NAV.CHARGE_DESCRIPTION
+            : AWB_NAV.VENDOR_CHARGE_DESCRIPTION;
+      if (key === "u") setPiecesOpen(true);
+      else if (key === "c") setChargesOpen(true);
+      else setVendorChargesOpen(true);
+      window.setTimeout(() => {
+        const container = awbFormNavRef.current;
+        if (container) focusErpFieldByOrder(container, order);
+      }, 0);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [showForm]);
 
   type DraftUiStatus = "idle" | "saving" | "saved" | "error";
   const [draftUiStatus, setDraftUiStatus] = useState<DraftUiStatus>("idle");
@@ -1778,12 +1948,16 @@ function AwbEntryPage() {
   const allowLeaveRef = useRef(false);
   const draftHydratedRef = useRef(false);
   const skipNextAutosaveRef = useRef(false);
+  const saveLockRef = useRef(false);
   const lastDraftSnapshotRef = useRef<string>("");
 
   const formStatus = editing?.status ?? (showForm && !editing ? "DRAFT" : undefined);
-  const isReadOnly = Boolean(formStatus && formStatus !== "DRAFT");
+  const isTerminalStatus = formStatus === "CANCELLED" || formStatus === "VOID";
+  const persistedLocked = Boolean(editing?.id && editing.serverLocked);
+  const isReadOnly = isTerminalStatus || persistedLocked;
   const canModifyAwb = profile?.user_type === "ADMIN" || hasPermission("txn.awb-entry", "modify");
-  const entryLocked = isReadOnly || form.lock;
+  const canUnlockAwb = profile?.user_type === "ADMIN" || hasPermission("txn.awb-unlock", "modify");
+  const entryLocked = isTerminalStatus || persistedLocked;
   /** Persisted shipment id from save/book/open-edit — not the AWB number input. */
   const isSaved = Boolean(editing?.id);
   const hasUnfinishedDraft =
@@ -2024,21 +2198,27 @@ function AwbEntryPage() {
 
   const chargeSummary = useMemo(() => {
     if (ratingSummary) return ratingSummary;
-    const subTotal = form.chargeLines.reduce((s, l) => s + (Number.parseFloat(l.amount) || 0), 0);
+    const amountOf = (line: { amount: string }) => Number.parseFloat(line.amount) || 0;
+    const freight = form.chargeLines
+      .filter((line) => /freight/i.test(line.description))
+      .reduce((sum, line) => sum + amountOf(line), 0);
+    const other = form.chargeLines
+      .filter((line) => !/freight/i.test(line.description))
+      .reduce((sum, line) => sum + amountOf(line), 0);
     const totalFuel = form.chargeLines.reduce((s, l) => s + (Number.parseFloat(l.fuelAmt) || 0), 0);
     const igst = form.chargeLines.reduce((s, l) => s + (Number.parseFloat(l.igst) || 0), 0);
     const cgst = form.chargeLines.reduce((s, l) => s + (Number.parseFloat(l.cgst) || 0), 0);
     const sgst = form.chargeLines.reduce((s, l) => s + (Number.parseFloat(l.sgst) || 0), 0);
     const total = form.chargeLines.reduce((s, l) => s + (Number.parseFloat(l.total) || 0), 0);
     return {
-      freight: "0.00",
+      freight: freight.toFixed(2),
       fuel: totalFuel.toFixed(2),
       tax: (igst + cgst + sgst).toFixed(2),
-      otherCharges: subTotal.toFixed(2),
+      otherCharges: other.toFixed(2),
       vendorCost: "0.00",
       total: total.toFixed(2),
-      contractCharges: "0",
-      subTotal: subTotal.toFixed(2),
+      contractCharges: freight.toFixed(2),
+      subTotal: (freight + other).toFixed(2),
       totalFuel: totalFuel.toFixed(2),
       igst: igst.toFixed(2),
       cgst: cgst.toFixed(2),
@@ -2050,12 +2230,16 @@ function AwbEntryPage() {
   const applyServerRating = (breakdown: Parameters<typeof ratingToSummary>[0]) => {
     const summary = ratingToSummary(breakdown);
     const lines = ratingSnapshotToChargeLines(breakdown);
+    const persistedVendor = Number(breakdown.raw?.vendor_charges_total);
     setRatingSummary(summary);
     setForm((f) => ({
       ...f,
       chargeLines: lines,
-      customerChargesTotal: summary.subTotal,
-      vendorChargesTotal: summary.vendorCost,
+      customerChargesTotal: summary.totalAmount,
+      vendorChargesTotal:
+        Number.isFinite(persistedVendor) && breakdown.raw?.vendor_charges_total != null
+          ? persistedVendor.toFixed(2)
+          : summary.vendorCost,
     }));
   };
 
@@ -2117,8 +2301,28 @@ function AwbEntryPage() {
   const goPrevTab = () => {
     if (tabIndex > 0) setActiveTab(AWB_TABS[tabIndex - 1]);
   };
-  const goNextTab = () => {
-    if (tabIndex < AWB_TABS.length - 1) setActiveTab(AWB_TABS[tabIndex + 1]);
+  const openBlankAwb = () => {
+    setEditing(null);
+    setForm(emptyForm());
+    setRatingSummary(null);
+    setBookingErrors([]);
+    setActiveTab("awb");
+    setPiecesDraft(emptyPiecesDraft());
+    setEditingPiecesId(null);
+    setChargeDraft(emptyChargeDraft());
+    setProformaDraft(emptyProformaDraft());
+    setVendorChargeDraft(emptyVendorChargeDraft());
+    setLoadedClientProfile(null);
+    setClientLoading(false);
+    setVendorMeta({});
+    setKycSearchInput("");
+    allowLeaveRef.current = true;
+  };
+
+  const goNextTab = async () => {
+    const booked = await handleSave();
+    if (!booked) return;
+    openBlankAwb();
   };
 
   const patchProforma = (patch: Partial<ProformaData>) => {
@@ -2309,7 +2513,10 @@ function AwbEntryPage() {
           carrierLabelFileId: _clf,
           ...rest
         } = patch;
-        sourceForm = normalizeForm({ ...emptyForm(), ...rest } as AwbFullForm);
+        sourceForm = await withStoredKyc(
+          found.id,
+          normalizeForm({ ...emptyForm(), ...rest } as AwbFullForm),
+        );
       } else {
         const match = rows.find(
           (r) => r.awbNo === key || r.awbNo.toLowerCase() === key.toLowerCase(),
@@ -2602,10 +2809,13 @@ function AwbEntryPage() {
         destinationName: form.consignee.origin.name,
         bookDate: form.bookDate,
       }),
-      gstPct: awbGstPercent({ commercial: form.commercial, csbType: form.proforma.csbType }),
+      gstPct: awbGstPercent({ gstPercent: Number(taxRateQuery.data?.igst_pct ?? 18) }),
+      igstPct: Number(taxRateQuery.data?.igst_pct ?? 18),
+      cgstPct: Number(taxRateQuery.data?.cgst_pct ?? 9),
+      sgstPct: Number(taxRateQuery.data?.sgst_pct ?? 9),
       otherCharges: otherChargesSum,
-      customerBillingStateCode: form.shipper.state || "TELANGANA",
-      branchStateCode: "TELANGANA",
+      customerBillingStateCode: loadedClientProfile?.billingStateCode || "",
+      branchStateCode: branchStateQuery.data || "",
     };
   };
 
@@ -2661,6 +2871,7 @@ function AwbEntryPage() {
           return;
         }
 
+        toast.error(data.message || data.error || "Failed to calculate rating");
         if (options?.silent) {
           setChargeRefs((current) => ({ ...current, customerContract: "", customerZone: "" }));
           setForm((current) => ({
@@ -2668,8 +2879,6 @@ function AwbEntryPage() {
             customerChargesTotal: "0.00",
             balanceAmount: "0.00",
           }));
-        } else {
-          toast.error(data.message || "Failed to calculate rating");
         }
         return;
       }
@@ -2683,12 +2892,17 @@ function AwbEntryPage() {
         customerContract: data.contractNo || "",
         customerZone: data.zoneCode || "",
       }));
-      setForm((f) => ({
-        ...f,
-        customerChargesTotal: summary.totalAmount,
-        balanceAmount: balanceDue(summary.totalAmount, f.amountReceived),
-        chargeLines,
-      }));
+      setForm((f) => {
+        const manualLines = f.chargeLines.filter(
+          (line) => line.chargesType?.toUpperCase() !== "SYSTEM" && !/freight/i.test(line.description),
+        );
+        return {
+          ...f,
+          customerChargesTotal: summary.totalAmount,
+          balanceAmount: balanceDue(summary.totalAmount, f.amountReceived),
+          chargeLines: [...chargeLines, ...manualLines],
+        };
+      });
 
       if (!options?.silent) {
         toast.success(
@@ -2696,9 +2910,7 @@ function AwbEntryPage() {
         );
       }
     } catch (err) {
-      if (!options?.silent) {
-        toast.error(toErrorMessage(err, "Rate calculation request failed"));
-      }
+      toast.error(toErrorMessage(err, "Rate calculation request failed"));
     } finally {
       if (!options?.silent) setRatingBusy(null);
     }
@@ -2719,12 +2931,11 @@ function AwbEntryPage() {
       if (!options?.silent) setRatingBusy("vendor");
       const { ok, data } = await postRating("/api/shipments/vendor-rate", payload);
       if (!ok) {
+        toast.error(data.message || data.error || "No vendor tariff for this shipment");
         if (options?.silent) {
           setChargeRefs((current) => ({ ...current, vendorContract: "", vendorZone: "" }));
           setForm((current) => ({ ...current, vendorChargesTotal: "0.00" }));
-          return;
         }
-        toast.error(data.message || "No vendor tariff for this shipment");
         return;
       }
       const total = Number(data.totalAmount);
@@ -2740,7 +2951,7 @@ function AwbEntryPage() {
       setForm((current) => ({ ...current, vendorChargesTotal: total.toFixed(2) }));
       if (!options?.silent) toast.success(`Vendor cost ₹${total.toFixed(2)}`);
     } catch (err) {
-      if (!options?.silent) toast.error(toErrorMessage(err, "Vendor charge calculation failed"));
+      toast.error(toErrorMessage(err, "Vendor charge calculation failed"));
     } finally {
       if (!options?.silent) setRatingBusy(null);
     }
@@ -2797,12 +3008,18 @@ function AwbEntryPage() {
   };
 
   useEffect(() => {
-    const totals = summarizePieceLines(form.piecesLines);
+    const totals = summarizePieceLines(form.piecesLines, vendorRoundOff);
+    const pieceCount =
+      form.piecesLines.length > 0
+        ? String(sumPieceCount(form.piecesLines.map((line) => line.pieces)))
+        : null;
     setForm((f) => {
+      const nextPieces = pieceCount ?? f.pieces;
       if (
         f.actualWeight === totals.actualWeight &&
         f.volWeight === totals.volWeight &&
-        f.chargeWeight === totals.chargeWeight
+        f.chargeWeight === totals.chargeWeight &&
+        f.pieces === nextPieces
       ) {
         return f;
       }
@@ -2811,14 +3028,15 @@ function AwbEntryPage() {
         actualWeight: totals.actualWeight,
         volWeight: totals.volWeight,
         chargeWeight: totals.chargeWeight,
+        pieces: nextPieces,
       };
     });
-  }, [form.piecesLines]);
+  }, [form.piecesLines, vendorRoundOff]);
 
   useEffect(() => {
-    const next = balanceDue(form.customerChargesTotal, form.amountReceived);
+    const next = balanceDue(payableFromLines(form), form.amountReceived);
     setForm((current) => (current.balanceAmount === next ? current : { ...current, balanceAmount: next }));
-  }, [form.customerChargesTotal, form.amountReceived]);
+  }, [form.chargeLines, form.customerChargesTotal, form.amountReceived]);
 
   useEffect(() => {
     try {
@@ -2942,7 +3160,7 @@ function AwbEntryPage() {
       if (current.division === nextDivision) return current;
       const next = { ...current, division: nextDivision };
       next.volWeight = calcVolWeight(next);
-      next.chargeWeight = calcChargeWeight(next, vendorRoundOff);
+      next.chargeWeight = calcChargeWeight(next);
       return next;
     });
     // divisionKey is the only trigger. Typing a division must not reset it.
@@ -2951,7 +3169,7 @@ function AwbEntryPage() {
 
   useEffect(() => {
     setPiecesDraft((current) => {
-      const chargeWeight = calcChargeWeight(current, vendorRoundOff);
+      const chargeWeight = calcChargeWeight(current);
       return current.chargeWeight === chargeWeight ? current : { ...current, chargeWeight };
     });
     setForm((current) => {
@@ -2960,7 +3178,7 @@ function AwbEntryPage() {
       const piecesLines = current.piecesLines.map((line) => {
         const volumetric = Number.parseFloat(line.volWeight) || 0;
         const actual = (Number.parseFloat(line.actualWeightPerPc) || 0) * (Number.parseFloat(line.pieces) || 0);
-        const chargeWeight = formatChargeWeight(Math.max(volumetric, actual), vendorRoundOff);
+        const chargeWeight = formatChargeWeight(Math.max(volumetric, actual), false);
         if (chargeWeight === line.chargeWeight) return line;
         changed = true;
         return { ...line, chargeWeight };
@@ -3013,9 +3231,34 @@ function AwbEntryPage() {
       .join(","),
   ].join("|");
 
+  // Remember the rate inputs that were stored with this AWB. A later change
+  // is the only reason to calculate again.
+  useEffect(() => {
+    if (!editing?.id) {
+      loadedAwbIdRef.current = null;
+      loadedRateKeyRef.current = null;
+      return;
+    }
+    if (loadedAwbIdRef.current !== editing.id) {
+      loadedAwbIdRef.current = editing.id;
+      loadedRateKeyRef.current = customerRateKey;
+    }
+  }, [editing?.id, customerRateKey]);
+
   // Fill Customer Charges as soon as the client, lane, and weight are known.
+  // Opening a saved AWB shows the stored charges. Rating runs only after a
+  // rate field changes, and only for a new AWB while it is being filled in.
   useEffect(() => {
     if (!authed || !showForm || entryLocked) return;
+    if (
+      rateRefreshDecision({
+        isSavedAwb: Boolean(editing?.id),
+        loadedRateKey: loadedRateKeyRef.current,
+        currentRateKey: customerRateKey,
+      }) === "show-stored"
+    ) {
+      return;
+    }
     if (!form.clientName.code.trim()) return;
     if (!form.shipper.origin.code.trim() && !form.shipper.origin.name.trim()) return;
     if (!form.consignee.origin.code.trim() && !form.consignee.origin.name.trim()) return;
@@ -3024,7 +3267,7 @@ function AwbEntryPage() {
       if (form.vendor.code.trim()) void rateVendorRef.current({ silent: true });
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [customerRateKey]);
+  }, [customerRateKey, editing?.id, authed, showForm, entryLocked]);
 
   const openAdd = () => {
     const existing = restoreDraft ?? readLocalAwbDraft(userKey);
@@ -3065,7 +3308,11 @@ function AwbEntryPage() {
           carrierLabelFileId,
           ...rest
         } = patch;
-        const formForDocs = normalizeForm({ ...emptyForm(), ...rest } as AwbFullForm);
+        const formForDocs = await withStoredKyc(
+          row.id,
+          normalizeForm({ ...emptyForm(), ...rest } as AwbFullForm),
+        );
+        const lockDisplay = await lockDisplayFor(full);
         setEditing({
           ...emptyForm(),
           ...rest,
@@ -3077,20 +3324,25 @@ function AwbEntryPage() {
           carrierTrackingNo,
           carrierBookingStatus,
           carrierLabelFileId,
+          lockedByName: lockDisplay.lockedByName,
+          lockedAt: lockDisplay.lockedAt,
+          serverLocked: Boolean(full.is_locked),
         } as AwbRow);
         setForm(formForDocs);
         setRatingSummary(null);
-        try {
-          const breakdown = await getRatingBreakdown(row.id);
-          if (
-            breakdown.rating_version ||
-            (breakdown.snapshot?.length ?? 0) > 0 ||
-            breakdown.total > 0
-          ) {
-            applyServerRating(breakdown);
-          }
-        } catch {
-          /* draft without rating yet */
+        loadedAwbIdRef.current = null;
+        if (authed && (formForDocs.clientName.id || formForDocs.clientName.code.trim())) {
+          const seq = ++clientLoadSeqRef.current;
+          void loadClientProfile({
+            id: formForDocs.clientName.id,
+            code: formForDocs.clientName.code,
+            name: formForDocs.clientName.name,
+          })
+            .then((profile) => {
+              if (seq !== clientLoadSeqRef.current) return;
+              setLoadedClientProfile(profile);
+            })
+            .catch(() => undefined);
         }
         setPiecesDraft(emptyPiecesDraft());
         setEditingPiecesId(null);
@@ -3221,13 +3473,80 @@ function AwbEntryPage() {
     setRestoreDraft(null);
   };
 
-  const handleSave = async () => {
-    if (isReadOnly) return toast.error("BOOKED and CANCELLED shipments cannot be edited");
-    if (form.lock && !canModifyAwb) {
-      return toast.error("This AWB is locked. Unlock access is required to change it.");
+  const fieldError = useCallback(
+    (order: number) => {
+      for (const message of bookingErrors) {
+        const field = awbErrorField(message);
+        if (field && AWB_ERROR_NAV[field] === order) return message;
+      }
+      return undefined;
+    },
+    [bookingErrors],
+  );
+
+  const reportSaveErrors = useCallback((messages: string[]) => {
+    const list = messages.map((message) => message.trim()).filter(Boolean);
+    setBookingErrors(list);
+    if (list.length === 0) return;
+    toast.error(list[0]);
+    const orders = list
+      .map((message) => {
+        const field = awbErrorField(message);
+        return field ? AWB_ERROR_NAV[field] : undefined;
+      })
+      .filter((order): order is number => order != null);
+    if (orders.length === 0) return;
+    setNavInvalidOrders((prev) => {
+      const next = new Set(prev);
+      for (const order of orders) next.add(order);
+      return next;
+    });
+    const first = Math.min(...orders);
+    window.setTimeout(() => {
+      const container = awbFormNavRef.current;
+      if (container) focusErpFieldByOrder(container, first);
+    }, 0);
+  }, []);
+
+  const handleSave = async (): Promise<boolean> => {
+    if (saveLockRef.current) return false;
+    saveLockRef.current = true;
+    setSaving(true);
+    try {
+      return await persistAwb();
+    } finally {
+      saveLockRef.current = false;
+      setSaving(false);
     }
-    const productionError = collectAwbProductionErrors(form)[0];
-    if (productionError) return toast.error(productionError);
+  };
+
+  const persistAwb = async (): Promise<boolean> => {
+    if (isTerminalStatus) return toast.error("Cancelled shipments cannot be edited"), false;
+    if (persistedLocked) {
+      toast.error("This AWB is locked. An admin has to unlock it before it can be saved.");
+      return false;
+    }
+    const saveErrors = [
+      ...collectAwbProductionErrors(form),
+      ...consigneeBookingErrors({
+        companyName: form.consignee.companyName.name || form.consignee.companyName.code,
+        address1: form.consignee.address1,
+        city: form.consignee.city,
+        postcode: form.consignee.pincode,
+        country: form.consignee.country,
+        phone: form.consignee.mobileNo || form.consignee.telephone,
+      }),
+    ];
+    if (authed && loadedClientProfile && !loadedClientProfile.billingStateCode.trim()) {
+      saveErrors.push("Customer billing state is required. Set it on the customer before saving this AWB.");
+    }
+    if (authed && branchStateQuery.isFetched && !branchStateQuery.data?.trim()) {
+      saveErrors.push("Branch state is required before GST can be calculated. Set the branch state and try again.");
+    }
+    if (saveErrors.length > 0) {
+      reportSaveErrors(saveErrors);
+      return false;
+    }
 
     const awbValidation = validateAwbEntry({
       paymentType: form.paymentType,
@@ -3239,36 +3558,33 @@ function AwbEntryPage() {
     });
 
     if (!awbValidation.valid) {
-      setWeightErrorModal({
-        open: true,
-        message: awbValidation.message!,
-      });
-      return;
+      reportSaveErrors([awbValidation.message || "AWB details are incomplete"]);
+      return false;
     }
 
-    if (!authed && !form.awbNo.trim()) return toast.error("AWB No is required");
+    if (!authed && !form.awbNo.trim()) return reportSaveErrors(["AWB No is required"]), false;
     if (!form.clientName.code.trim() && !form.clientName.name.trim())
-      return toast.error("Client Name is required");
-    if (!isAwbLookupSelected(form.shipper.origin)) return toast.error("Origin is required");
+      return reportSaveErrors(["Client Name is required"]), false;
+    if (!isAwbLookupSelected(form.shipper.origin)) return reportSaveErrors(["Origin is required"]), false;
     if (!isAwbLookupSelected(form.shipper.companyName))
-      return toast.error("Shipper Company Name is required");
+      return reportSaveErrors(["Shipper Company Name is required"]), false;
     if (
       !formSetupSettings.consigneeNotRequired &&
       !form.consignee.origin.name.trim() &&
       !form.consignee.origin.code.trim()
     ) {
-      return toast.error("Destination is required");
+      return reportSaveErrors(["Destination is required"]), false;
     }
     if (
       !formSetupSettings.consigneeNotRequired &&
       !isAwbLookupSelected(form.consignee.companyName)
     ) {
-      return toast.error("Consignee Company Name is required");
+      return reportSaveErrors(["Consignee Company Name is required"]), false;
     }
-    if (!form.product.code.trim()) return toast.error("Product is required");
-    if (!isAwbLookupSelected(form.service)) return toast.error("Service is required");
+    if (!form.product.code.trim()) return reportSaveErrors(["Product is required"]), false;
+    if (!isAwbLookupSelected(form.service)) return reportSaveErrors(["Service is required"]), false;
     if (!formSetupSettings.airlineNotRequired && !form.airline.trim())
-      return toast.error("Airline is required");
+      return toast.error("Airline is required"), false;
     const payload = normalizeForm({
       ...form,
       awbNo: form.awbNo.trim(),
@@ -3277,22 +3593,22 @@ function AwbEntryPage() {
     });
 
     if (authed && !editing && branchStockQuery.data?.is_exhausted) {
-      return toast.error("Branch AWB stock quota is exhausted (Balance: 0). Cannot save new shipments.");
+      return toast.error("Branch AWB stock quota is exhausted (Balance: 0). Cannot save new shipments."), false;
     }
     if (authed && !editing && awbMode === "MANUAL") {
       if (!payload.awbNo.trim()) {
-        return toast.error("Manual AWB mode requires entering an AWB Number");
+        return toast.error("Manual AWB mode requires entering an AWB Number"), false;
       }
       try {
         const check = await validateManualAwb({
-          branchId: profile?.home_branch_id || undefined,
+          branchId: activeBranchId || profile?.home_branch_id || undefined,
           awbNo: payload.awbNo,
         });
         if (!check.valid) {
-          return toast.error(check.message || "Manual AWB is invalid or outside allotted series");
+          return reportSaveErrors([check.message || "Manual AWB is invalid or outside allotted series"]), false;
         }
       } catch (err) {
-        return toast.error(`AWB validation error: ${toErrorMessage(err)}`);
+        return toast.error(`AWB validation error: ${toErrorMessage(err)}`), false;
       }
     }
 
@@ -3382,15 +3698,36 @@ function AwbEntryPage() {
             ...payload,
             pickupId: editing?.pickupId ?? payload.pickupId,
           },
-          { manualAwbNo: awbMode === "MANUAL" ? payload.awbNo : null },
+          {
+            manualAwbNo: awbMode === "MANUAL" ? payload.awbNo : null,
+            branchId: activeBranchId || profile?.home_branch_id,
+          },
         );
-        const saved = await saveShipment({
+        const saved = await bookAwbShipment({
           id: editing?.id ?? null,
           rowVersion: editing?.rowVersion ?? null,
           fields,
           pieces,
           charges,
         });
+        const fresh = (await getShipmentById(saved.id)) ?? saved;
+        const children = await fetchShipmentChildren(saved.id);
+        for (const doc of payload.kyc.documents) {
+          if (!doc.contentB64 || doc.uploaded) continue;
+          try {
+            await saveShipmentDocument({
+              shipmentId: saved.id,
+              documentType: "KYC",
+              source: "USER_UPLOAD",
+              fileName: doc.fileName,
+              contentB64: doc.contentB64,
+              mimeType: doc.mimeType || "application/octet-stream",
+              status: "AVAILABLE",
+            });
+          } catch (kycError) {
+            toast.warning(toErrorMessage(kycError, "KYC file could not be stored"));
+          }
+        }
         if (carrierDocsToPersist.length > 0) {
           for (const doc of carrierDocsToPersist) {
             try {
@@ -3429,24 +3766,106 @@ function AwbEntryPage() {
         });
         await refreshLive();
         // Keep form open in saved/edit mode so the document-button row can appear.
-        const allocatedAwb = saved.awb_no || payload.awbNo;
+        const allocatedAwb = fresh.awb_no || saved.awb_no || payload.awbNo;
+        const money = (value: number | null | undefined) => (Number(value) || 0).toFixed(2);
+        const weightText = (value: number | null | undefined) => (Number(value) || 0).toFixed(3);
+        const customerLines = children.charges.filter((line) => line.side !== "VENDOR");
+        const vendorLines = children.charges.filter((line) => line.side === "VENDOR");
+        const gstOf = (key: "igst" | "cgst" | "sgst") =>
+          customerLines.reduce((sum, line) => sum + (Number(line[key]) || 0), 0);
+        const freightLine = customerLines.find((line) => /freight/i.test(line.description));
+        const otherLines = customerLines.filter((line) => line !== freightLine);
+        const otherAmount = otherLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
+        const fuelAmount = customerLines.reduce((sum, line) => sum + (Number(line.fuel_amount) || 0), 0);
+        const payable = Number(fresh.grand_total ?? fresh.customer_charges_total) || 0;
+        const lockDisplay = await lockDisplayFor(fresh);
         setEditing((prev) => ({
-          ...(prev ?? ({ ...payload, id: saved.id } as AwbRow)),
-          id: saved.id,
-          rowVersion: saved.row_version,
-          status: saved.current_status ?? prev?.status ?? "DRAFT",
+          ...(prev ?? ({ ...payload, id: fresh.id } as AwbRow)),
+          id: fresh.id,
+          rowVersion: fresh.row_version,
+          status: fresh.current_status || "BOOKED",
           awbNo: allocatedAwb,
+          lockedByName: lockDisplay.lockedByName,
+          lockedAt: lockDisplay.lockedAt,
+          serverLocked: Boolean(fresh.is_locked),
         }));
+        setRatingSummary({
+          freight: money(freightLine?.amount),
+          fuel: money(fuelAmount),
+          tax: money(gstOf("igst") + gstOf("cgst") + gstOf("sgst")),
+          otherCharges: money(otherAmount),
+          vendorCost: money(fresh.vendor_charges_total),
+          total: money(payable),
+          contractCharges: money(freightLine?.amount),
+          subTotal: money((Number(freightLine?.amount) || 0) + otherAmount),
+          totalFuel: money(fuelAmount),
+          igst: money(gstOf("igst")),
+          cgst: money(gstOf("cgst")),
+          sgst: money(gstOf("sgst")),
+          totalAmount: money(payable),
+        });
         setForm((f) => ({
           ...f,
           awbNo: allocatedAwb,
-          // After clone save, stamp child AWBs as {newAwb}-n when still blank.
-          piecesLines: f.piecesLines.map((line, i) => ({
-            ...line,
-            childAwb:
-              line.childAwb.trim() ||
-              (allocatedAwb ? `${allocatedAwb}-${i + 1}` : ""),
+          lock: Boolean(fresh.is_locked),
+          pieces: String(fresh.pieces ?? f.pieces),
+          piecesUnit: fresh.pieces_unit || f.piecesUnit,
+          actualWeight: weightText(fresh.actual_weight),
+          volWeight: weightText(fresh.vol_weight),
+          chargeWeight: weightText(fresh.charge_weight),
+          customerChargesTotal: money(payable),
+          vendorChargesTotal: money(fresh.vendor_charges_total),
+          balanceAmount: fresh.balance_amount == null ? f.balanceAmount : money(fresh.balance_amount),
+          piecesLines: children.pieces.map((piece, index) => ({
+            id: `pc-${piece.seq || index}`,
+            childAwb: piece.child_awb || (allocatedAwb ? `${allocatedAwb}-${piece.seq || index + 1}` : ""),
+            actualWeightPerPc: weightText(piece.actual_weight_per_pc),
+            pieces: String(piece.pieces ?? ""),
+            length: piece.length == null ? "" : String(piece.length),
+            breadth: piece.breadth == null ? "" : String(piece.breadth),
+            height: piece.height == null ? "" : String(piece.height),
+            volWeight: weightText(piece.vol_weight),
+            chargeWeight: weightText(piece.charge_weight),
+            division: piece.divisor == null ? "" : String(piece.divisor),
+            measurementUnit: piece.measurement_unit || "Centimeter",
           })),
+          chargeLines: customerLines.map((line, index) => ({
+            id: `ch-${line.seq || index}`,
+            description: line.description,
+            rate: money(line.rate),
+            amount: money(line.amount),
+            fuelApply: line.fuel_applies ? "Yes" : "No",
+            fuelAmt: money(line.fuel_amount),
+            taxApply: line.tax_applies ? "Yes" : "No",
+            taxOnFuel: line.tax_on_fuel ? "Yes" : "No",
+            igst: money(line.igst),
+            sgst: money(line.sgst),
+            cgst: money(line.cgst),
+            total: money(line.total),
+            chargesType: line.charges_type || "SYSTEM",
+          })),
+          forwarding: {
+            ...f.forwarding,
+            vendorAmount: money(fresh.vendor_charges_total),
+            vendorChargeLines: vendorLines.map((line, index) => ({
+              id: `vch-${line.seq || index}`,
+              description: line.description,
+              rate: money(line.rate),
+              amount: money(line.amount),
+              fuelApply: line.fuel_applies ? "Yes" : "No",
+              fuelAmt: money(line.fuel_amount),
+              taxApply: line.tax_applies ? "Yes" : "No",
+              taxOnFuel: line.tax_on_fuel ? "Yes" : "No",
+              igst: money(line.igst),
+              sgst: money(line.sgst),
+              cgst: money(line.cgst),
+              total: money(line.total),
+              chargesType: line.charges_type || "SYSTEM",
+            })),
+          },
+          kyc: {
+            documents: f.kyc.documents.map((doc) => ({ ...doc, contentB64: undefined, uploaded: true })),
+          },
         }));
         setLastSavedForm({ ...payload, awbNo: allocatedAwb });
         setVendorPanelKey((k) => k + 1);
@@ -3454,14 +3873,15 @@ function AwbEntryPage() {
         await clearDraftState();
         void awbStatusQuery.refetch();
         void branchStockQuery.refetch();
-        toast.success(editing ? "AWB entry updated" : `AWB ${allocatedAwb} saved (DRAFT)`);
+        toast.success(`AWB ${allocatedAwb} booked`);
         await notifySavedAwb({ ...payload, awbNo: allocatedAwb });
+        return true;
       } catch (e) {
-        toast.error(toErrorMessage(e));
-      } finally {
-        setSaving(false);
+        const message = toErrorMessage(e);
+        toast.error(message);
+        if (message.includes(";")) setWeightErrorModal({ open: true, message: message.replaceAll("; ", "\n") });
+        return false;
       }
-      return;
     }
 
     if (editing) {
@@ -3481,7 +3901,7 @@ function AwbEntryPage() {
       await notifySavedAwb(payload);
     } else {
       if (demoRows.some((r) => r.awbNo === payload.awbNo))
-        return toast.error("AWB No already exists");
+        return toast.error("AWB No already exists"), false;
       const id = crypto.randomUUID();
       const row: AwbRow = { id, status: "DRAFT", ...payload };
       setDemoRows((prev) => [row, ...prev]);
@@ -3493,6 +3913,7 @@ function AwbEntryPage() {
     setVendorPanelKey((k) => k + 1);
     allowLeaveRef.current = true;
     await clearDraftState();
+    return true;
   };
 
   const collectClientBookingErrors = (): string[] => {
@@ -3620,7 +4041,7 @@ function AwbEntryPage() {
       try {
         if (awbMode === "MANUAL" && payload.awbNo.trim()) {
           const manualCheck = await validateManualAwb({
-            branchId: profile?.home_branch_id || undefined,
+            branchId: activeBranchId || profile?.home_branch_id || undefined,
             awbNo: payload.awbNo,
           });
           if (!manualCheck.valid) {
@@ -3713,18 +4134,17 @@ function AwbEntryPage() {
             ...payload,
             pickupId: editing?.pickupId ?? payload.pickupId,
           },
-          { manualAwbNo: awbMode === "MANUAL" ? payload.awbNo : null },
+          {
+            manualAwbNo: awbMode === "MANUAL" ? payload.awbNo : null,
+            branchId: activeBranchId || profile?.home_branch_id,
+          },
         );
-        const saved = await saveShipment({
+        const booked = await bookAwbShipment({
           id: editing?.id ?? null,
           rowVersion: editing?.rowVersion ?? null,
           fields,
           pieces,
           charges,
-        });
-        const booked = await confirmBooking({
-          id: saved.id,
-          rowVersion: saved.row_version,
         });
         if (carrierDocsToPersist.length > 0) {
           for (const doc of carrierDocsToPersist) {
@@ -3772,12 +4192,16 @@ function AwbEntryPage() {
           toast.success(`AWB ${booked.awb_no} booked`);
         }
 
+        const lockDisplay = await lockDisplayFor(booked);
         setEditing((prev) => ({
           ...(prev ?? ({ ...payload, id: booked.id } as AwbRow)),
           id: booked.id,
           rowVersion: booked.row_version,
           status: booked.current_status ?? "BOOKED",
           awbNo: booked.awb_no || payload.awbNo,
+          lockedByName: lockDisplay.lockedByName,
+          lockedAt: lockDisplay.lockedAt,
+          serverLocked: Boolean(booked.is_locked),
         }));
         setForm((f) => ({ ...f, awbNo: booked.awb_no || f.awbNo }));
         setLastSavedForm({ ...payload, awbNo: booked.awb_no || payload.awbNo });
@@ -4379,7 +4803,7 @@ function AwbEntryPage() {
     setPiecesDraft((d) => {
       const next = { ...d, ...patch };
       next.volWeight = calcVolWeight(next);
-      next.chargeWeight = calcChargeWeight(next, vendorRoundOff);
+      next.chargeWeight = calcChargeWeight(next);
       return next;
     });
   };
@@ -4394,6 +4818,10 @@ function AwbEntryPage() {
     const file = mtsFileRef.current?.files?.[0];
     if (!file) {
       toast.error("Select an Excel or CSV file");
+      return;
+    }
+    if (!mtsFileAccepted(file.name)) {
+      toast.error("Use an Excel (.xlsx, .xls) or CSV file");
       return;
     }
     try {
@@ -4449,6 +4877,7 @@ function AwbEntryPage() {
                   volWeight: piecesDraft.volWeight,
                   chargeWeight: piecesDraft.chargeWeight,
                   division: piecesDraft.division,
+                  measurementUnit: piecesDraft.measurementUnit,
                 }
               : line,
           ),
@@ -4465,6 +4894,7 @@ function AwbEntryPage() {
         volWeight: piecesDraft.volWeight,
         chargeWeight: piecesDraft.chargeWeight,
         division: piecesDraft.division,
+        measurementUnit: piecesDraft.measurementUnit,
       };
       return { ...f, piecesLines: [...f.piecesLines, line] };
     });
@@ -4475,7 +4905,7 @@ function AwbEntryPage() {
 
   const editPiecesLine = (line: PiecesLine) => {
     const next: PiecesDraft = {
-      measurementUnit: piecesDraft.measurementUnit,
+      measurementUnit: line.measurementUnit || piecesDraft.measurementUnit,
       actualWeightPerPc: line.actualWeightPerPc,
       noOfPieces: line.pieces,
       length: line.length,
@@ -4510,10 +4940,9 @@ function AwbEntryPage() {
   };
 
   const priceChargeDraft = (draft: ChargeDraft) => {
-    const head = chargeHeads.find((row) => row.name === draft.description || row.code === draft.description);
-    const applyFuel = head ? head.apply_fuel : draft.itemFuel === "Yes";
-    const applyTaxOnFuel = head ? head.apply_tax_on_fuel : draft.taxOnFuel === "Yes";
-    const applyTax = head ? head.apply_tax : draft.tax === "Yes";
+    const applyFuel = draft.itemFuel === "Yes";
+    const applyTaxOnFuel = draft.taxOnFuel === "Yes";
+    const applyTax = draft.tax === "Yes";
     return manualChargeAmounts({
       itemAmount: Number.parseFloat(draft.itemAmount) || 0,
       applyFuel,
@@ -4529,8 +4958,11 @@ function AwbEntryPage() {
         destinationName: form.consignee.origin.name,
         bookDate: form.bookDate,
       }),
-      gstPct: awbGstPercent({ commercial: form.commercial, csbType: form.proforma.csbType }),
-      intraState: awbIntraState(form.shipper.state, form.consignee.state),
+      gstPct: awbGstPercent({ gstPercent: Number(taxRateQuery.data?.igst_pct ?? 18) }),
+      intraState: awbIntraState(
+        loadedClientProfile?.billingStateCode || "",
+        branchStateQuery.data || "",
+      ),
     });
   };
 
@@ -4809,12 +5241,77 @@ function AwbEntryPage() {
     });
   };
 
-  const addKycDocument = (file: File) => {
+  const withStoredKyc = async (shipmentId: string, source: AwbFullForm): Promise<AwbFullForm> => {
+    const stored = await getShipmentDocument(shipmentId, "KYC").catch(() => null);
+    if (!stored?.contentB64) return source;
+    const docs = source.kyc.documents;
+    const match = docs.find((doc) => doc.fileName === stored.fileName) ?? docs[0];
+    const hydrated: KycDocument = {
+      id: match?.id || stored.id || crypto.randomUUID(),
+      fileName: stored.fileName || match?.fileName || "kyc",
+      entryType: match?.entryType || "KYC",
+      entryDate: match?.entryDate || "",
+      contentB64: stored.contentB64,
+      mimeType: stored.mimeType || match?.mimeType || "application/octet-stream",
+      uploaded: true,
+    };
+    const documents =
+      docs.length === 0
+        ? [hydrated]
+        : docs.map((doc) =>
+            doc.id === hydrated.id || doc.fileName === hydrated.fileName
+              ? {
+                  ...doc,
+                  contentB64: stored.contentB64,
+                  mimeType: stored.mimeType || doc.mimeType,
+                  uploaded: true,
+                }
+              : doc,
+          );
+    return { ...source, kyc: { documents } };
+  };
+
+  const downloadKycDocument = (doc: KycDocument) => {
+    if (!doc.contentB64) {
+      toast.error("This KYC file is not stored on the shipment");
+      return;
+    }
+    const href = documentObjectUrl({
+      id: doc.id,
+      type: "KYC",
+      title: "KYC",
+      status: "AVAILABLE",
+      available: true,
+      contentB64: doc.contentB64,
+      mimeType: doc.mimeType,
+      fileName: doc.fileName,
+    });
+    if (!href) {
+      toast.error("This KYC file could not be opened");
+      return;
+    }
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = doc.fileName || "kyc";
+    link.click();
+    window.setTimeout(() => revokeDocumentObjectUrl(href), 1500);
+  };
+
+  const addKycDocument = async (file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
     const doc: KycDocument = {
       id: crypto.randomUUID(),
       fileName: file.name,
       entryType: kycDocType,
       entryDate: formatDisplayDate(todayIso()),
+      contentB64: btoa(binary),
+      mimeType: file.type || "application/octet-stream",
+      uploaded: false,
     };
     setForm((f) => ({ ...f, kyc: { documents: [...f.kyc.documents, doc] } }));
     toast.success("KYC document added");
@@ -4892,8 +5389,7 @@ function AwbEntryPage() {
           !f.vendor.code.trim() && !f.vendor.name.trim() && profile.defaultVendor.code
             ? profile.defaultVendor
             : f.vendor,
-        shipper: {
-          ...f.shipper,
+        shipper: fillEmptyPartyFields(f.shipper, {
           ...hydrate.shipper,
           origin:
             hydrate.shipper.origin.code || hydrate.shipper.origin.name
@@ -4901,7 +5397,7 @@ function AwbEntryPage() {
               : f.shipper.origin.code.trim()
                 ? f.shipper.origin
                 : DEFAULT_SHIPPER_ORIGIN,
-        },
+        }),
         proforma: {
           ...(f.proforma ?? emptyProforma()),
           currency: profile.defaults.currency || f.proforma?.currency || "INR",
@@ -4982,9 +5478,6 @@ function AwbEntryPage() {
     });
   }, [form.product, form.vendor, form.service]);
 
-  const selectedChargeHead = chargeHeads.find(
-    (row) => row.name === chargeDraft.description || row.code === chargeDraft.description,
-  );
   const chargePreview = priceChargeDraft(chargeDraft);
   const chargeFuelPct = fuelPercentFor({
     rows: fuelRows,
@@ -4996,12 +5489,10 @@ function AwbEntryPage() {
     destinationName: form.consignee.origin.name,
     bookDate: form.bookDate,
   });
-  const chargeGstPct = awbGstPercent({ commercial: form.commercial, csbType: form.proforma.csbType });
+  const chargeGstPct = awbGstPercent({ gstPercent: Number(taxRateQuery.data?.igst_pct ?? 18) });
   const chargeFuelAmount = Number.parseFloat(chargePreview.fuelAmt) || 0;
-  const chargeTaxOnFuelOn = selectedChargeHead
-    ? selectedChargeHead.apply_tax_on_fuel
-    : chargeDraft.taxOnFuel === "Yes";
-  const chargeTaxOn = selectedChargeHead ? selectedChargeHead.apply_tax : chargeDraft.tax === "Yes";
+  const chargeTaxOnFuelOn = chargeDraft.taxOnFuel === "Yes";
+  const chargeTaxOn = chargeDraft.tax === "Yes";
   const chargeTaxOnFuelAmount = chargeTaxOnFuelOn ? (chargeFuelAmount * chargeGstPct) / 100 : 0;
   const chargeTaxAmount = chargeTaxOn
     ? ((Number.parseFloat(chargeDraft.itemAmount) || 0) * chargeGstPct) / 100
@@ -5026,6 +5517,8 @@ function AwbEntryPage() {
   const displayCreditNoteNo = awbStatusQuery.data?.creditNoteNo ?? form.creditNoteNo ?? "0";
   const displayFlightNo = awbStatusQuery.data?.flightNo || form.flightNo || "";
   const awbStatusItems: { label: string; value: string }[] = [
+    { label: "AWB No:", value: form.awbNo },
+    { label: "Status:", value: editing?.status ?? "" },
     { label: "AWB UserID:", value: displayAwbUserId },
     { label: "POD UserID:", value: displayPodUserId },
     { label: "Manifest No:", value: displayManifestNo },
@@ -5150,18 +5643,22 @@ function AwbEntryPage() {
                       <div className="mb-2 rounded border border-border bg-card p-2 pt-2.5">
                         <div className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-2 lg:grid-cols-12 lg:gap-x-2">
                           <div className="flex flex-col lg:col-span-2">
-                            <FieldWrapper borderLabel label={`AWB No. [${awbMode}]`}>
+                            <FieldWrapper borderLabel label={`AWB No. [${awbMode}]`} error={fieldError(AWB_NAV.AWB_NO)}>
                               <div className="relative flex items-center w-full">
                                 <ErpNavInput
                                   order={AWB_NAV.AWB_NO}
                                   value={form.awbNo}
                                   disabled={awbMode === "AUTO" || !!editing || isReadOnly || clientSelected}
-                                  onValueChange={(v) => setForm((f) => ({ ...f, awbNo: v }))}
+                                  inputMode="numeric"
+                                  maxLength={6}
+                                  onValueChange={(v) =>
+                                    setForm((f) => ({ ...f, awbNo: v.replace(/\D/g, "").slice(0, 6) }))
+                                  }
                                   onBlur={async () => {
                                     if (awbMode === "MANUAL" && form.awbNo.trim() && authed) {
                                       try {
                                         const res = await validateManualAwb({
-                                          branchId: profile?.home_branch_id || undefined,
+                                          branchId: activeBranchId || profile?.home_branch_id || undefined,
                                           awbNo: form.awbNo,
                                         });
                                         if (!res.valid) {
@@ -5209,6 +5706,7 @@ function AwbEntryPage() {
                             <ErpNavDateInput
                               order={AWB_NAV.BOOK_DATE}
                               readOnly={!canModifyAwb}
+                              max={todayIso()}
                               value={form.bookDate}
                               onValueChange={(v) => setForm((f) => ({ ...f, bookDate: v }))}
                               className="h-8 px-1.5 text-[13px]"
@@ -5228,11 +5726,12 @@ function AwbEntryPage() {
                               className="h-8 px-1.5 text-[13px]"
                             />
                           </FieldWrapper>
-                          <FieldWrapper borderLabel label="Reference No." className="lg:col-span-2">
+                          <FieldWrapper borderLabel label="Reference No." className="lg:col-span-2" error={fieldError(AWB_NAV.REFERENCE)}>
                             <ErpNavInput
                               order={AWB_NAV.REFERENCE}
                               value={form.referenceNo}
-                              onValueChange={(v) => setForm((f) => ({ ...f, referenceNo: v }))}
+                              maxLength={30}
+                              onValueChange={(v) => setForm((f) => ({ ...f, referenceNo: clipText(v, 30) }))}
                               className="h-8 px-1.5 text-[13px]"
                             />
                           </FieldWrapper>
@@ -5243,6 +5742,7 @@ function AwbEntryPage() {
                               label="Client Name"
                               required
                               invalid={navInvalidOrders.has(AWB_NAV.CLIENT)}
+                              error={fieldError(AWB_NAV.CLIENT)}
                             >
                               <ClientNameField
                                 value={form.clientName}
@@ -5291,6 +5791,7 @@ function AwbEntryPage() {
                           originRequired
                           addressRequired
                           invalidNavOrders={navInvalidOrders}
+                          fieldError={fieldError}
                           onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
                         />
                         <PartySection
@@ -5300,7 +5801,18 @@ function AwbEntryPage() {
                           originLookup="internationalDestination"
                           originRequired={consigneeFieldsRequired}
                           companyRequired={consigneeFieldsRequired}
+                          addressRequired
+                          phoneRequired
+                          pincodeCountryCode={
+                            !form.consignee.country.trim() ||
+                            form.consignee.country.trim().toLowerCase() === "india"
+                              ? "IN"
+                              : /^[A-Za-z]{2}$/.test(form.consignee.origin.code.trim())
+                                ? form.consignee.origin.code.trim().toUpperCase()
+                                : "XX"
+                          }
                           invalidNavOrders={navInvalidOrders}
+                          fieldError={fieldError}
                           onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
                         />
                         <ServicesSection
@@ -5308,6 +5820,7 @@ function AwbEntryPage() {
                           setForm={setForm}
                           airlineRequired={!formSetupSettings.airlineNotRequired}
                           invalidNavOrders={navInvalidOrders}
+                          fieldError={fieldError}
                         />
                       </div>
 
@@ -5327,8 +5840,8 @@ function AwbEntryPage() {
                             </Button>
                             <span className="text-sm text-foreground">Total Amount</span>
                             <span className="min-w-16 text-sm font-medium tabular-nums text-foreground">
-                              {Number.parseFloat(form.customerChargesTotal) > 0
-                                ? Number.parseFloat(form.customerChargesTotal).toFixed(2)
+                              {Number.parseFloat(payableFromLines(form)) > 0
+                                ? payableFromLines(form)
                                 : ""}
                             </span>
                           </div>
@@ -5548,7 +6061,7 @@ function AwbEntryPage() {
                             </FieldWrapper>
                             <FieldWrapper
                               borderLabel
-                              label="Vol Weight (Discount - 0 %)"
+                              label="Vol Weight"
                               className="sm:col-span-2 md:col-span-2 lg:col-span-2 xl:col-span-1"
                             >
                               <Input
@@ -5595,7 +6108,7 @@ function AwbEntryPage() {
                             </div>
                           </div>
 
-                          <div className="overflow-x-auto border-t">
+                          <div className="max-h-80 overflow-auto border-t">
                             <table className="w-full min-w-[720px] text-sm">
                               <TableHeader>
                                 <TableRow className="bg-sidebar hover:bg-sidebar">
@@ -5789,7 +6302,7 @@ function AwbEntryPage() {
                                     ...d,
                                     description: head?.name || v,
                                     itemFuel: head ? (head.apply_fuel ? "Yes" : "No") : d.itemFuel,
-                                    taxOnFuel: head ? (head.apply_tax_on_fuel ? "Yes" : "No") : d.taxOnFuel,
+                                    taxOnFuel: "Yes",
                                     tax: head ? (head.apply_tax ? "Yes" : "No") : d.tax,
                                     itemAmount:
                                       d.itemAmount ||
@@ -5819,7 +6332,6 @@ function AwbEntryPage() {
                                 <ErpNavSelect
                                   order={AWB_NAV.CHARGE_ITEM_FUEL}
                                   value={chargeDraft.itemFuel}
-                                  disabled={Boolean(selectedChargeHead)}
                                   onValueChange={(v) => setChargeDraft((d) => ({ ...d, itemFuel: v }))}
                                   items={YES_NO}
                                   triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
@@ -5836,7 +6348,6 @@ function AwbEntryPage() {
                                 <ErpNavSelect
                                   order={AWB_NAV.CHARGE_TAX_ON_FUEL}
                                   value={chargeDraft.taxOnFuel}
-                                  disabled={Boolean(selectedChargeHead)}
                                   onValueChange={(v) => setChargeDraft((d) => ({ ...d, taxOnFuel: v }))}
                                   items={YES_NO}
                                   triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
@@ -5853,7 +6364,6 @@ function AwbEntryPage() {
                                 <ErpNavSelect
                                   order={AWB_NAV.CHARGE_TAX}
                                   value={chargeDraft.tax}
-                                  disabled={Boolean(selectedChargeHead)}
                                   onValueChange={(v) => setChargeDraft((d) => ({ ...d, tax: v }))}
                                   items={YES_NO}
                                   triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
@@ -5964,21 +6474,62 @@ function AwbEntryPage() {
                           paymentTypeReadOnly={paymentTypeReadOnly}
                           clientLoading={clientLoading}
                           isReadOnly={isReadOnly}
+                          executiveBranchId={activeBranchId}
+                          executiveLocation={form.shipper.origin.code}
+                          fieldError={fieldError}
                         />
                       </FormSection>
                     </div>
                   </fieldset>
-                  <div className="flex items-center gap-2 px-4 pb-2">
+                  <div className="flex flex-wrap items-center gap-2 px-4 pb-2">
                     <Checkbox
                       id="lock"
                       checked={form.lock}
-                      disabled={isReadOnly || !canModifyAwb}
+                      disabled={isTerminalStatus || persistedLocked || !canModifyAwb}
                       onCheckedChange={(checked) => setForm((current) => ({ ...current, lock: checked === true }))}
                       {...erpNavOrder(AWB_NAV.LOCK)}
                     />
                     <label htmlFor="lock" className="text-sm text-muted-foreground">
                       Lock
                     </label>
+                    {persistedLocked ? (
+                      <span className="text-sm text-muted-foreground">
+                        {lockedByCaption(editing?.lockedByName, editing?.lockedAt) ?? "Locked"}
+                      </span>
+                    ) : null}
+                    {persistedLocked && canUnlockAwb ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8"
+                        disabled={saving}
+                        onClick={() => {
+                          if (!editing?.id) return;
+                          setSaving(true);
+                          void unlockShipment(editing.id)
+                            .then((row) => {
+                              setForm((current) => ({ ...current, lock: false }));
+                              setEditing((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      rowVersion: row.row_version,
+                                      status: row.current_status,
+                                      lockedByName: null,
+                                      lockedAt: null,
+                                      serverLocked: false,
+                                    }
+                                  : current,
+                              );
+                              toast.success(`AWB ${row.awb_no} unlocked`);
+                            })
+                            .catch((error) => toast.error(toErrorMessage(error)))
+                            .finally(() => setSaving(false));
+                        }}
+                      >
+                        Unlock
+                      </Button>
+                    ) : null}
                   </div>
                   {editing?.id &&
                     (showShipmentDocumentsCenter || vendorShippingActive || vendorBookingBusy) ? (
@@ -6108,7 +6659,7 @@ function AwbEntryPage() {
                   ) : null}
                   <div className="border-t px-4 py-4 md:px-6">
                     {bookingErrors.length > 0 ? (
-                      <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                      <div role="alert" className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                         {bookingErrors.map((msg) => (
                           <div key={msg}>{msg}</div>
                         ))}
@@ -6968,15 +7519,27 @@ function AwbEntryPage() {
                                     <TableCell>{d.entryType}</TableCell>
                                     <TableCell>{d.entryDate}</TableCell>
                                     <TableCell>
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="h-8 w-8 text-destructive"
-                                        onClick={() => removeKycDocument(d.id)}
-                                        aria-label="Delete KYC document"
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
+                                      <div className="flex items-center gap-1">
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-8 w-8"
+                                          disabled={!d.contentB64}
+                                          onClick={() => downloadKycDocument(d)}
+                                          aria-label="Download KYC document"
+                                        >
+                                          <Download className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-8 w-8 text-destructive"
+                                          onClick={() => removeKycDocument(d.id)}
+                                          aria-label="Delete KYC document"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
                                     </TableCell>
                                   </TableRow>
                                 ))
@@ -7803,7 +8366,10 @@ function PartySection({
   originRequired,
   companyRequired = true,
   addressRequired = false,
+  phoneRequired = false,
+  pincodeCountryCode = "IN",
   invalidNavOrders,
+  fieldError,
   onValidationError,
 }: {
   title: string;
@@ -7813,7 +8379,10 @@ function PartySection({
   originRequired?: boolean;
   companyRequired?: boolean;
   addressRequired?: boolean;
+  phoneRequired?: boolean;
+  pincodeCountryCode?: string;
   invalidNavOrders?: Set<number>;
+  fieldError?: (order: number) => string | undefined;
   onValidationError?: (message: string) => void;
 }) {
   const isConsignee = title.includes("Consignee");
@@ -7875,6 +8444,7 @@ function PartySection({
           label={originLabel}
           required={originRequired}
           invalid={invalidNavOrders?.has(nav.origin)}
+          error={fieldError?.(nav.origin)}
         >
           <LookupPairInput
             lookup={originLookup}
@@ -7890,11 +8460,12 @@ function PartySection({
           label="Company Name"
           required={companyRequired}
           invalid={invalidNavOrders?.has(nav.company)}
+          error={fieldError?.(nav.company)}
         >
           <PartyContactLookup
             role={isConsignee ? "consignee" : "shipper"}
             value={party.companyName}
-            onCompanyChange={(v) => onChange({ companyName: v })}
+            onCompanyChange={(v) => onChange({ companyName: { ...v, name: clipText(v.name, 100) } })}
             compact
             splitCode
             manualSearch
@@ -7933,15 +8504,17 @@ function PartySection({
               order={nav.contact}
               className={inputClass}
               value={party.contactName}
-              onValueChange={(v) => onChange({ contactName: v })}
+              maxLength={100}
+              onValueChange={(v) => onChange({ contactName: clipText(v, 100) })}
             />
           </FieldWrapper>
-          <FieldWrapper borderLabel label="Address 1" required={addressRequired}>
+          <FieldWrapper borderLabel label="Address 1" required={addressRequired} error={fieldError?.(nav.address1)}>
             <ErpNavInput
               order={nav.address1}
               className={inputClass}
               value={party.address1}
-              onValueChange={(v) => onChange({ address1: v })}
+              maxLength={100}
+              onValueChange={(v) => onChange({ address1: clipText(v, 100) })}
             />
           </FieldWrapper>
         </div>
@@ -7949,18 +8522,19 @@ function PartySection({
           <ErpNavInput
             order={nav.address2}
             className={inputClass}
-            value={party.address2}
-            onValueChange={(v) => onChange({ address2: v })}
+              value={party.address2}
+              maxLength={100}
+              onValueChange={(v) => onChange({ address2: clipText(v, 100) })}
           />
         </FieldWrapper>
         <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Pincode" required={addressRequired}>
+          <FieldWrapper borderLabel label="Pincode" required={addressRequired} error={fieldError?.(nav.pincode)}>
             <PincodeAutocomplete
               navOrder={nav.pincode}
               className={inputClass}
               placeholder=""
               value={party.pincode}
-              countryCode="IN"
+              countryCode={pincodeCountryCode}
               onValueChange={(v) => onChange({ pincode: v })}
               onSelect={(item) =>
                 onChange({
@@ -7972,22 +8546,24 @@ function PartySection({
               onCommit={onPincodeCommit}
             />
           </FieldWrapper>
-          <FieldWrapper borderLabel label="City" required={addressRequired}>
+          <FieldWrapper borderLabel label="City" required={addressRequired} error={fieldError?.(nav.city)}>
             <ErpNavInput
               order={nav.city}
               className={inputClass}
               value={party.city}
-              onValueChange={(v) => onChange({ city: v })}
+              maxLength={50}
+              onValueChange={(v) => onChange({ city: clipText(v, 50) })}
             />
           </FieldWrapper>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="State" required={addressRequired}>
+          <FieldWrapper borderLabel label="State" required={addressRequired} error={fieldError?.(nav.state)}>
             <ErpNavInput
               order={nav.state}
               className={inputClass}
               value={party.state}
-              onValueChange={(v) => onChange({ state: v })}
+              maxLength={50}
+              onValueChange={(v) => onChange({ state: clipText(v, 50) })}
             />
           </FieldWrapper>
           <FieldWrapper borderLabel label="Telephone">
@@ -7995,30 +8571,33 @@ function PartySection({
               order={nav.telephone}
               className={inputClass}
               value={party.telephone}
-              onValueChange={(v) => onChange({ telephone: v })}
+              maxLength={15}
+              onValueChange={(v) => onChange({ telephone: clipText(v, 15) })}
             />
           </FieldWrapper>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Mobile No.">
+          <FieldWrapper borderLabel label="Mobile No." required={phoneRequired} error={fieldError?.(nav.mobile)}>
             <ErpNavInput
               order={nav.mobile}
               className={inputClass}
               value={party.mobileNo}
-              onValueChange={(v) => onChange({ mobileNo: v })}
+              maxLength={15}
+              onValueChange={(v) => onChange({ mobileNo: clipText(v, 15) })}
             />
           </FieldWrapper>
-          <FieldWrapper borderLabel label="E-Mail">
+          <FieldWrapper borderLabel label="E-Mail" error={fieldError?.(nav.email)}>
             <ErpNavInput
               order={nav.email}
               className={inputClass}
               value={party.email}
-              onValueChange={(v) => onChange({ email: v })}
+              maxLength={100}
+              onValueChange={(v) => onChange({ email: clipText(v, 100) })}
             />
           </FieldWrapper>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Country">
+          <FieldWrapper borderLabel label="Country" required={phoneRequired}>
             <ErpNavInput
               order={nav.country}
               className={`cursor-default bg-muted/40 ${inputClass}`}
@@ -8027,12 +8606,13 @@ function PartySection({
               onValueChange={(v) => onChange({ country: v })}
             />
           </FieldWrapper>
-          <FieldWrapper borderLabel label="IEC No">
+          <FieldWrapper borderLabel label="IEC No" error={fieldError?.(nav.iec)}>
             <ErpNavInput
               order={nav.iec}
               className={inputClass}
               value={party.iecNo}
-              onValueChange={(v) => onChange({ iecNo: v.toUpperCase() })}
+              maxLength={10}
+              onValueChange={(v) => onChange({ iecNo: clipText(v.toUpperCase(), 10) })}
               onBlur={() => {
                 if (party.iecNo && party.iecNo.trim()) {
                   const res = validateDocumentId("IEC", party.iecNo, `${isConsignee ? "Consignee" : "Shipper"} IEC`);
@@ -8091,11 +8671,13 @@ function ServicesSection({
   setForm,
   airlineRequired,
   invalidNavOrders,
+  fieldError,
 }: {
   form: AwbFullForm;
   setForm: React.Dispatch<React.SetStateAction<AwbFullForm>>;
   airlineRequired?: boolean;
   invalidNavOrders?: Set<number>;
+  fieldError?: (order: number) => string | undefined;
 }) {
   const onCommit = useErpNavCommit();
   const onVendorCommit = useErpNavCommit(AWB_NAV.VENDOR);
@@ -8114,6 +8696,7 @@ function ServicesSection({
           label="Product"
           required
           invalid={invalidNavOrders?.has(AWB_NAV.PRODUCT)}
+          error={fieldError?.(AWB_NAV.PRODUCT)}
         >
           <LookupPairInput
             lookup="product"
@@ -8128,6 +8711,7 @@ function ServicesSection({
           label="Vendor"
           required
           invalid={invalidNavOrders?.has(AWB_NAV.VENDOR)}
+          error={fieldError?.(AWB_NAV.VENDOR)}
         >
           <LookupPairInput
             lookup="vendor"
@@ -8162,6 +8746,7 @@ function ServicesSection({
             label="Service"
             required
             invalid={invalidNavOrders?.has(AWB_NAV.SERVICE)}
+            error={fieldError?.(AWB_NAV.SERVICE)}
           >
             <VendorServiceLookup
               vendor={form.vendor}
@@ -8188,8 +8773,9 @@ function ServicesSection({
             <ErpNavInput
               order={AWB_NAV.SHIPMENT_VALUE}
               className={`min-w-0 flex-1 ${inputClass}`}
-              value={form.shipmentValue}
-              onValueChange={(v) => setForm((f) => ({ ...f, shipmentValue: decimalNumber(v) }))}
+          value={form.shipmentValue}
+          onValueChange={(v) => setForm((f) => ({ ...f, shipmentValue: decimalNumber(v) }))}
+          onBlur={() => setForm((f) => ({ ...f, shipmentValue: formatMoney2(f.shipmentValue) }))}
             />
             <Select
               value={form.shipmentCurrency}
@@ -8334,12 +8920,18 @@ function ShipmentDetailsFields({
   paymentTypeReadOnly,
   clientLoading,
   isReadOnly,
+  executiveBranchId,
+  executiveLocation,
+  fieldError,
 }: {
   form: AwbFullForm;
   setForm: React.Dispatch<React.SetStateAction<AwbFullForm>>;
   paymentTypeReadOnly: boolean;
   clientLoading: boolean;
   isReadOnly: boolean;
+  executiveBranchId?: string | null;
+  executiveLocation?: string | null;
+  fieldError?: (order: number) => string | undefined;
 }) {
   const { onValueChange: onPaymentTypeChange, contentProps: paymentTypeSelectContentProps, itemProps: paymentTypeSelectItemProps } =
     useErpSelectNav((v: string) => setForm((f) => ({ ...f, paymentType: v })), {
@@ -8399,9 +8991,11 @@ function ShipmentDetailsFields({
           value={form.fieldExecutive}
           onChange={(v) => setForm((f) => ({ ...f, fieldExecutive: v }))}
           navOrder={AWB_NAV.FIELD_EXECUTIVE}
+          branchId={executiveBranchId}
+          locationCode={executiveLocation}
         />
       </FieldWrapper>
-      <FieldWrapper borderLabel label="Cash Receipt No.">
+      <FieldWrapper borderLabel label="Cash Receipt No." error={fieldError?.(AWB_NAV.CASH_RECEIPT_NO)}>
         <ErpNavInput
           order={AWB_NAV.CASH_RECEIPT_NO}
           className={inputClass}
@@ -8409,12 +9003,13 @@ function ShipmentDetailsFields({
           onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptNo: v }))}
         />
       </FieldWrapper>
-      <FieldWrapper borderLabel label="Amount Received">
+      <FieldWrapper borderLabel label="Amount Received" error={fieldError?.(AWB_NAV.AMOUNT_RECEIVED)}>
         <ErpNavInput
           order={AWB_NAV.AMOUNT_RECEIVED}
           className={inputClass}
           value={form.amountReceived}
-          onValueChange={(v) => setForm((f) => ({ ...f, amountReceived: v }))}
+          onValueChange={(v) => setForm((f) => ({ ...f, amountReceived: decimalNumber(v) }))}
+          onBlur={() => setForm((f) => ({ ...f, amountReceived: formatMoney2(f.amountReceived) }))}
         />
       </FieldWrapper>
       <FieldWrapper borderLabel label="Balance Amount">
@@ -8426,7 +9021,7 @@ function ShipmentDetailsFields({
           onValueChange={() => undefined}
         />
       </FieldWrapper>
-      <FieldWrapper borderLabel label="Cash Receipt Date">
+      <FieldWrapper borderLabel label="Cash Receipt Date" error={fieldError?.(AWB_NAV.CASH_RECEIPT_DATE)}>
         <ErpNavDateInput
           order={AWB_NAV.CASH_RECEIPT_DATE}
           className={inputClass}
@@ -8434,7 +9029,7 @@ function ShipmentDetailsFields({
           onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptDate: v }))}
         />
       </FieldWrapper>
-      <FieldWrapper borderLabel label="Expected Delivery Date">
+      <FieldWrapper borderLabel label="Expected Delivery Date" error={fieldError?.(AWB_NAV.EXPECTED_DELIVERY)}>
         <ErpNavDateInput
           order={AWB_NAV.EXPECTED_DELIVERY}
           className={inputClass}
@@ -8480,7 +9075,7 @@ function AwbFormFooter({
           <Button
             onClick={onSave}
             disabled={saving || readOnly}
-            title={readOnly ? "Booked and cancelled AWBs cannot be updated" : undefined}
+            title={readOnly ? "Unlock this AWB before saving it" : undefined}
             className="h-11 min-w-32 rounded-full bg-emerald-600 px-8 text-sm text-white shadow-sm hover:bg-emerald-600/90"
             {...erpNavOrder(AWB_NAV.FOOTER_SAVE)}
           >
@@ -8583,6 +9178,8 @@ function LookupPairInput({
   noResultsMessage = AWB_LOOKUP_NO_RESULTS,
   minChars = 1,
   displayVariant,
+  branchId,
+  locationCode,
 }: {
   value: LookupPair;
   onChange: (v: LookupPair) => void;
@@ -8595,6 +9192,8 @@ function LookupPairInput({
   noResultsMessage?: string;
   minChars?: number;
   displayVariant?: LookupDisplayVariant;
+  branchId?: string | null;
+  locationCode?: string | null;
 }) {
   const defaultCommit = useErpNavCommit();
   const onCommit = onCommitProp ?? defaultCommit;
@@ -8609,6 +9208,8 @@ function LookupPairInput({
       splitCode
       manualSearch
       minChars={minChars}
+      branchId={branchId}
+      locationCode={locationCode}
       navOrder={navOrder}
       onCommit={onCommit}
       emptySearchMessage={emptySearchMessage}

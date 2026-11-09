@@ -16,6 +16,9 @@ dist-ssr
 .nitro
 *.local
 
+# Local audit seed remembers the billing state it replaced
+scripts/awb-audit/.seed-state.json
+
 # Environment / secrets — never commit real credentials
 .env
 .env.*

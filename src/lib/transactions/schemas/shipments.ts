@@ -16,6 +16,7 @@ export const shipmentPieceSchema = z.object({
   divisor: optText(32),
   vol_weight: optText(32),
   charge_weight: optText(32),
+  measurement_unit: z.string().trim().max(32).optional(),
 });
 
 export const shipmentChargeSchema = z.object({

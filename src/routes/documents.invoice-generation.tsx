@@ -290,10 +290,10 @@ function CustomerDataTable({
                 <td className="px-4 py-2 font-mono text-xs">{cust.code}</td>
                 <td className="px-4 py-2 font-medium">{cust.name}</td>
                 <td className="px-4 py-2 text-right">{hasData ? cust.awbCount : ""}</td>
-                <td className="px-4 py-2 text-right font-mono">{hasData ? cust.totalAmount.toFixed(4) : ""}</td>
-                <td className="px-4 py-2 text-right font-mono">{hasData ? cust.igst.toFixed(4) : ""}</td>
-                <td className="px-4 py-2 text-right font-mono">{hasData ? cust.cgst.toFixed(4) : ""}</td>
-                <td className="px-4 py-2 text-right font-mono">{hasData ? cust.sgst.toFixed(4) : ""}</td>
+                <td className="px-4 py-2 text-right font-mono">{hasData ? cust.totalAmount.toFixed(2) : ""}</td>
+                <td className="px-4 py-2 text-right font-mono">{hasData ? cust.igst.toFixed(2) : ""}</td>
+                <td className="px-4 py-2 text-right font-mono">{hasData ? cust.cgst.toFixed(2) : ""}</td>
+                <td className="px-4 py-2 text-right font-mono">{hasData ? cust.sgst.toFixed(2) : ""}</td>
                 <td className="px-4 py-2 text-right font-mono font-bold">{hasData ? cust.grandTotal.toFixed(3) : ""}</td>
               </tr>
             );

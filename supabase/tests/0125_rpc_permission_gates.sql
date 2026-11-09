@@ -273,6 +273,22 @@ begin
       raise exception 'get_shipment_document: unexpected 42501: %', sqlerrm;
     end if;
   end;
+  begin
+    perform public.book_awb_shipment(null, 1, '{}'::jsonb);
+    raise exception 'book_awb_shipment: expected authorization error';
+  exception when sqlstate '42501' then
+    if sqlerrm not ilike '%permission is required%' then
+      raise exception 'book_awb_shipment: unexpected 42501: %', sqlerrm;
+    end if;
+  end;
+  begin
+    perform count(*) from public.lookup_field_executives(null, null, null, 5);
+    raise exception 'lookup_field_executives: expected authorization error';
+  exception when sqlstate '42501' then
+    if sqlerrm not ilike '%permission is required%' then
+      raise exception 'lookup_field_executives: unexpected 42501: %', sqlerrm;
+    end if;
+  end;
 
   -- ALLOW
   insert into public.group_permissions (
@@ -316,6 +332,12 @@ begin
   perform count(*) from public.lookup_international_destinations(null, 5);
   perform public.list_shipment_documents(v_ship_staff);
   perform public.get_shipment_document(v_ship_staff, 'INVOICE');
+  perform count(*) from public.lookup_field_executives(null, null, null, 5);
+  begin
+    perform public.book_awb_shipment(null, 1, '{}'::jsonb);
+  exception when sqlstate 'CMS04' then
+    null;
+  end;
 
   -- ADMIN
   perform set_config('request.jwt.claim.sub', v_admin_auth::text, true);
@@ -336,6 +358,12 @@ begin
   perform count(*) from public.lookup_international_destinations('a', 5);
   perform public.list_shipment_documents(v_ship_admin);
   perform public.get_shipment_document(v_ship_admin, 'INVOICE');
+  perform count(*) from public.lookup_field_executives(null, null, null, 5);
+  begin
+    perform public.book_awb_shipment(null, 1, '{}'::jsonb);
+  exception when sqlstate 'CMS04' then
+    null;
+  end;
 end
 $gate$;
 

@@ -104,9 +104,10 @@ async function fetchLookupHits(
   live: boolean,
   liveKey: LiveLookupKey | undefined,
   q: string,
+  scope?: { branchId?: string | null; locationCode?: string | null },
 ): Promise<SearchHit[]> {
   if (live && liveKey) {
-    const rows = await lookup(liveKey, q, LOOKUP_DEFAULT_LIMIT);
+    const rows = await lookup(liveKey, q, LOOKUP_DEFAULT_LIMIT, scope);
     const hits = rows.map((r: LookupItem) => ({
       id: r.id,
       code: r.code,
@@ -133,6 +134,8 @@ export function SearchableLookupPair({
   onSelect,
   lookup: lookupKey,
   liveLookup,
+  branchId,
+  locationCode,
   minChars = 2,
   debounceMs = AWB_LOOKUP_DEBOUNCE_MS,
   disabled,
@@ -160,6 +163,10 @@ export function SearchableLookupPair({
   lookup: LookupKey;
   /** Signed-in lookup key. Overrides the shared demo-to-live map for this field. */
   liveLookup?: LiveLookupKey;
+  /** Booking branch. Field executives linked to another branch stay out of the list. */
+  branchId?: string | null;
+  /** Origin or service-center code. Executives linked to this location are included. */
+  locationCode?: string | null;
   minChars?: number;
   debounceMs?: number;
   disabled?: boolean;
@@ -221,9 +228,11 @@ export function SearchableLookupPair({
     void queryClient.prefetchQuery(lookupQueryOptions(liveKey, "", LOOKUP_DEFAULT_LIMIT));
   }, [live, liveKey, queryClient]);
 
+  const lookupScope = { branchId, locationCode };
   const { data: liveInlineRows } = useLookup(liveKey ?? "branch", debouncedInline, {
     enabled: Boolean(live && liveKey && inlineOpen && canInlineSearch && !cached && !manualSearch),
     limit: LOOKUP_DEFAULT_LIMIT,
+    scope: lookupScope,
   });
 
   const { data: livePopupRows, isFetching: popupFetching } = useLookup(
@@ -232,6 +241,7 @@ export function SearchableLookupPair({
     {
       enabled: Boolean(live && liveKey && popupOpen && manualPopupRows === null),
       limit: LOOKUP_DEFAULT_LIMIT,
+      scope: lookupScope,
     },
   );
 
@@ -305,7 +315,7 @@ export function SearchableLookupPair({
     setManualSearching(true);
     setManualDropdownRows([]);
     setManualDropdownOpen(false);
-    void fetchLookupHits(lookupKey, live, liveKey, debouncedManualQuery)
+    void fetchLookupHits(lookupKey, live, liveKey, debouncedManualQuery, lookupScope)
       .then((hits) => {
         if (cancelled || seqAtStart !== explicitSearchSeqRef.current) return;
         const rows = hits.slice(0, resultLimit);
@@ -331,6 +341,8 @@ export function SearchableLookupPair({
     live,
     liveKey,
     lookupKey,
+    branchId,
+    locationCode,
     manualSearch,
     minChars,
     resultLimit,

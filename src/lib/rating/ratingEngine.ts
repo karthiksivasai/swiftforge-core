@@ -6,7 +6,7 @@
  * Display formatting (3 dp contract charges, 4 dp GST, 2 dp total) is applied at UI level.
  */
 
-import { formatChargeWeight } from "@/lib/transactions/awbEntryRules";
+import { formatChargeWeight, roundMoney2, splitRoundedGst } from "@/lib/transactions/awbEntryRules";
 
 export interface PieceItemInput {
   actualWeight: number;
@@ -82,6 +82,10 @@ export interface RateQueryInput {
   otherCharges?: number;
   customerBillingStateCode?: string;
   branchStateCode?: string;
+  /** From the tax table. When set, these replace the half-split of gstPct. */
+  igstPct?: number;
+  cgstPct?: number;
+  sgstPct?: number;
   gstPct?: number;
   fuelPct?: number;
 }
@@ -108,7 +112,8 @@ export interface RatingCalculationResult {
 }
 
 /**
- * Calculates volumetric and chargeable weights per piece row and sums total chargeable weight.
+ * Each piece charge weight is max(actual, volumetric). Those weights are added,
+ * and only the total is rounded up to the next 0.5 kg when roundHalfKg is set.
  * Default division is 5000 cm³/kg.
  */
 export function calculatePieceWeights(
@@ -123,8 +128,7 @@ export function calculatePieceWeights(
     const pcs = Math.max(p.pieces || 1, 1);
     const volumetric = (p.length * p.width * p.height * pcs) / div;
     const actual = (p.actualWeight || 0) * pcs;
-    const raw = Math.max(volumetric, actual);
-    const rowChargeWeight = options?.roundHalfKg ? Number(formatChargeWeight(raw, true)) : raw;
+    const rowChargeWeight = Math.max(volumetric, actual);
     totalChargeable += rowChargeWeight;
     return {
       ...p,
@@ -133,6 +137,10 @@ export function calculatePieceWeights(
       rowChargeWeight,
     };
   });
+
+  if (options?.roundHalfKg) {
+    totalChargeable = Number(formatChargeWeight(totalChargeable, true));
+  }
 
   return {
     calculatedPieces,
@@ -402,29 +410,29 @@ export function computeShipmentRating(
   const taxable = subTotal + fuelAmount;
   const zeroRated = isExportZeroRated(query);
 
-  const custState = (query.customerBillingStateCode || "TELANGANA").trim().toUpperCase();
-  const branchState = (query.branchStateCode || "TELANGANA").trim().toUpperCase();
+  const custState = (query.customerBillingStateCode || "").trim().toUpperCase();
+  const branchState = (query.branchStateCode || "").trim().toUpperCase();
+  if (!custState || !branchState) {
+    throw new Error(
+      "Customer billing state and branch state are required before GST can be calculated",
+    );
+  }
   const isIntraState = custState === branchState;
 
   const gstPct = zeroRated ? 0 : (query.gstPct ?? 18);
+  const igstPct = query.igstPct ?? gstPct;
+  const cgstPct = query.cgstPct ?? gstPct / 2;
+  const sgstPct = query.sgstPct ?? gstPct / 2;
+  const appliedPct = isIntraState ? cgstPct + sgstPct : igstPct;
+  const split = splitRoundedGst(taxable, {
+    intraState: isIntraState,
+    gstPct: zeroRated ? 0 : appliedPct,
+  });
+  const cgst = split.cgst;
+  const sgst = split.sgst;
+  const igst = split.igst;
 
-  let cgst = 0;
-  let sgst = 0;
-  let igst = 0;
-
-  if (!zeroRated && gstPct > 0) {
-    if (isIntraState) {
-      cgst = taxable * ((gstPct / 2) / 100);
-      sgst = taxable * ((gstPct / 2) / 100);
-      igst = 0;
-    } else {
-      igst = taxable * (gstPct / 100);
-      cgst = 0;
-      sgst = 0;
-    }
-  }
-
-  const totalAmount = subTotal + fuelAmount + cgst + sgst + igst;
+  const totalAmount = roundMoney2(subTotal + fuelAmount + split.tax);
 
   return {
     customerCode: query.customerCode,

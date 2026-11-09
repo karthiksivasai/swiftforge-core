@@ -55,6 +55,8 @@ const gated: Array<{ name: string; slug: string; actions: string[] }> = [
   { name: "lookup_international_destinations", slug: "mst.destination-master", actions: ["list", "search"] },
   { name: "list_shipment_documents", slug: "txn.awb-entry", actions: ["list", "search"] },
   { name: "get_shipment_document", slug: "txn.awb-entry", actions: ["list", "search"] },
+  { name: "book_awb_shipment", slug: "txn.awb-entry", actions: ["add", "modify"] },
+  { name: "lookup_field_executives", slug: "txn.awb-entry", actions: ["list", "search"] },
 ];
 
 function walk(dir: string): string[] {
@@ -119,7 +121,6 @@ describe("client RPC permission gates", () => {
   });
 
   it("gates each confirmed function on its catalog slug and action", () => {
-    const migration = readFileSync(join(migrationsDir, "0125_rpc_permission_gates.sql"), "utf8");
     for (const gate of gated) {
       const body = definers.get(gate.name) ?? "";
       expect(body, gate.name).toMatch(/security\s+definer/i);
@@ -131,7 +132,7 @@ describe("client RPC permission gates", () => {
       }
       expect(body, gate.name).toContain("using errcode = '42501'");
       expect(body, gate.name).toContain("permission is required");
-      expect(migration, gate.name).toContain(`function public.${gate.name}`);
+      expect(body, gate.name).toContain(`function public.${gate.name}`);
     }
   });
 

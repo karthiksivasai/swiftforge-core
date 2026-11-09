@@ -37,6 +37,9 @@ describe("ratingUiMap", () => {
     expect(s.tax).toBe("50.40");
     expect(s.otherCharges).toBe("50.00");
     expect(s.totalAmount).toBe("330.40");
+    expect(s.igst).toBe("0.00");
+    expect(s.cgst).toBe("25.20");
+    expect(s.sgst).toBe("25.20");
   });
 
   it("maps snapshot lines for AWB charges panel", () => {

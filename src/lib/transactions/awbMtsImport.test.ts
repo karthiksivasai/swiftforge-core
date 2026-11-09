@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { AWB_MTS_EXAMPLE_ROW, AWB_MTS_HEADERS, mtsPiecesFromRow, mtsPiecesFromRows } from "./awbMtsImport";
+import {
+  AWB_MTS_EXAMPLE_ROW,
+  AWB_MTS_HEADERS,
+  mtsFileAccepted,
+  mtsPiecesFromRow,
+  mtsPiecesFromRows,
+} from "./awbMtsImport";
 
 const box = {
   "Measurement Unit": "C",
@@ -120,5 +126,13 @@ describe("AWB MTS import", () => {
 
     expect(result.lines).toEqual([]);
     expect(result.errors).toEqual(['Row 3: Measurement Unit must be C or I (found "X")']);
+  });
+
+  it("accepts the template formats and rejects other file types", () => {
+    expect(mtsFileAccepted("AWBMtsFormat.xlsx")).toBe(true);
+    expect(mtsFileAccepted("pieces.XLS")).toBe(true);
+    expect(mtsFileAccepted("pieces.csv")).toBe(true);
+    expect(mtsFileAccepted("notes.txt")).toBe(false);
+    expect(mtsFileAccepted("photo.pdf")).toBe(false);
   });
 });

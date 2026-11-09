@@ -4,7 +4,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ export function FieldWrapper({
   label,
   required,
   invalid,
+  error,
   children,
   className,
   dense,
@@ -34,6 +35,7 @@ export function FieldWrapper({
   label: string;
   required?: boolean;
   invalid?: boolean;
+  error?: string;
   children: React.ReactNode;
   className?: string;
   /** Tighter label/input spacing for high-density forms (e.g. AWB Entry). */
@@ -43,22 +45,44 @@ export function FieldWrapper({
   /** Name + separate code box (label sits on name field only). */
   lookupSplit?: boolean;
 }) {
-  const invalidLookupSplitClass = invalid
+  const marked = Boolean(invalid || error);
+  const errorId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const control = root.querySelector<HTMLElement>(
+      "input, textarea, select, button[role='combobox']",
+    );
+    if (!control) return;
+    if (marked) control.setAttribute("aria-invalid", "true");
+    else if (control.getAttribute("aria-invalid") === "true") control.removeAttribute("aria-invalid");
+    if (error) control.setAttribute("aria-describedby", errorId);
+    else if (control.getAttribute("aria-describedby") === errorId) control.removeAttribute("aria-describedby");
+  }, [error, errorId, marked]);
+  const errorText = error ? (
+    <p id={errorId} role="alert" className="mt-0.5 text-[11px] leading-snug text-destructive">
+      {error}
+    </p>
+  ) : null;
+  const invalidLookupSplitClass = marked
     ? "[&_.lookup-name]:border-destructive [&_.lookup-name]:ring-1 [&_.lookup-name]:ring-destructive"
     : undefined;
-  const invalidAttrs = invalid ? ({ "data-invalid": "true" } as const) : undefined;
+  const invalidAttrs = marked ? ({ "data-invalid": "true" } as const) : undefined;
+  const focusRing =
+    "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-1";
 
   if (borderLabel && lookupSplit) {
     const blank = !label.trim();
     return (
-      <div className={cn("relative min-w-0", className)}>
+      <div ref={rootRef} className={cn("relative min-w-0", className)}>
         <div className="pt-1.5">
-          <div className={cn("relative", invalidLookupSplitClass)} {...invalidAttrs}>
+          <div className={cn("relative rounded", focusRing, invalidLookupSplitClass)} {...invalidAttrs}>
             {!blank ? (
               <Label
                 className={cn(
                   "pointer-events-none absolute left-1.5 top-0 z-10 -translate-y-1/2 bg-card px-0.5 text-[12px] font-medium leading-none",
-                  invalid ? "text-destructive" : "text-foreground",
+                  marked ? "text-destructive" : "text-foreground",
                 )}
               >
                 {label}
@@ -68,6 +92,7 @@ export function FieldWrapper({
             {children}
           </div>
         </div>
+        {errorText}
       </div>
     );
   }
@@ -75,11 +100,12 @@ export function FieldWrapper({
   if (borderLabel) {
     const blank = !label.trim();
     return (
-      <div className={cn("relative min-w-0 pt-1.5", className)}>
+      <div ref={rootRef} className={cn("relative min-w-0", className)}>
         <div
           className={cn(
-            "relative flex h-8 w-full min-w-0 items-stretch overflow-visible rounded border bg-background erp-field-shell",
-            invalid ? "border-destructive ring-1 ring-destructive" : "border-input",
+            "relative mt-1.5 flex h-8 w-full min-w-0 items-stretch overflow-visible rounded border bg-background erp-field-shell",
+            focusRing,
+            marked ? "border-destructive ring-1 ring-destructive" : "border-input",
             // Flatten nested controls so the group reads as one outlined field
             "[&_input]:h-8 [&_input]:min-h-8 [&_input]:rounded-none [&_input]:border-0 [&_input]:bg-transparent [&_input]:px-1.5 [&_input]:text-[13px] [&_input]:shadow-none [&_input]:focus-visible:ring-0",
             "[&_button[role=combobox]]:h-8 [&_button[role=combobox]]:rounded-none [&_button[role=combobox]]:border-0 [&_button[role=combobox]]:bg-transparent [&_button[role=combobox]]:px-1.5 [&_button[role=combobox]]:text-[13px] [&_button[role=combobox]]:shadow-none [&_button[role=combobox]]:focus:ring-0",
@@ -93,7 +119,7 @@ export function FieldWrapper({
             <Label
               className={cn(
                 "pointer-events-none absolute left-1.5 top-0 z-10 -translate-y-1/2 bg-card px-0.5 text-[12px] font-medium leading-none",
-                invalid ? "text-destructive" : "text-foreground",
+                marked ? "text-destructive" : "text-foreground",
               )}
             >
               {label}
@@ -102,15 +128,17 @@ export function FieldWrapper({
           ) : null}
           {children}
         </div>
+        {errorText}
       </div>
     );
   }
 
   return (
-    <div className={cn("flex flex-col", dense ? "gap-0.5" : "gap-1.5", className)}>
+    <div ref={rootRef} className={cn("flex flex-col", dense ? "gap-0.5" : "gap-1.5", focusRing, className)}>
       <Label
         className={cn(
-          "font-medium text-muted-foreground",
+          "font-medium",
+          marked ? "text-destructive" : "text-muted-foreground",
           dense ? "text-[11px] leading-none" : "text-xs",
         )}
       >
@@ -118,6 +146,7 @@ export function FieldWrapper({
         {required ? <span className="ml-0.5 text-destructive">*</span> : null}
       </Label>
       {children}
+      {errorText}
     </div>
   );
 }

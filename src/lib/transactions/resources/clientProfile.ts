@@ -55,6 +55,8 @@ export type ClientProfile = {
   salesExecutive: ClientLookupPair;
   fieldExecutive: ClientLookupPair;
   defaultVendor: ClientLookupPair;
+  /** State code used for GST. Blank blocks the save. */
+  billingStateCode: string;
   /** Future-ready defaults bag (billing, credit, tax, invoice, etc.). */
   defaults: {
     currency: string;
@@ -226,6 +228,7 @@ function mapRowToProfile(row: CustomerRow, addresses: DbCustomerAddress[]): Clie
     salesExecutive,
     fieldExecutive,
     defaultVendor,
+    billingStateCode: "",
     defaults: {
       currency: str(other.currency) || str(other.defaultCurrency) || "INR",
       billingCycle: row.billing_cycle,
@@ -425,6 +428,15 @@ export async function loadClientProfile(ref: ClientLookupRef): Promise<ClientPro
   }
 
   let profile = mapRowToProfile(row, addresses);
+  const billingStateId = row.billing_state_id || row.state_id;
+  if (billingStateId) {
+    const { data: stateRow } = await supabase
+      .from("states")
+      .select("code")
+      .eq("id", billingStateId)
+      .maybeSingle();
+    profile = { ...profile, billingStateCode: stateRow?.code ?? "" };
+  }
   try {
     profile = await overlayLinkedShipper(profile);
   } catch {

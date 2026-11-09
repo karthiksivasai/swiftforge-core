@@ -26,6 +26,16 @@ function num(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+const RATE_CACHE_MS = 60_000;
+const rateCardCache = new Map<string, { at: number; rows: CustomerRateRecord[] }>();
+const vendorTariffCache = new Map<string, { at: number; rows: VendorTariff[] }>();
+
+function cached<T>(map: Map<string, { at: number; rows: T[] }>, key: string): T[] | null {
+  const hit = map.get(key);
+  if (!hit || Date.now() - hit.at > RATE_CACHE_MS) return null;
+  return hit.rows;
+}
+
 /** Active selling rates for one customer account, shaped for the rating engine. */
 export async function loadCustomerRateCard(
   db: SupabaseClient,
@@ -34,6 +44,9 @@ export async function loadCustomerRateCard(
 ): Promise<CustomerRateRecord[]> {
   const code = customerCode.trim();
   if (!code) return [];
+  const cacheKey = `${tenantId}:${code.toUpperCase()}`;
+  const hit = cached(rateCardCache, cacheKey);
+  if (hit) return hit;
 
   const { data: customers, error: customerError } = await db
     .from("customers")
@@ -61,7 +74,10 @@ export async function loadCustomerRateCard(
   if (error) throw new Error(error.message);
 
   const rows = (data ?? []) as Record<string, unknown>[];
-  if (rows.length === 0) return [];
+  if (rows.length === 0) {
+    rateCardCache.set(cacheKey, { at: Date.now(), rows: [] });
+    return [];
+  }
 
   const ids = (key: string) => rows.map((row) => (row[key] ? String(row[key]) : ""));
   const [products, vendors, destinations, countries, zones] = await Promise.all([
@@ -73,7 +89,7 @@ export async function loadCustomerRateCard(
   ]);
   const refOf = (map: Map<string, CodeName>, id: unknown) => (id ? map.get(String(id)) : undefined);
 
-  return rows.map((row) => ({
+  const card = rows.map((row) => ({
     id: String(row.id),
     customer_code: customer.code ?? code,
     contract_no: row.contract_no ? String(row.contract_no) : "",
@@ -96,10 +112,14 @@ export async function loadCustomerRateCard(
     from_date: String(row.from_date).slice(0, 10),
     to_date: row.to_date ? String(row.to_date).slice(0, 10) : null,
   }));
+  rateCardCache.set(cacheKey, { at: Date.now(), rows: card });
+  return card;
 }
 
 /** Active carrier rate cards with their weight slabs. */
 export async function loadVendorTariffs(db: SupabaseClient, tenantId: string): Promise<VendorTariff[]> {
+  const hit = cached(vendorTariffCache, tenantId);
+  if (hit) return hit;
   const { data, error } = await db
     .from("vendor_contracts")
     .select(
@@ -143,7 +163,7 @@ export async function loadVendorTariffs(db: SupabaseClient, tenantId: string): P
     loadRefs(db, "zones", ids("zone_id")),
   ]);
 
-  return contracts.map((row) => {
+  const tariffs = contracts.map((row) => {
     const vendor = vendors.get(String(row.vendor_id));
     return {
       id: String(row.id),
@@ -166,4 +186,6 @@ export async function loadVendorTariffs(db: SupabaseClient, tenantId: string): P
       slabs: slabsByContract.get(String(row.id)) ?? [],
     };
   });
+  vendorTariffCache.set(tenantId, { at: Date.now(), rows: tariffs });
+  return tariffs;
 }

@@ -79,14 +79,12 @@ describe("Courier Charge Details Rating Engine", () => {
     expect(res.subTotal).toBe(16906.58);
     expect(res.fuelAmount).toBe(0);
 
-    // Intra-state GST (TELANGANA === TELANGANA): 9% CGST + 9% SGST
+    // Intra-state: round 16906.58 × 18% = 3043.18, then split 1521.59 / 1521.59
     expect(res.isIntraState).toBe(true);
-    expect(res.cgst).toBeCloseTo(1521.5922, 4);
-    expect(res.sgst).toBeCloseTo(1521.5922, 4);
+    expect(res.cgst).toBe(1521.59);
+    expect(res.sgst).toBe(1521.59);
     expect(res.igst).toBe(0);
-
-    // Total Amount: 16906.58 + 1521.5922 + 1521.5922 = 19949.7644 -> UI display formats to 19949.76
-    expect(res.totalAmount).toBeCloseTo(19949.7644, 4);
+    expect(res.totalAmount).toBe(19949.76);
   });
 
   it("computes inter-state GST (IGST) when customer state differs from branch state", () => {
@@ -110,8 +108,53 @@ describe("Courier Charge Details Rating Engine", () => {
     expect(res.isIntraState).toBe(false);
     expect(res.cgst).toBe(0);
     expect(res.sgst).toBe(0);
-    expect(res.igst).toBeCloseTo(3043.1844, 4);
-    expect(res.totalAmount).toBeCloseTo(19949.7644, 4);
+    expect(res.igst).toBe(3043.18);
+    expect(res.totalAmount).toBe(19949.76);
+  });
+
+  it("refuses to assume a state when the billing state or branch state is blank", () => {
+    const query: RateQueryInput = {
+      customerCode: "CKING",
+      contractNo: "243792",
+      productCode: "SPX",
+      vendorCode: "DTAU",
+      serviceCode: "COURIER PLEASE",
+      originCode: "HYD",
+      destinationCode: "AUSTRALIA",
+      bookDate: "2026-08-14",
+      gstPct: 18,
+      pieces: [{ actualWeight: 1, pieces: 1, length: 10, width: 10, height: 10 }],
+    };
+    expect(() => computeShipmentRating(query, sampleRateCard, sampleRules)).toThrow(
+      /billing state and branch state are required/i,
+    );
+  });
+
+  it("uses the tax-table GST percent, then splits the rounded total in half", () => {
+    const query: RateQueryInput = {
+      customerCode: "CKING",
+      contractNo: "243792",
+      productCode: "SPX",
+      vendorCode: "DTAU",
+      serviceCode: "COURIER PLEASE",
+      originCode: "HYD",
+      destinationCode: "AUSTRALIA",
+      bookDate: "2026-08-14",
+      customerBillingStateCode: "TS",
+      branchStateCode: "TS",
+      igstPct: 18,
+      cgstPct: 9,
+      sgstPct: 9,
+      fuelPct: 0,
+      pieces: [{ actualWeight: 1, pieces: 1, length: 1, width: 1, height: 1 }],
+    };
+    const res = computeShipmentRating(query, sampleRateCard, sampleRules);
+    expect(res.isIntraState).toBe(true);
+    expect(res.igst).toBe(0);
+    expect(res.contractCharges).toBe(444.91);
+    expect(res.cgst).toBe(40.04);
+    expect(res.sgst).toBe(40.04);
+    expect(res.cgst + res.sgst).toBe(80.08);
   });
 
   it("selects max(volumetric, actual Weight) per piece row", () => {
@@ -131,6 +174,19 @@ describe("Courier Charge Details Rating Engine", () => {
     expect(calculatedPieces[1].rowChargeWeight).toBe(15);
 
     expect(chargeableWeight).toBe(58.2);
+  });
+
+  it("rounds the summed charge weight once, not each piece", () => {
+    const pieces = [
+      { actualWeight: 0.6, pieces: 1, length: 0, width: 0, height: 0 },
+      { actualWeight: 0.6, pieces: 1, length: 0, width: 0, height: 0 },
+      { actualWeight: 0.6, pieces: 1, length: 0, width: 0, height: 0 },
+    ];
+    const { chargeableWeight, calculatedPieces } = calculatePieceWeights(pieces, 5000, {
+      roundHalfKg: true,
+    });
+    expect(calculatedPieces.map((piece) => piece.rowChargeWeight)).toEqual([0.6, 0.6, 0.6]);
+    expect(chargeableWeight).toBe(2);
   });
 
   it("matches a rate by destination name when the form code differs, and ignores a different contract number", () => {

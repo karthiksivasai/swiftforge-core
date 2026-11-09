@@ -164,6 +164,10 @@ export function mtsPiecesFromRows(
   return { lines, errors };
 }
 
+export function mtsFileAccepted(name: string): boolean {
+  return /\.(xlsx|xls|csv)$/i.test(name.trim());
+}
+
 export async function downloadAwbMtsTemplate(): Promise<void> {
   await exportTable({
     format: "excel",

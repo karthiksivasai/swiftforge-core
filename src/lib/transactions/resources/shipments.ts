@@ -67,6 +67,7 @@ export type ShipmentRow = BaseRow & {
   medical_charges: boolean;
   customer_charges_total: number;
   vendor_charges_total: number;
+  grand_total?: number | null;
   cash_receipt_no: string | null;
   amount_received: number | null;
   balance_amount: number | null;
@@ -80,6 +81,10 @@ export type ShipmentRow = BaseRow & {
   current_status: ShipmentStatus;
   status_at: string;
   is_locked: boolean;
+  locked_by?: string | null;
+  locked_at?: string | null;
+  unlocked_by?: string | null;
+  unlocked_at?: string | null;
   is_hold: boolean;
   wizard_extras: Record<string, unknown>;
   carrier_provider_code: string | null;
@@ -121,6 +126,7 @@ export type ShipmentPieceRow = {
   divisor: number | null;
   vol_weight: number;
   charge_weight: number;
+  measurement_unit?: string | null;
 };
 
 export type ShipmentChargeRow = {
@@ -167,10 +173,11 @@ const SHIPMENT_COLUMNS = `
   content, instruction, field_executive_id, pickup_id,
   pieces, pieces_unit, actual_weight, weight_unit, vol_weight, charge_weight,
   shipment_value, currency, is_commercial, is_oda, medical_charges,
-  customer_charges_total, vendor_charges_total,
+  customer_charges_total, vendor_charges_total, grand_total,
   cash_receipt_no, amount_received, balance_amount, cash_receipt_date,
   forwarding_awb, delivery_awb, return_awb, delivery_vendor_id, delivery_service,
-  flight_no, current_status, status_at, is_locked, is_hold, wizard_extras,
+  flight_no, current_status, status_at, is_locked, locked_by, locked_at,
+  unlocked_by, unlocked_at, is_hold, wizard_extras,
   carrier_provider_code, carrier_booking_ref, carrier_tracking_no,
   carrier_label_file_id, carrier_booking_status, carrier_last_sync_at,
   vendor_api_status, vendor_api_awb, vendor_api_ref, vendor_booking_id,
@@ -295,7 +302,7 @@ export async function fetchShipmentChildren(shipmentId: string): Promise<Shipmen
     supabase
       .from("shipment_pieces")
       .select(
-        "seq, child_awb, actual_weight_per_pc, pieces, length, breadth, height, divisor, vol_weight, charge_weight",
+        "seq, child_awb, actual_weight_per_pc, pieces, length, breadth, height, divisor, vol_weight, charge_weight, measurement_unit",
       )
       .eq("shipment_id", shipmentId)
       .order("seq", { ascending: true }),
@@ -350,6 +357,41 @@ export async function saveShipment(args: {
     if (error.code === "40001") throw new ConflictError(error.message);
     throw translateDbError(error);
   }
+  return data as ShipmentRow;
+}
+
+/** Validate, rate, and commit BOOKED in one server transaction. */
+export async function bookAwbShipment(args: {
+  id: string | null;
+  rowVersion: number | null;
+  fields: ShipmentFields;
+  pieces?: ShipmentPieceInput[];
+  charges?: ShipmentChargeInput[];
+  comments?: ShipmentCommentInput[];
+  attachments?: ShipmentAttachmentInput[];
+}): Promise<ShipmentRow> {
+  const { data, error } = await supabase.rpc("book_awb_shipment", {
+    p_id: args.id,
+    p_row_version: args.rowVersion,
+    p_fields: args.fields,
+    p_pieces: args.pieces ?? [],
+    p_charges: args.charges ?? [],
+    p_comments: args.comments ?? [],
+    p_attachments: args.attachments ?? [],
+  });
+  if (error) {
+    if (error.code === "40001") throw new ConflictError(error.message);
+    if (error.code === "CMS04" || /Booking validation failed/i.test(error.message)) {
+      throw new Error(formatBookingValidationError(new Error(error.message)));
+    }
+    throw translateDbError(error);
+  }
+  return data as ShipmentRow;
+}
+
+export async function unlockShipment(id: string): Promise<ShipmentRow> {
+  const { data, error } = await supabase.rpc("unlock_shipment", { p_id: id });
+  if (error) throw translateDbError(error);
   return data as ShipmentRow;
 }
 

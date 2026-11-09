@@ -65,8 +65,13 @@ type LookupCacheEntry = { at: number; rows: LookupItem[] };
 const lookupResultCache = new Map<string, LookupCacheEntry>();
 const lookupInflight = new Map<string, Promise<LookupItem[]>>();
 
-function lookupCacheId(key: LookupKey, q: string | null, limit: number): string {
-  return `${key}::${q ?? ""}::${limit}`;
+export type LookupScope = {
+  branchId?: string | null;
+  locationCode?: string | null;
+};
+
+function lookupCacheId(key: LookupKey, q: string | null, limit: number, scope?: LookupScope): string {
+  return `${key}::${q ?? ""}::${limit}::${scope?.branchId ?? ""}::${scope?.locationCode ?? ""}`;
 }
 
 /** Call the lookup RPC once. Repeat calls for the same list reuse the last result. */
@@ -74,10 +79,11 @@ export async function lookup(
   key: LookupKey,
   q?: string,
   limit: number = LOOKUP_DEFAULT_LIMIT,
+  scope?: LookupScope,
 ): Promise<LookupItem[]> {
   const trimmed = q && q.trim() ? q.trim() : null;
   const cappedLimit = Math.min(Math.max(1, limit), LOOKUP_MAX_LIMIT);
-  const cacheId = lookupCacheId(key, trimmed, cappedLimit);
+  const cacheId = lookupCacheId(key, trimmed, cappedLimit, scope);
   const cached = lookupResultCache.get(cacheId);
   if (cached && Date.now() - cached.at < LOOKUP_CACHE_MS) return cached.rows;
   const pending = lookupInflight.get(cacheId);
@@ -87,7 +93,9 @@ export async function lookup(
     const rows =
       key === "international-destination"
         ? await lookupInternational(trimmed, cappedLimit)
-        : await lookupCatalog(key, trimmed, cappedLimit);
+        : key === "field-executive"
+          ? await lookupFieldExecutives(trimmed, cappedLimit, scope)
+          : await lookupCatalog(key, trimmed, cappedLimit);
     lookupResultCache.set(cacheId, { at: Date.now(), rows });
     return rows;
   })().finally(() => {
@@ -95,6 +103,21 @@ export async function lookup(
   });
   lookupInflight.set(cacheId, request);
   return request;
+}
+
+async function lookupFieldExecutives(
+  q: string | null,
+  limit: number,
+  scope?: LookupScope,
+): Promise<LookupItem[]> {
+  const { data, error } = await supabase.rpc("lookup_field_executives", {
+    p_q: q,
+    p_branch: scope?.branchId || null,
+    p_location: scope?.locationCode || null,
+    p_limit: limit,
+  });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as LookupItem[];
 }
 
 async function lookupInternational(q: string | null, limit: number): Promise<LookupItem[]> {
@@ -121,10 +144,11 @@ export function lookupQueryOptions(
   key: LookupKey,
   q?: string,
   limit: number = LOOKUP_DEFAULT_LIMIT,
+  scope?: LookupScope,
 ) {
   return {
-    queryKey: masterKeys.lookup(key, q?.trim() ?? "", limit),
-    queryFn: () => lookup(key, q, limit),
+    queryKey: [...masterKeys.lookup(key, q?.trim() ?? "", limit), scope?.branchId ?? "", scope?.locationCode ?? ""],
+    queryFn: () => lookup(key, q, limit, scope),
     // Autocomplete UX: keep the old list visible while the next query resolves.
     placeholderData: keepPreviousData,
     staleTime: LOOKUP_CACHE_MS,
@@ -137,10 +161,10 @@ export function lookupQueryOptions(
 export function useLookup(
   key: LookupKey,
   q?: string,
-  opts?: { limit?: number; enabled?: boolean },
+  opts?: { limit?: number; enabled?: boolean; scope?: LookupScope },
 ) {
   return useQuery({
-    ...lookupQueryOptions(key, q, opts?.limit ?? LOOKUP_DEFAULT_LIMIT),
+    ...lookupQueryOptions(key, q, opts?.limit ?? LOOKUP_DEFAULT_LIMIT, opts?.scope),
     enabled: opts?.enabled ?? true,
   });
 }

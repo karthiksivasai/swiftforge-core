@@ -209,6 +209,7 @@ export type PickupPermissionKey = keyof typeof PICKUP_PERMISSIONS;
 export const SHIPMENT_PERMISSIONS = {
   shipments: "txn.awb-entry",
   void_cancel: "txn.awb-entry-void-cancel",
+  unlock: "txn.awb-unlock",
 } as const;
 
 export type ShipmentPermissionKey = keyof typeof SHIPMENT_PERMISSIONS;

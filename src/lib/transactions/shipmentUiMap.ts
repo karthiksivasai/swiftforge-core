@@ -10,6 +10,7 @@ import type {
   ShipmentChildren,
   ShipmentRow as ShipmentDbRow,
 } from "@/lib/transactions/resources/shipments";
+import { formatMoney2 } from "@/lib/transactions/awbEntryRules";
 import { recalculateProformaAmounts } from "@/lib/transactions/proformaImport";
 
 type LookupPair = { id?: string; code: string; name: string };
@@ -43,6 +44,7 @@ type PiecesLine = {
   volWeight: string;
   chargeWeight: string;
   division?: string;
+  measurementUnit?: string;
 };
 
 type ChargeLine = {
@@ -147,26 +149,27 @@ function formatListWeight(value: number | string | null | undefined): string {
 }
 
 function partyToJson(p: PartyDetails): Record<string, unknown> {
+  const text = (value: string) => value.trim();
   return {
-    origin_code: p.origin.code,
-    origin_name: p.origin.name,
+    origin_code: text(p.origin.code),
+    origin_name: text(p.origin.name),
     origin_id: p.origin.id ?? null,
-    company_code: p.companyName.code,
-    company_name: p.companyName.name,
+    company_code: text(p.companyName.code),
+    company_name: text(p.companyName.name),
     company_id: p.companyName.id ?? null,
-    contact_name: p.contactName,
-    address1: p.address1,
-    address2: p.address2,
-    pincode: p.pincode,
-    city: p.city,
-    state: p.state,
-    telephone: p.telephone,
-    mobile: p.mobileNo,
-    email: p.email,
-    country: p.country,
-    iec_no: p.iecNo,
-    document_type: p.documentType,
-    document_no: p.documentNo,
+    contact_name: text(p.contactName),
+    address1: text(p.address1),
+    address2: text(p.address2),
+    pincode: text(p.pincode),
+    city: text(p.city),
+    state: text(p.state),
+    telephone: text(p.telephone),
+    mobile: text(p.mobileNo),
+    email: text(p.email),
+    country: text(p.country),
+    iec_no: text(p.iecNo),
+    document_type: text(p.documentType),
+    document_no: text(p.documentNo),
   };
 }
 
@@ -204,7 +207,7 @@ function partyFromJson(
 
 export function uiFormToShipmentPayload(
   form: AwbLiveForm,
-  opts?: { manualAwbNo?: string | null },
+  opts?: { manualAwbNo?: string | null; branchId?: string | null; branchCode?: string | null },
 ): {
   fields: ShipmentFields;
   pieces: ShipmentPieceInput[];
@@ -232,8 +235,8 @@ export function uiFormToShipmentPayload(
     delivery_vendor_code: deliveryVendor.code.trim() || null,
     field_executive_id: form.fieldExecutive.id || null,
     field_executive_code: form.fieldExecutive.code.trim() || null,
-    branch_id: null,
-    branch_code: null,
+    branch_id: opts?.branchId || null,
+    branch_code: opts?.branchCode || null,
     pickup_id: form.pickupId || null,
     book_date: form.bookDate,
     book_time: form.bookTime.trim() || null,
@@ -273,7 +276,17 @@ export function uiFormToShipmentPayload(
     wizard_extras: {
       proforma: recalculateProformaAmounts((form.proforma ?? { lines: [] }) as { lines?: unknown[] }),
       forwarding: form.forwarding ?? {},
-      kyc: form.kyc ?? {},
+      kyc: {
+        documents: (Array.isArray((form.kyc as { documents?: unknown[] } | undefined)?.documents)
+          ? ((form.kyc as { documents: Array<Record<string, unknown>> }).documents)
+          : []
+        ).map((doc) => ({
+          id: doc.id,
+          fileName: doc.fileName,
+          entryType: doc.entryType,
+          entryDate: doc.entryDate,
+        })),
+      },
       masterAwbNo: form.masterAwbNo?.trim() || "",
       expectedDeliveryDate: form.expectedDeliveryDate?.trim() || "",
       notifyEmail: form.notifyEmail === true,
@@ -289,8 +302,9 @@ export function uiFormToShipmentPayload(
     breadth: l.breadth || null,
     height: l.height || null,
     divisor: l.division?.trim() || null,
-    vol_weight: l.volWeight || null,
-    charge_weight: l.chargeWeight || null,
+    vol_weight: null,
+    charge_weight: null,
+    measurement_unit: l.measurementUnit?.trim() || "Centimeter",
   }));
 
   const charges: ShipmentChargeInput[] = (form.chargeLines ?? []).map((l) => ({
@@ -394,7 +408,7 @@ export function dbShipmentToFormPatch(
     },
     airline: row.airline ?? "",
     service: { code: row.service ?? "", name: row.service ?? "" },
-    shipmentValue: row.shipment_value != null ? String(row.shipment_value) : "",
+    shipmentValue: formatMoney2(row.shipment_value),
     shipmentCurrency: row.currency ?? "INR",
     pieces: String(row.pieces ?? 1),
     piecesUnit: row.pieces_unit ?? "DOX",
@@ -405,8 +419,8 @@ export function dbShipmentToFormPatch(
     commercial: row.is_commercial,
     oda: row.is_oda,
     medicalCharges: row.medical_charges,
-    customerChargesTotal: String(row.customer_charges_total ?? 0),
-    vendorChargesTotal: String(row.vendor_charges_total ?? 0),
+    customerChargesTotal: formatMoney2(row.customer_charges_total ?? 0),
+    vendorChargesTotal: formatMoney2(row.vendor_charges_total ?? 0),
     paymentType: row.payment_type ?? "",
     content: row.content ?? "",
     instruction: row.instruction ?? "",
@@ -416,8 +430,8 @@ export function dbShipmentToFormPatch(
       name: row.field_executives?.name ?? "",
     },
     cashReceiptNo: row.cash_receipt_no ?? "",
-    amountReceived: row.amount_received != null ? String(row.amount_received) : "",
-    balanceAmount: row.balance_amount != null ? String(row.balance_amount) : "",
+    amountReceived: formatMoney2(row.amount_received),
+    balanceAmount: formatMoney2(row.balance_amount),
     cashReceiptDate: row.cash_receipt_date ?? "",
     lock: row.is_locked,
     forwardingNo: row.forwarding_awb ?? "",
@@ -445,22 +459,23 @@ export function dbShipmentToFormPatch(
       volWeight: String(p.vol_weight ?? ""),
       chargeWeight: String(p.charge_weight ?? ""),
       division: p.divisor != null ? String(p.divisor) : "",
+      measurementUnit: p.measurement_unit ?? "Centimeter",
     })),
     chargeLines: children.charges
       .filter((c) => String(c.side ?? "CUSTOMER").toUpperCase() !== "VENDOR")
       .map((c, i) => ({
         id: `ch-${i}`,
         description: c.description,
-        rate: String(c.rate ?? ""),
-        amount: String(c.amount ?? ""),
+        rate: formatMoney2(c.rate),
+        amount: formatMoney2(c.amount),
         fuelApply: c.fuel_applies ? "Yes" : "No",
-        fuelAmt: String(c.fuel_amount ?? ""),
+        fuelAmt: formatMoney2(c.fuel_amount),
         taxApply: c.tax_applies ? "Yes" : "No",
         taxOnFuel: c.tax_on_fuel ? "Yes" : "No",
-        igst: String(c.igst ?? ""),
-        sgst: String(c.sgst ?? ""),
-        cgst: String(c.cgst ?? ""),
-        total: String(c.total ?? ""),
+        igst: formatMoney2(c.igst),
+        sgst: formatMoney2(c.sgst),
+        cgst: formatMoney2(c.cgst),
+        total: formatMoney2(c.total),
         chargesType: c.charges_type,
       })),
     masterAwbNo: String(extras.masterAwbNo ?? ""),
@@ -481,22 +496,33 @@ export function dbShipmentToFormPatch(
         const fromExtras = Array.isArray(forwardingExtra.vendorChargeLines)
           ? forwardingExtra.vendorChargeLines
           : null;
-        if (fromExtras && fromExtras.length > 0) return fromExtras;
+        if (fromExtras && fromExtras.length > 0) {
+          return fromExtras.map((line) => ({
+            ...line,
+            rate: formatMoney2(line.rate),
+            amount: formatMoney2(line.amount),
+            fuelAmt: formatMoney2(line.fuelAmt),
+            igst: formatMoney2(line.igst),
+            sgst: formatMoney2(line.sgst),
+            cgst: formatMoney2(line.cgst),
+            total: formatMoney2(line.total),
+          }));
+        }
         return children.charges
           .filter((c) => String(c.side ?? "").toUpperCase() === "VENDOR")
           .map((c, i) => ({
             id: `vch-${i}`,
             description: c.description,
-            rate: String(c.rate ?? ""),
-            amount: String(c.amount ?? ""),
+            rate: formatMoney2(c.rate),
+            amount: formatMoney2(c.amount),
             fuelApply: c.fuel_applies ? "Yes" : "No",
-            fuelAmt: String(c.fuel_amount ?? ""),
+            fuelAmt: formatMoney2(c.fuel_amount),
             taxApply: c.tax_applies ? "Yes" : "No",
             taxOnFuel: c.tax_on_fuel ? "Yes" : "No",
-            igst: String(c.igst ?? ""),
-            sgst: String(c.sgst ?? ""),
-            cgst: String(c.cgst ?? ""),
-            total: String(c.total ?? ""),
+            igst: formatMoney2(c.igst),
+            sgst: formatMoney2(c.sgst),
+            cgst: formatMoney2(c.cgst),
+            total: formatMoney2(c.total),
             chargesType: c.charges_type === "SYSTEM" ? "SYSTEM" : "Vendor",
           }));
       })(),
