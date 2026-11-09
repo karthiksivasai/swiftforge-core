@@ -8470,19 +8470,18 @@ function AwbFormFooter({
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div>
         {showPrevious && onPrevious ? (
-          <Button size="sm" variant="secondary" className="h-8 text-xs" onClick={onPrevious} disabled={saving}>
+          <Button className="h-11 min-w-32 rounded-full bg-amber-600 px-8 text-sm text-white shadow-sm hover:bg-amber-700" onClick={onPrevious} disabled={saving}>
             Previous
           </Button>
         ) : null}
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-3">
         {showSave ? (
           <Button
-            size="sm"
             onClick={onSave}
             disabled={saving || readOnly}
             title={readOnly ? "Booked and cancelled AWBs cannot be updated" : undefined}
-            className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+            className="h-11 min-w-32 rounded-full bg-emerald-600 px-8 text-sm text-white shadow-sm hover:bg-emerald-600/90"
             {...erpNavOrder(AWB_NAV.FOOTER_SAVE)}
           >
             {saveLabel}
@@ -8490,8 +8489,7 @@ function AwbFormFooter({
         ) : null}
         {onNext ? (
           <Button
-            size="sm"
-            className="h-8 bg-sidebar text-xs text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+            className="h-11 min-w-32 rounded-full bg-sidebar px-8 text-sm text-sidebar-foreground shadow-sm hover:bg-sidebar/90 hover:text-sidebar-foreground"
             onClick={onNext}
             disabled={saving}
             {...erpNavOrder(AWB_NAV.FOOTER_NEXT)}
@@ -8500,9 +8498,8 @@ function AwbFormFooter({
           </Button>
         ) : null}
         <Button
-          size="sm"
           variant="destructive"
-          className="h-8 text-xs"
+          className="h-11 min-w-32 rounded-full px-8 text-sm shadow-sm"
           onClick={onCancel}
           disabled={saving}
           {...erpNavOrder(AWB_NAV.FOOTER_CLOSE)}
