@@ -61,7 +61,8 @@ export function resolveDivision(input: {
     const score = specificity(row);
     if (!best || score > best.score) best = { score, value };
   }
-  return best ? String(best.value) : "5000";
+  if (best) return String(best.value);
+  return inches ? "" : "5000";
 }
 
 /**
@@ -239,13 +240,14 @@ const AWB_ERROR_FIELDS: Array<{ field: string; test: RegExp }> = [
   { field: "client", test: /client name is required/i },
   { field: "origin", test: /^origin is required/i },
   { field: "shipperCompany", test: /shipper company/i },
-  { field: "destination", test: /destination is required/i },
+  { field: "destination", test: /destination is required|consignee country/i },
   { field: "consigneeCompany", test: /consignee company/i },
   { field: "product", test: /product is required/i },
   { field: "vendor", test: /^vendor is required/i },
   { field: "service", test: /service is required/i },
   { field: "adCode", test: /ad code/i },
   { field: "bondUt", test: /bond\/ut|lut \(bond\/ut\)|lut number is required|valid lut/i },
+  { field: "lutExpiry", test: /lut expiry date/i },
   { field: "payOfIgst", test: /payment of igst/i },
   { field: "csbType", test: /csb type|csb-iv\/iii|csb-v|csb 5/i },
   { field: "exportReason", test: /export reason/i },

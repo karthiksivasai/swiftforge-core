@@ -329,6 +329,7 @@ describe("Proforma Tab Audit Live Verification", () => {
       adCode: "ADCODE01",
       bondUt: "Yes",
       lutNo: "LUT-HYD-2026-001",
+      lutExpiry: "2027-03-31",
       payOfIgst: "No",
       ecommerce: "No",
       meis: "No",
@@ -520,6 +521,25 @@ describe("Proforma Tab Audit Live Verification", () => {
     console.log("[P3 BOOKED]", data.awb_no);
     const lineTotalIgst = p3Proforma.lines.reduce((s, l) => s + parseFloat(l.igstAmount), 0);
     expect(lineTotalIgst).toBe(90.00); // 18 + 72
+
+    const invInput = formToInvoiceInput({
+      awbNo: data.awb_no,
+      invoiceNo: "INV-P3-003",
+      bookDate: "2026-11-10",
+      piecesUnit: "NDOX",
+      shipper: { ...payload.fields.shipper, iecNo: "ABCDE12345", companyName: { code: "EXP", name: "Exporter" }, origin: { code: "HYD", name: "HYD" } },
+      consignee: { ...payload.fields.consignee, companyName: { code: "BUY", name: "Buyer" }, origin: { code: "USA", name: "USA" } },
+      vendor: { id: "v1", code: "FEDE", name: "FEDEX" },
+      piecesLines: [],
+      proforma: p3Proforma,
+      forwarding: { deliveryAwb: "", forwardingAwb: "" },
+    } as unknown as Parameters<typeof formToInvoiceInput>[0]);
+    const html = buildInvoiceHtml(invInput);
+    expect(html).toContain("IGST %");
+    expect(html).toContain("IGST AMT");
+    expect(html).toContain("18.00%");
+    expect(html).toContain("TOTAL IGST:");
+    expect(html).toContain("90.00");
   }, 15000);
 
   it("P4: books foreign currency (USD) and observes lack of exchange rate / conversion", async () => {
@@ -737,8 +757,9 @@ describe("Proforma Tab Audit Live Verification", () => {
     expect(err6g).not.toBeNull();
     expect(err6g?.message).toContain("exceeds the statutory CSB-IV limit");
 
-    // 6h: Blank CSB Type is rejected
+    // 6h: Blank CSB Type is rejected on non-DOX
     const p6h = buildPayload("TEST_AWB_P6H", {
+      product: "NDOX",
       proforma: { csbType: "", exportReason: "UNSOLICITED GIFT - NOT FOR SALE", lines: [] },
     });
     const { error: err6h } = await client.rpc("book_awb_shipment", {
@@ -751,8 +772,9 @@ describe("Proforma Tab Audit Live Verification", () => {
     console.log("[6h Blank CSB Type]: Error?", err6h?.message);
     expect(err6h?.message).toContain("CSB Type is required");
 
-    // 6i: Blank Export Reason is rejected
+    // 6i: Blank Export Reason is rejected on non-DOX
     const p6i = buildPayload("TEST_AWB_P6I", {
+      product: "NDOX",
       proforma: { csbType: "CSB 4", exportReason: "", lines: [] },
     });
     const { error: err6i } = await client.rpc("book_awb_shipment", {

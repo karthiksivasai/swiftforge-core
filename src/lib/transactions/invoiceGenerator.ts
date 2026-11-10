@@ -37,6 +37,8 @@ export type InvoiceLine = {
   rate?: string;
   amount?: string;
   weight?: string;
+  igstPercent?: string;
+  igstAmount?: string;
 };
 
 export type InvoicePiece = {
@@ -76,6 +78,8 @@ export type InvoiceInput = {
   termsOfDelivery?: string;
   otherReference?: string;
   currency?: string;
+  payOfIgst?: string;
+  totalIgst?: string;
   lines: InvoiceLine[];
   pieces?: InvoicePiece[];
   freight?: string;
@@ -256,6 +260,13 @@ export function buildInvoiceHtml(input: InvoiceInput): string {
     (sum, l) => sum + (Number.parseFloat(String(l.amount)) || 0),
     0,
   );
+  const showLineIgst =
+    input.payOfIgst?.trim().toUpperCase() === "YES" ||
+    input.lines.some((l) => Number(l.igstPercent) > 0 || Number(l.igstAmount) > 0);
+  const totalLineIgst = input.lines.reduce(
+    (sum, l) => sum + (Number.parseFloat(String(l.igstAmount)) || 0),
+    0,
+  );
   const words = amountInWords(total, currency);
 
   let sr = 0;
@@ -263,14 +274,14 @@ export function buildInvoiceHtml(input: InvoiceInput): string {
   if (grouped.size === 0) {
     bodyRows.push(`
       <tr>
-        <td colspan="7" style="text-align:center;padding:16px;color:#666;">No proforma lines</td>
+        <td colspan="${showLineIgst ? 9 : 7}" style="text-align:center;padding:16px;color:#666;">No proforma lines</td>
       </tr>`);
   } else {
     for (const [boxNo, lines] of grouped) {
       const { dims, weight } = boxDims(input.pieces, boxNo, lines[0]?.weight);
       bodyRows.push(`
         <tr class="box-hdr">
-          <td colspan="6" class="left">BOX NO.: ${esc(boxNo)}${dims ? ` = ${esc(dims)}` : ""}</td>
+          <td colspan="${showLineIgst ? 8 : 6}" class="left">BOX NO.: ${esc(boxNo)}${dims ? ` = ${esc(dims)}` : ""}</td>
           <td class="right">${esc(weight)}</td>
         </tr>`);
       for (const line of lines) {
@@ -284,6 +295,12 @@ export function buildInvoiceHtml(input: InvoiceInput): string {
             <td class="center">${esc(line.quantity)} ${esc(line.unit || "PCS")}</td>
             <td class="right">${esc(num(line.rate, 2))}</td>
             <td class="right">${esc(num(line.amount, 2))}</td>
+            ${
+              showLineIgst
+                ? `<td class="right">${esc(num(line.igstPercent, 2))}%</td>
+            <td class="right">${esc(num(line.igstAmount, 2))}</td>`
+                : ""
+            }
           </tr>`);
       }
     }
@@ -486,13 +503,19 @@ export function buildInvoiceHtml(input: InvoiceInput): string {
   <table class="goods">
     <thead>
       <tr>
-        <th style="width:6%">SR NO</th>
-        <th style="width:7%">BOX</th>
+        <th style="width:${showLineIgst ? "5%" : "6%"}">SR NO</th>
+        <th style="width:${showLineIgst ? "6%" : "7%"}">BOX</th>
         <th>DESCRIPTION OF GOODS</th>
-        <th style="width:14%">HS CODE</th>
-        <th style="width:10%">QTY</th>
-        <th style="width:11%">RATE (${esc(currency)})</th>
-        <th style="width:11%">AMT (${esc(currency)})</th>
+        <th style="width:${showLineIgst ? "12%" : "14%"}">HS CODE</th>
+        <th style="width:${showLineIgst ? "9%" : "10%"}">QTY</th>
+        <th style="width:${showLineIgst ? "10%" : "11%"}">RATE (${esc(currency)})</th>
+        <th style="width:${showLineIgst ? "10%" : "11%"}">AMT (${esc(currency)})</th>
+        ${
+          showLineIgst
+            ? `<th style="width:8%">IGST %</th>
+        <th style="width:11%">IGST AMT (${esc(currency)})</th>`
+            : ""
+        }
       </tr>
     </thead>
     <tbody>
@@ -500,6 +523,12 @@ export function buildInvoiceHtml(input: InvoiceInput): string {
       <tr>
         <td colspan="6" class="right" style="font-weight:700;">TOTAL =</td>
         <td class="right" style="font-weight:700;">${esc(num(total, 2))}</td>
+        ${
+          showLineIgst
+            ? `<td class="right" style="font-weight:700;">TOTAL IGST:</td>
+        <td class="right" style="font-weight:700;" id="inv-total-line-igst">${esc(num(totalLineIgst, 2))}</td>`
+            : ""
+        }
       </tr>
     </tbody>
   </table>
@@ -684,6 +713,8 @@ export type InvoiceFormSlice = {
       unit: string;
       rate: string;
       amount: string;
+      igstPercent?: string;
+      igstAmount?: string;
     }>;
   };
   forwarding: {
@@ -824,6 +855,7 @@ export function formToInvoiceInput(form: InvoiceFormSlice): InvoiceInput {
     termsOfDelivery: form.proforma.termOfInvoice || "DAP",
     otherReference: giftReference(form.proforma.exportReason),
     currency,
+    payOfIgst: form.proforma.payOfIgst || "No",
     ...invoiceCharges(form),
     lines: (form.proforma.lines ?? []).map((l) => ({
       boxNo: l.boxNo,
@@ -834,6 +866,8 @@ export function formToInvoiceInput(form: InvoiceFormSlice): InvoiceInput {
       rate: l.rate,
       amount: l.amount,
       weight: l.weight,
+      igstPercent: l.igstPercent,
+      igstAmount: l.igstAmount,
     })),
     pieces: (form.piecesLines ?? []).map((p) => ({
       length: p.length,

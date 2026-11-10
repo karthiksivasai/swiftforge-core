@@ -319,6 +319,7 @@ type ProformaData = {
   bondUt: string;
   payOfIgst: string;
   lutNo: string;
+  lutExpiry: string;
   ecommerce: string;
   meis: string;
   invoiceType: string;
@@ -367,7 +368,7 @@ type KycData = {
   documents: KycDocument[];
 };
 
-type AwbFullForm = {
+export type AwbFullForm = {
   awbNo: string;
   /** Source AWB this entry was duplicated from (blank for normal creates). */
   masterAwbNo: string;
@@ -1029,6 +1030,7 @@ const emptyProforma = (): ProformaData => ({
   bondUt: "No",
   payOfIgst: "No",
   lutNo: "",
+  lutExpiry: "",
   ecommerce: "No",
   meis: "No",
   invoiceType: "",
@@ -1074,7 +1076,7 @@ const emptyVendorChargeDraft = (): VendorChargeDraft => ({
   total: "0.00",
 });
 
-const emptyForm = (): AwbFullForm => ({
+export const emptyForm = (): AwbFullForm => ({
   awbNo: "",
   masterAwbNo: "",
   bookDate: todayIso(),
@@ -1281,9 +1283,12 @@ const calcVolWeight = (draft: PiecesDraft) => {
   const w = Number.parseFloat(draft.width) || 0;
   const h = Number.parseFloat(draft.height) || 0;
   const pcs = Number.parseFloat(draft.noOfPieces) || 0;
-  const div = Number.parseFloat(draft.division) || 5000;
-  if (!l || !w || !h || !pcs || !div) return "0.000";
-  return ((l * w * h * pcs) / div).toFixed(3);
+  const isInch = (draft.measurementUnit || "").toUpperCase().startsWith("INCH");
+  const div = Number.parseFloat(draft.division);
+  if (!l || !w || !h || !pcs) return "0.000";
+  if (isInch && (!div || div === 5000)) return "0.000";
+  const divisor = div > 0 ? div : 5000;
+  return ((l * w * h * pcs) / divisor).toFixed(3);
 };
 
 const calcChargeWeight = (draft: PiecesDraft) => {
@@ -1331,6 +1336,7 @@ const AWB_ERROR_NAV: Record<string, number> = {
   bondUt: AWB_NAV.PROFORMA_BOND_UT,
   payOfIgst: AWB_NAV.PROFORMA_PAY_IGST,
   lutNo: AWB_NAV.PROFORMA_LUT_NO,
+  lutExpiry: AWB_NAV.PROFORMA_LUT_EXPIRY,
   csbType: AWB_NAV.PROFORMA_CSB_TYPE,
   exportReason: AWB_NAV.PROFORMA_EXPORT_REASON,
   proformaLines: AWB_NAV.PROFORMA_BOX_NO,
@@ -1352,7 +1358,7 @@ function getCustomsExchangeRate(currency: string): number {
   return DEFAULT_CUSTOMS_EXCHANGE_RATES[c] ?? 1.0;
 }
 
-function collectAwbProductionErrors(form: AwbFullForm): string[] {
+export function collectAwbProductionErrors(form: AwbFullForm, clientProfile?: ClientProfile | null): string[] {
   const errors: string[] = [];
   if (!isAwbLookupSelected(form.vendor)) errors.push("Vendor is required");
   if (!form.shipper.address1.trim()) errors.push("Shipper Address 1 is required");
@@ -1369,16 +1375,18 @@ function collectAwbProductionErrors(form: AwbFullForm): string[] {
 
   const csbTypeUpper = (form.proforma.csbType || "").trim().toUpperCase();
   const exportReasonUpper = (form.proforma.exportReason || "").trim().toUpperCase();
-
-  // CSB Type and Export Reason MUST be chosen by the operator (cannot be blank)
-  if (!csbTypeUpper) {
-    errors.push("CSB Type is required. Select CSB 4, CSB 5, etc. on the Proforma tab.");
-  }
-  if (!exportReasonUpper) {
-    errors.push("Export reason is required. Select an export reason on the Proforma tab.");
-  }
-
   const isCommercialExport = form.commercial || csbTypeUpper === "CSB 5" || csbTypeUpper === "COMMERCIAL" || csbTypeUpper === "CBE XIII";
+  const isDox = form.product.code.trim().toUpperCase() === "DOX" && !isCommercialExport;
+
+  // For non-commercial DOX shipments, CSB Type and Export Reason are not required (exempt)
+  if (!isDox) {
+    if (!csbTypeUpper) {
+      errors.push("CSB Type is required. Select CSB 4, CSB 5, etc. on the Proforma tab.");
+    }
+    if (!exportReasonUpper) {
+      errors.push("Export reason is required. Select an export reason on the Proforma tab.");
+    }
+  }
 
   if (isCommercialExport) {
     if (!form.proforma.adCode.trim()) {
@@ -1410,15 +1418,34 @@ function collectAwbProductionErrors(form: AwbFullForm): string[] {
   // Must come only from Proforma input, Shipper master, or Customer master (Branch fallback removed)
   if (bondUt === "YES") {
     const lutInput = (form.proforma.lutNo || "").trim();
-    const customerLut = (loadedClientProfile?.lutNumber || "").trim();
-    const lutExpiry = (loadedClientProfile?.lutExpiryDate || "").trim();
-    const bookDate = form.bookDate.trim() || new Date().toISOString().slice(0, 10);
+    const customerLut = (clientProfile?.lutNumber || "").trim();
+    const customerLutExpiry = (clientProfile?.lutExpiryDate || "").trim();
     const activeLut = lutInput || customerLut;
+    const lutExpiryInput = (form.proforma.lutExpiry || "").trim();
+    const activeExpiry = lutInput && lutInput !== customerLut ? lutExpiryInput : (lutExpiryInput || customerLutExpiry);
+    const bookDate = form.bookDate.trim() || new Date().toISOString().slice(0, 10);
 
     if (!activeLut) {
       errors.push("Bond / UT is selected as Yes, but no valid LUT (Bond/UT) number is on file for the Shipper or Customer. Enter an LUT number on the Proforma tab or configure it in Client Master.");
-    } else if (lutExpiry && lutExpiry < bookDate && (!lutInput || lutInput === customerLut)) {
-      errors.push(`Bond / UT is selected as Yes, but the LUT on file (${activeLut}) expired on ${lutExpiry}. An active, unexpired LUT is required.`);
+    } else {
+      if (lutInput && !activeExpiry) {
+        errors.push("LUT Expiry Date is required when LUT Number is entered on the Proforma tab.");
+      } else if (activeExpiry && activeExpiry < bookDate) {
+        errors.push(`Bond / UT is selected as Yes, but the LUT on file (${activeLut}) expired on ${activeExpiry}. An active, unexpired LUT is required.`);
+      }
+    }
+  }
+
+  // Inch volumetric divisor check
+  for (let i = 0; i < form.piecesLines.length; i++) {
+    const line = form.piecesLines[i];
+    const isInch = (line.measurementUnit || "").toUpperCase().startsWith("INCH");
+    const hasDims = Number(line.length) > 0 || Number(line.breadth) > 0 || Number(line.height) > 0;
+    if (isInch && hasDims) {
+      const div = Number(line.division);
+      if (!div || div === 5000) {
+        errors.push(`Box ${i + 1}: No inch volumetric divisor (e.g. 305 or 166) is configured for this customer or vendor. Configure an inch divisor or enter dimensions in cm.`);
+      }
     }
   }
 
@@ -1427,7 +1454,6 @@ function collectAwbProductionErrors(form: AwbFullForm): string[] {
   // Non-DOX and Commercial shipments need at least one proforma line.
   const consigneeCountry = (form.consignee.country || "").trim().toUpperCase();
   const isDomestic = consigneeCountry === "INDIA" || consigneeCountry === "IN";
-  const isDox = (form.piecesUnit === "DOX" || form.product.code.toUpperCase() === "DOX") && !isCommercialExport;
   if (!isDomestic && !isDox && form.proforma.lines.length === 0) {
     errors.push("At least one Proforma line item is required for non-document and commercial shipments. Add items on the Proforma tab before booking.");
   }
@@ -2191,27 +2217,28 @@ function AwbEntryPage() {
       bondUt: String(p.bondUt ?? base.bondUt),
       payOfIgst: String(p.payOfIgst ?? base.payOfIgst),
       lutNo: String(p.lutNo ?? base.lutNo),
+      lutExpiry: String(p.lutExpiry ?? base.lutExpiry),
       ecommerce: String(p.ecommerce ?? base.ecommerce),
       meis: String(p.meis ?? base.meis),
       invoiceType: String(p.invoiceType ?? base.invoiceType),
       lines: recalculateProformaAmounts({
         lines: linesRaw.map((line, i) => {
-        const l = line && typeof line === "object" ? (line as Record<string, unknown>) : {};
-        return {
-          id: String(l.id ?? `pf-${i}`),
-          boxNo: String(l.boxNo ?? "1"),
-          packages: String(l.packages ?? ""),
-          description: String(l.description ?? ""),
-          hsCode: String(l.hsCode ?? l.hsnCode ?? ""),
-          quantity: String(l.quantity ?? ""),
-          weight: String(l.weight ?? ""),
-          unit: String(l.unit ?? "PCS"),
-          rate: String(l.rate ?? ""),
-          amount: String(l.amount ?? ""),
-          igstPercent: String(l.igstPercent ?? "0"),
-          igstAmount: String(l.igstAmount ?? "0"),
-        };
-      }),
+          const l = line && typeof line === "object" ? (line as Record<string, unknown>) : {};
+          return {
+            id: String(l.id ?? `pf-${i}`),
+            boxNo: String(l.boxNo ?? "1"),
+            packages: String(l.packages ?? ""),
+            description: String(l.description ?? ""),
+            hsCode: String(l.hsCode ?? l.hsnCode ?? ""),
+            quantity: String(l.quantity ?? ""),
+            weight: String(l.weight ?? ""),
+            unit: String(l.unit ?? "PCS"),
+            rate: String(l.rate ?? ""),
+            amount: String(l.amount ?? ""),
+            igstPercent: String(l.igstPercent ?? "0"),
+            igstAmount: String(l.igstAmount ?? "0"),
+          };
+        }),
       }).lines,
     };
   };
@@ -2793,7 +2820,7 @@ function AwbEntryPage() {
   const pushFormPage = () => {
     if (view === "form") return;
     allowLeaveRef.current = true;
-    void navigate({ search: { view: "form" } });
+    void navigate({ search: { view: "form", fresh: undefined } });
   };
 
   useLayoutEffect(() => {
@@ -2823,7 +2850,7 @@ function AwbEntryPage() {
 
   useEffect(() => {
     if (!fresh) return;
-    void navigate({ search: { view: "form" }, replace: true });
+    void navigate({ search: { view: "form", fresh: undefined }, replace: true });
   }, [fresh, navigate]);
 
   useEffect(() => {
@@ -3664,16 +3691,26 @@ function AwbEntryPage() {
       return false;
     }
     const saveErrors = [
-      ...collectAwbProductionErrors(form),
+      ...collectAwbProductionErrors(form, loadedClientProfile),
       ...consigneeBookingErrors({
         companyName: form.consignee.companyName.name || form.consignee.companyName.code,
         address1: form.consignee.address1,
         city: form.consignee.city,
         postcode: form.consignee.pincode,
-        country: form.consignee.country,
+        country: form.consignee.country || form.consignee.origin.name || form.consignee.origin.code,
         phone: form.consignee.mobileNo || form.consignee.telephone,
       }),
     ];
+    if (form.piecesLines.length === 0) {
+      const isInch = (piecesDraft.measurementUnit || "").toUpperCase().startsWith("INCH");
+      const hasDims = Number(piecesDraft.length) > 0 || Number(piecesDraft.width) > 0 || Number(piecesDraft.height) > 0;
+      if (isInch && hasDims) {
+        const div = Number(piecesDraft.division);
+        if (!div || div === 5000) {
+          saveErrors.push("No inch volumetric divisor (e.g. 305 or 166) is configured for this customer or vendor. Configure an inch divisor or enter dimensions in cm.");
+        }
+      }
+    }
     if (authed && loadedClientProfile && !loadedClientProfile.billingStateCode.trim()) {
       saveErrors.push("Customer billing state is required. Set it on the customer before saving this AWB.");
     }
@@ -3756,7 +3793,7 @@ function AwbEntryPage() {
         const vendorServiceError = await validateVendorServicePair(payload);
         if (vendorServiceError) {
           toast.error(vendorServiceError);
-          return;
+          return false;
         }
 
         let carrierDocsToPersist: Array<{ docType: string; label: string; contentB64: string; mimeType: string }> = [];
@@ -3769,7 +3806,7 @@ function AwbEntryPage() {
             const msg = `World-First Validation Error: ${validation.errors.join("; ")}`;
             toast.error(msg);
             setBookingErrors(validation.errors);
-            return;
+            return false;
           }
 
           const wfResult = await callWorldFirstBookingApi(wfPayload);
@@ -3783,7 +3820,7 @@ function AwbEntryPage() {
             toast.error(`World-First API Error: ${err}`);
             console.error("World-First AWB Booking Failed:", wfResult);
             setBookingErrors([err]);
-            return; // Abort save if World-First booking fails
+            return false; // Abort save if World-First booking fails
           }
 
           if (wfResult.awbNo) {
@@ -3804,7 +3841,7 @@ function AwbEntryPage() {
             const msg = `UPS Validation Error: ${validation.errors.join("; ")}`;
             toast.error(msg);
             setBookingErrors(validation.errors);
-            return;
+            return false;
           }
 
           const upsResult = await callWorldFirstBookingApi(upsPayload, getUpsClientConfig());
@@ -3818,7 +3855,7 @@ function AwbEntryPage() {
             toast.error(`UPS API Error: ${err}`);
             console.error("UPS AWB Booking Failed:", upsResult);
             setBookingErrors([err]);
-            return; // Abort save if UPS booking fails
+            return false; // Abort save if UPS booking fails
           }
 
           if (upsResult.awbNo) {
@@ -4015,6 +4052,19 @@ function AwbEntryPage() {
         return true;
       } catch (e) {
         const message = toErrorMessage(e);
+        const jsonMatch = message.match(/Booking validation failed:\s*(\[.+\])/);
+        if (jsonMatch) {
+          try {
+            const parsed = JSON.parse(jsonMatch[1]);
+            const serverMsgs = parsed.map((item: { message?: string }) => item.message).filter(Boolean);
+            if (serverMsgs.length > 0) {
+              reportSaveErrors(serverMsgs);
+              return false;
+            }
+          } catch {
+            // fall through
+          }
+        }
         toast.error(message);
         if (message.includes(";")) setWeightErrorModal({ open: true, message: message.replaceAll("; ", "\n") });
         return false;
@@ -4111,7 +4161,17 @@ function AwbEntryPage() {
     }
 
     // Production & Compliance checks
-    errors.push(...collectAwbProductionErrors(form));
+    errors.push(...collectAwbProductionErrors(form, loadedClientProfile));
+    if (form.piecesLines.length === 0) {
+      const isInch = (piecesDraft.measurementUnit || "").toUpperCase().startsWith("INCH");
+      const hasDims = Number(piecesDraft.length) > 0 || Number(piecesDraft.width) > 0 || Number(piecesDraft.height) > 0;
+      if (isInch && hasDims) {
+        const div = Number(piecesDraft.division);
+        if (!div || div === 5000) {
+          errors.push("No inch volumetric divisor (e.g. 305 or 166) is configured for this customer or vendor. Configure an inch divisor or enter dimensions in cm.");
+        }
+      }
+    }
 
     const shipperDocErrors = validatePartyIdNumbers(form.shipper, "Shipper");
     const consigneeDocErrors = validatePartyIdNumbers(form.consignee, "Consignee");
@@ -4961,6 +5021,14 @@ function AwbEntryPage() {
 
   const addPiecesLine = () => {
     if (!piecesDraft.noOfPieces.trim()) return toast.error("No. Of Pieces is required");
+    const isInch = (piecesDraft.measurementUnit || "").toUpperCase().startsWith("INCH");
+    const hasDims = Number(piecesDraft.length) > 0 || Number(piecesDraft.width) > 0 || Number(piecesDraft.height) > 0;
+    if (isInch && hasDims) {
+      const div = Number(piecesDraft.division);
+      if (!div || div === 5000) {
+        return toast.error("No inch volumetric divisor (e.g. 305 or 166) is configured for this customer or vendor. Configure an inch divisor or enter dimensions in cm.");
+      }
+    }
     const editedId = editingPiecesId;
     const updating = editedId != null && form.piecesLines.some((line) => line.id === editedId);
     setForm((f) => {
@@ -4970,17 +5038,17 @@ function AwbEntryPage() {
           piecesLines: f.piecesLines.map((line) =>
             line.id === editedId
               ? {
-                  ...line,
-                  actualWeightPerPc: piecesDraft.actualWeightPerPc,
-                  pieces: piecesDraft.noOfPieces,
-                  length: piecesDraft.length,
-                  breadth: piecesDraft.width,
-                  height: piecesDraft.height,
-                  volWeight: piecesDraft.volWeight,
-                  chargeWeight: piecesDraft.chargeWeight,
-                  division: piecesDraft.division,
-                  measurementUnit: piecesDraft.measurementUnit,
-                }
+                ...line,
+                actualWeightPerPc: piecesDraft.actualWeightPerPc,
+                pieces: piecesDraft.noOfPieces,
+                length: piecesDraft.length,
+                breadth: piecesDraft.width,
+                height: piecesDraft.height,
+                volWeight: piecesDraft.volWeight,
+                chargeWeight: piecesDraft.chargeWeight,
+                division: piecesDraft.division,
+                measurementUnit: piecesDraft.measurementUnit,
+              }
               : line,
           ),
         };
@@ -5379,15 +5447,15 @@ function AwbEntryPage() {
       docs.length === 0
         ? [hydrated]
         : docs.map((doc) =>
-            doc.id === hydrated.id || doc.fileName === hydrated.fileName
-              ? {
-                  ...doc,
-                  contentB64: stored.contentB64,
-                  mimeType: stored.mimeType || doc.mimeType,
-                  uploaded: true,
-                }
-              : doc,
-          );
+          doc.id === hydrated.id || doc.fileName === hydrated.fileName
+            ? {
+              ...doc,
+              contentB64: stored.contentB64 || undefined,
+              mimeType: stored.mimeType || doc.mimeType,
+              uploaded: true,
+            }
+            : doc,
+        );
     return { ...source, kyc: { documents } };
   };
 
@@ -5523,6 +5591,7 @@ function AwbEntryPage() {
           currency: profile.defaults.currency || f.proforma?.currency || "INR",
           adCode: f.proforma?.adCode || profile.bankAdCode || "",
           lutNo: f.proforma?.lutNo || profile.lutNumber || "",
+          lutExpiry: f.proforma?.lutExpiry || profile.lutExpiryDate || "",
         },
       }));
     } catch (e) {
@@ -5927,7 +5996,7 @@ function AwbEntryPage() {
                           phoneRequired
                           pincodeCountryCode={
                             !form.consignee.country.trim() ||
-                            form.consignee.country.trim().toLowerCase() === "india"
+                              form.consignee.country.trim().toLowerCase() === "india"
                               ? "IN"
                               : /^[A-Za-z]{2}$/.test(form.consignee.origin.code.trim())
                                 ? form.consignee.origin.code.trim().toUpperCase()
@@ -6634,13 +6703,13 @@ function AwbEntryPage() {
                               setEditing((current) =>
                                 current
                                   ? {
-                                      ...current,
-                                      rowVersion: row.row_version,
-                                      status: row.current_status,
-                                      lockedByName: null,
-                                      lockedAt: null,
-                                      serverLocked: false,
-                                    }
+                                    ...current,
+                                    rowVersion: row.row_version,
+                                    status: row.current_status,
+                                    lockedByName: null,
+                                    lockedAt: null,
+                                    serverLocked: false,
+                                  }
                                   : current,
                               );
                               toast.success(`AWB ${row.awb_no} unlocked`);
@@ -6944,15 +7013,26 @@ function AwbEntryPage() {
                             />
                           </FieldWrapper>
                           {form.proforma.bondUt === "Yes" ? (
-                            <FieldWrapper borderLabel label="LUT No" required>
-                              <ErpNavInput
-                                order={AWB_NAV.PROFORMA_LUT_NO}
-                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                value={form.proforma.lutNo}
-                                onValueChange={(v) => patchProforma({ lutNo: v })}
-                                placeholder={loadedClientProfile?.lutNumber || "Enter LUT No"}
-                              />
-                            </FieldWrapper>
+                            <>
+                              <FieldWrapper borderLabel label="LUT No" required>
+                                <ErpNavInput
+                                  order={AWB_NAV.PROFORMA_LUT_NO}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={form.proforma.lutNo}
+                                  onValueChange={(v) => patchProforma({ lutNo: v })}
+                                  placeholder={loadedClientProfile?.lutNumber || "Enter LUT No"}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="LUT Expiry Date" required>
+                                <ErpNavDateInput
+                                  order={AWB_NAV.PROFORMA_LUT_EXPIRY}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={form.proforma.lutExpiry}
+                                  onValueChange={(v) => patchProforma({ lutExpiry: v })}
+                                  placeholder="YYYY-MM-DD"
+                                />
+                              </FieldWrapper>
+                            </>
                           ) : null}
                           <FieldWrapper borderLabel label="Ecommerce">
                             <ErpNavSelect
@@ -8751,9 +8831,9 @@ function PartySection({
           <ErpNavInput
             order={nav.address2}
             className={inputClass}
-              value={party.address2}
-              maxLength={100}
-              onValueChange={(v) => onChange({ address2: clipText(v, 100) })}
+            value={party.address2}
+            maxLength={100}
+            onValueChange={(v) => onChange({ address2: clipText(v, 100) })}
           />
         </FieldWrapper>
         <div className="grid grid-cols-2 gap-2">
@@ -9002,9 +9082,9 @@ function ServicesSection({
             <ErpNavInput
               order={AWB_NAV.SHIPMENT_VALUE}
               className={`min-w-0 flex-1 ${inputClass}`}
-          value={form.shipmentValue}
-          onValueChange={(v) => setForm((f) => ({ ...f, shipmentValue: decimalNumber(v) }))}
-          onBlur={() => setForm((f) => ({ ...f, shipmentValue: formatMoney2(f.shipmentValue) }))}
+              value={form.shipmentValue}
+              onValueChange={(v) => setForm((f) => ({ ...f, shipmentValue: decimalNumber(v) }))}
+              onBlur={() => setForm((f) => ({ ...f, shipmentValue: formatMoney2(f.shipmentValue) }))}
             />
             <Select
               value={form.shipmentCurrency}

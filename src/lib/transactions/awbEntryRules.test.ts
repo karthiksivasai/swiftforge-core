@@ -27,6 +27,10 @@ import {
   splitRoundedGst,
   storedChargeDisplay,
 } from "@/lib/transactions/awbEntryRules";
+import {
+  collectAwbProductionErrors,
+  emptyForm,
+} from "@/routes/transaction.awb-entry";
 
 describe("AWB entry rules", () => {
   it("uses the customer cm divisor for a matching product and falls back to 5000", () => {
@@ -271,5 +275,112 @@ describe("AWB entry rules", () => {
     expect(awbErrorField("Cash Receipt No. is required for a cash payment")).toBe("cashReceiptNo");
     expect(awbErrorField("Amount received cannot be more than the total")).toBe("amountReceived");
     expect(awbErrorField("Expected delivery date cannot be before the book date")).toBe("expectedDelivery");
+  });
+
+  it("returns empty string and never 5000 when piece unit is inches and no inch divisor exists", () => {
+    expect(
+      resolveDivision({
+        measurementUnit: "Inch",
+        productName: "AIR",
+        rows: [{ product: "AIR", cm_divisor: 5000, inch_divisor: null }],
+      }),
+    ).toBe("");
+    expect(resolveDivision({ measurementUnit: "Inch", rows: [] })).toBe("");
+  });
+
+  it("validates LUT Bond/UT without crashing and checks expiry", () => {
+    const form = emptyForm();
+    form.vendor = { id: "v1", code: "FEDEX", name: "FedEx" };
+    form.shipper.address1 = "123 Main St";
+    form.shipper.pincode = "500001";
+    form.shipper.city = "Hyderabad";
+    form.shipper.state = "Telangana";
+    form.proforma.csbType = "CSB 5";
+    form.proforma.exportReason = "SALE";
+    form.proforma.adCode = "ADCODE01";
+    form.shipper.iecNo = "0123456789";
+    form.proforma.bondUt = "Yes";
+    form.bookDate = "2026-11-10";
+    form.proforma.lines = [
+      { id: "1", boxNo: "1", packages: "1", description: "Silk Sarees", hsCode: "5007", quantity: "10", weight: "1.0", unit: "PCS", rate: "100", amount: "1000", igstPercent: "0", igstAmount: "0" },
+    ];
+
+    // 1. Crash test: clientProfile passed with valid LUT
+    const clientProfile = {
+      id: "c1",
+      code: "RAVI",
+      name: "Ravi Textiles",
+      billingStateCode: "36",
+      lutNumber: "LUT-2026-FUTURE",
+      lutExpiryDate: "2027-03-31",
+      defaults: { currency: "USD", preferredProduct: { id: "p1", code: "COM", name: "Commercial" } },
+      defaultVendor: { id: "v1", code: "FEDEX", name: "FedEx" },
+      activeLut: true,
+      iecNumber: "0123456789",
+      bankAdCode: "ADCODE01",
+    } as any;
+
+    const noCrashErrors = collectAwbProductionErrors(form, clientProfile);
+    expect(noCrashErrors.filter((e) => e.includes("Bond / UT") || e.includes("LUT"))).toHaveLength(0);
+
+    // 2. Expired LUT check
+    const expiredProfile = { ...clientProfile, lutExpiryDate: "2026-03-31" };
+    const expiredErrors = collectAwbProductionErrors(form, expiredProfile);
+    expect(expiredErrors).toContain(
+      "Bond / UT is selected as Yes, but the LUT on file (LUT-2026-FUTURE) expired on 2026-03-31. An active, unexpired LUT is required.",
+    );
+
+    // 3. Manual LUT typed without expiry date
+    form.proforma.lutNo = "LUT-MANUAL-001";
+    form.proforma.lutExpiry = "";
+    const manualNoExpiryErrors = collectAwbProductionErrors(form, null);
+    expect(manualNoExpiryErrors).toContain("LUT Expiry Date is required when LUT Number is entered on the Proforma tab.");
+
+    // 4. Manual LUT typed with valid future expiry date
+    form.proforma.lutExpiry = "2027-12-31";
+    const manualValidErrors = collectAwbProductionErrors(form, null);
+    expect(manualValidErrors.filter((e) => e.includes("LUT"))).toHaveLength(0);
+  });
+
+  it("exempts non-commercial DOX shipments from CSB Type and Export Reason requirements", () => {
+    const doxForm = emptyForm();
+    doxForm.vendor = { id: "v1", code: "FEDEX", name: "FedEx" };
+    doxForm.shipper.address1 = "123 Main St";
+    doxForm.shipper.pincode = "500001";
+    doxForm.shipper.city = "Hyderabad";
+    doxForm.shipper.state = "Telangana";
+    doxForm.product = { id: "p1", code: "DOX", name: "Documents" };
+    doxForm.piecesUnit = "DOX";
+    doxForm.commercial = false;
+    doxForm.proforma.csbType = "";
+    doxForm.proforma.exportReason = "";
+    doxForm.proforma.lines = [];
+
+    const errors = collectAwbProductionErrors(doxForm);
+    expect(errors.filter((e) => e.includes("CSB Type") || e.includes("Export reason"))).toHaveLength(0);
+    expect(errors.filter((e) => e.includes("Proforma line item is required"))).toHaveLength(0);
+  });
+
+  it("blocks save when dimensions are in inches without an inch divisor", () => {
+    const form = emptyForm();
+    form.piecesLines = [
+      {
+        id: "p1",
+        childAwb: "",
+        actualWeightPerPc: "1.0",
+        pieces: "1",
+        length: "12",
+        breadth: "12",
+        height: "12",
+        measurementUnit: "Inch",
+        division: "5000", // invalid cm fallback
+        volWeight: "0.345",
+        chargeWeight: "1.000",
+      },
+    ];
+    const errors = collectAwbProductionErrors(form);
+    expect(errors).toContain(
+      "Box 1: No inch volumetric divisor (e.g. 305 or 166) is configured for this customer or vendor. Configure an inch divisor or enter dimensions in cm.",
+    );
   });
 });
