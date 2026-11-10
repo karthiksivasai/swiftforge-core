@@ -59,6 +59,7 @@ export type ProformaEntryInput = {
   igstAmount?: string;
   units: string[];
   row?: number;
+  maxPiecesCount?: number;
 };
 
 function stripControls(value: string): string {
@@ -138,6 +139,16 @@ export function validateProformaEntry(input: ProformaEntryInput): {
   const boxText = stripControls(input.boxNo);
   const boxNo = boxText || "Box-1";
   if (boxNo.length > 20) fail("Box No", boxText, "Box No must be 20 characters or less");
+
+  if (input.maxPiecesCount != null && input.maxPiecesCount > 0) {
+    const boxMatch = boxNo.match(/(?:box[-_\s]*)?(\d+)/i);
+    if (boxMatch) {
+      const boxIdx = parseInt(boxMatch[1]!, 10);
+      if (boxIdx > input.maxPiecesCount) {
+        fail("Box No", boxText, `Box No (${boxIdx}) cannot exceed shipment piece count (${input.maxPiecesCount})`);
+      }
+    }
+  }
 
   const packagesText = input.packages.trim();
   let packages = 1;
@@ -235,7 +246,7 @@ export function validateProformaEntry(input: ProformaEntryInput): {
 
 function cellText(cell: XLSX.CellObject | undefined): string {
   if (!cell || cell.v == null) return "";
-  if (cell.t === "s" || cell.t === "str") return String(cell.v).trim();
+  if (cell.t === "s") return String(cell.v).trim();
   if (typeof cell.w === "string" && cell.w.trim()) return cell.w.trim();
   return String(cell.v).trim();
 }

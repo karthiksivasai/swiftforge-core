@@ -29,6 +29,11 @@ supabase/.branches
 supabase/.temp
 supabase/.env
 
+# Local database backups
+backups/
+*.dump
+
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars

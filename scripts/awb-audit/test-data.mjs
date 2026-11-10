@@ -120,22 +120,8 @@ export async function resolveMasters(db) {
 }
 
 const AUDIT_AWB_NOS = [
-  "000028",
-  "000029",
-  "000030",
-  "000031",
-  "000032",
-  "000033",
-  "000034",
-  "000035",
-  "000036",
-  "000037",
-  "000038",
-  "000039",
-  "000040",
-  "000041",
-  "000042",
-  "000043",
+  ...Array.from({ length: 43 }, (_, i) => String(i + 1).padStart(6, "0")),
+  ...Array.from({ length: 60 }, (_, i) => String(100001 + i)),
 ];
 
 /** Test AWBs from the audit, plus any later AWB whose reference starts with TEST_AWB_. */

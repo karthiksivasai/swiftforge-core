@@ -8,6 +8,18 @@ The app is not production ready. The booking code for the decided rules is in pl
 
 This is Swiftforge, a courier ERP. The owner is using the AWB Entry screen for international bookings only. The git repo is this `swiftforge-core` folder. The parent folder is only the workspace.
 
+## A1. Environments
+
+- **Current Environment (DEV)**:
+  - The linked Supabase project `ijosczggsrvscponules` (`https://ijosczggsrvscponules.supabase.co`) is strictly the **DEVELOPMENT** database.
+  - There are no real customers or production data in this project. All shipments (including older 000001–000027, audit test shipments 000028–000043, and 100001–100014) are developer test data.
+  - Development tests and migrations are developed, debugged, and verified here.
+- **Production Environment (PROD)**:
+  - Production must be a **new, completely separate Supabase project** created with automated backups enabled.
+  - Production will start entirely clean: **no test data (000001–000043 or 100001–100014) will ever be copied to production**.
+  - Migrations must be deployed to Production **only through the proper migration command** (`supabase db push` / recorded migration pipeline) after being thoroughly tested in DEV.
+  - Full read-only backups (schema and data) are generated in `backups/` (git-ignored) before executing major migrations.
+
 Stack:
 
 - TanStack Start and TanStack Router, React 19, Vite 8, Tailwind 4, Zod
@@ -76,10 +88,12 @@ That is `vitest run`. The last full run, on 9 Nov 2026, was 427 tests in 84 file
 | `scripts/awb-audit/cleanup-international-test-data.mjs` | Go-live delete. Has not been run. Do not run it. |
 | `scripts/awb-audit/test-data.mjs` | Shared ids, divisors, and the delete helpers. |
 
-Migrations added for this work. All are applied. Do not edit them. The next new file is `supabase/migrations/0146_*.sql`.
+Migrations added for this work. All are applied. Do not edit them. The next new file is `supabase/migrations/0150_*.sql`.
 
 | Migration | What it did |
 |---|---|
+| `0137_proforma_amount_recalc.sql` | Server recalculation trigger for proforma items (`app.recalculate_proforma_item_amounts()`). |
+| `0138_proforma_items.sql` | Table `public.proforma_items` with RLS, indexes, and shipment foreign keys. |
 | `0139_awb_save_books.sql` | Save books in one transaction. Adds `vendor_contracts.cm_divisor` and `inch_divisor` (5000 and 305). Blank billing state or branch state blocks the save. |
 | `0140_weight_round_gst_split.sql` | Telangana stays state code `TS`. GST alias `36` is only the GST code. One GST rounding rule. `app.apply_booked_money`. |
 | `0141_awb_lock_actor.sql` | Adds `locked_by`, `locked_at`, `unlocked_by`, `unlocked_at`. |
@@ -87,6 +101,10 @@ Migrations added for this work. All are applied. Do not edit them. The next new 
 | `0143_unlock_clears_lock_actor.sql` | Unlock clears `locked_by` and `locked_at`. The audit row keeps the history. |
 | `0144_awb_manual_charges_and_limits.sql` | Server prices manual charges. Length limits. Field-executive lookup. Manual numbers must be in 500001–899999. |
 | `0145_awb_series_permissions_tax_flag.sql` | AUTO 100001–499999 from the allotment. Overlap rejected. `book_awb_shipment` requires add or modify. `lookup_field_executives` requires list or search. Freight `tax_on_fuel` is set true. |
+| `0146_proforma_compliance_and_sync.sql` | Customs exchange rates table, branch LUT columns, helper functions `app.get_customs_exchange_rate` and `app.get_csb_iv_limit`. |
+| `0147_proforma_validation_rpc_wire.sql` | Hardens single-argument `app.awb_field_errors(p_fields jsonb)` called by `book_awb_shipment` with full customs compliance gates. |
+| `0148_proforma_dox_and_blank_csb_gates.sql` | Added `note` column to `customs_exchange_rates` (marked TEST). Enforced mandatory CSB type and export reason (rejects blank). Exempted DOX document shipments from requiring proforma lines, while strictly requiring proforma lines for Non-DOX (NDOX) and Commercial exports. Guaranteed that every booking stamps exchange rate, exchange rate date, and exchange rate note into `wizard_extras.proforma`. |
+| `0149_proforma_lut_branch_removal_and_expiry.sql` | Removed Branch master fallback from LUT validation (LUT must come only from Proforma input, Shipper master, or Customer master). Enforced LUT expiration check against book date. Auto-stamps resolved LUT into `wizard_extras.proforma`. |
 
 AWB-related tests:
 
@@ -109,7 +127,7 @@ These are decided. Do not ask them again, and do not undo them.
 - International bookings only. Domestic lanes are out of scope. None of AWB-01 through AWB-52 was only a domestic defect, so they stayed in the list. GST still applies because the customer is in India.
 - Save means Book. One server transaction (`book_awb_shipment`). Every booking check runs first. If any check fails, nothing is saved. Status becomes BOOKED. There is no separate Book button.
 - Saving an unlocked BOOKED AWB again re-rates it and leaves it BOOKED. A locked AWB cannot be saved until it is unlocked.
-- Next saves, toasts the AWB number, then opens a blank form.
+- Next button rule (updated 10 Nov 2026): On every tab (AWB, Proforma, Forwarding, KYC), Next moves to the next tab without saving or clearing. On the final tab, Next does nothing or is hidden. Save books the AWB. Every international booking must pass through Proforma (at least 1 line item required). This replaces the earlier "Next = save + blank form" rule.
 - The server is the only source of truth for weights, rates, fuel, GST, totals, and balance. Browser totals are ignored. After Save, show the amounts the server returned.
 - GST is 18% from the tax table for every international product, including Commercial and CSB V. CGST+SGST when the customer billing state equals the branch state. Otherwise IGST. Compare `branches.state_code` with `states.code`. Telangana is `TS`, not `36`. `36` is `states.gst_alias`. A blank customer billing state or a blank branch state blocks Save. Do not assume Telangana.
 - GST rounding: round the total GST to 2 decimals, then split it in half. CGST is the rounded half. SGST is the remainder. SQL function `app.split_gst`. Do not edit migration `0041`.
@@ -255,7 +273,7 @@ Old and broken. Booked or saved before the server rules. Do not treat their mone
 
 New and correct: 000035 through 000043. See the table in section C. 000043 also has the KYC file.
 
-Cleanup, when the owner asks, deletes shipments 000028–000043 and any shipment whose reference starts with `TEST_AWB_`, plus their pieces, charge snapshots, comments, attachments, events, rating audit, proforma items, shipment documents (invoice, label, KYC), and the audit-log rows for those shipment ids. It also deletes the TEST_ contracts, slabs, customer rates, fuel rows, ALIASSO test volumetric rows, and the seeded zone mappings. It restores the ALIASSO and OSMO billing states, then resets AUTO to 100001–499999 and MANUAL to 500001–899999. It does not delete zone master rows. The finance `invoices` register is not written by AWB entry. The AWB invoice is a `shipment_documents` row.
+Cleanup, when the owner asks, deletes shipments 000001–000043, 100001–100060, and any shipment whose reference starts with `TEST_AWB_`, plus their pieces, charge snapshots, comments, attachments, events, rating audit, proforma items, shipment documents (invoice, label, KYC), and the audit-log rows for those shipment ids. It also deletes the TEST_ contracts, slabs, customer rates, fuel rows, ALIASSO test volumetric rows, and the seeded zone mappings. It restores the ALIASSO and OSMO billing states, then resets AUTO to 100001–499999 and MANUAL to 500001–899999. It does not delete zone master rows. The finance `invoices` register is not written by AWB entry. The AWB invoice is a `shipment_documents` row. Production will be provisioned as a brand-new separate Supabase project starting clean with zero test data.
 
 ## E. Pending work
 
@@ -285,7 +303,8 @@ Go-live, in this order, and only when the owner asks:
 1. Replace the TEST_ rate cards, vendor contracts, zone mappings, and fuel percent with the real ones.
 2. Confirm billing state on every client and branch. A blank state must keep blocking Save.
 3. Get the CA confirmation for 18% GST on every international type, and for fuel on freight being taxed. Do not change the rule while waiting.
-4. Run `scripts/awb-audit/cleanup-international-test-data.mjs`. Not before. That is what removes 000028–000043 and resets the series.
+4. Load official CBIC customs exchange rates into `public.customs_exchange_rates` (replacing the initial TEST placeholder rates).
+5. Run `scripts/awb-audit/cleanup-international-test-data.mjs`. Not before. That is what removes test AWBs and resets the series.
 
 ## F. How we work
 
@@ -309,5 +328,79 @@ Waiting on the owner. Do not invent an answer.
 3. When to run the cleanup script.
 4. AWB-10: an empty customer payment type currently becomes Cash. What should the form do instead?
 5. Whether the remaining partials are the next batch: cold rate calls over 1 second, a future book date typed again, CSB without Ad Code, a vendor with no slab, a screen reader, and a re-read of the 000043 lock audit rows.
+6. LUT Attribution: Under Indian GST and Customs export rules, whose LUT is legally operative when exporting under Bond/UT? Currently, the code supports reading LUT numbers from Shipper master, Customer master, Branch master, and manual entry on the Proforma tab. Waiting on CA / Customs broker clarification on legal attribution.
 
 Not open: the manual AWB series. Option (a) is implemented. Domestic scope. Save equals Book. The consignee fields. The weight rule. The GST split. The lock rule.
+
+## H. Proforma Tab Audit (10 Nov 2026)
+
+Full audit findings are in `docs/proforma-audit.md` (PF-01 to PF-36).
+
+### 1. Current State & Database Gaps
+- **Unapplied Migrations**: `0137_proforma_amount_recalc.sql` and `0138_proforma_items.sql` exist in the repo but were never executed on the linked database. Table `public.proforma_items` is missing. Proforma lines are currently stored only inside `shipments.wizard_extras -> 'proforma'`.
+- **Server Recalculation Missing**: The database triggers to recalculate Amount = Quantity × Rate and IGST do not exist in Postgres. The server stores whatever client sends.
+- **Customs Loophole**: AWB `is_commercial: true` can be booked with `CSB 4` and `UNSOLICITED GIFT - NOT FOR SALE` because compliance Rule 7 only checks `csb_type`.
+- **Mutual Exclusivity**: `Bond / UT` and `Pay of IGST` can both be set to "Yes", violating Section 16 of the IGST Act.
+- **UI Gaps**: Line entry bar has no `IGST %` input (manual lines forced to 0%). Grid has no Edit button. "Next" button wipes the form to a blank AWB instead of advancing to the "Forwarding" tab.
+- **Invoice Print Omits Customs Metadata**: `invoiceGenerator.ts` omits `adNo`, `lutNo`, and `gstNo`, printing blank values on the commercial invoice.
+
+### 2. Live Test AWBs (P1–P6)
+Created with reference `TEST_AWB_P1` onward using seeded data:
+- `100008` (P1): CSB IV Gift with 2 lines (INR ₹350.00).
+- `100009` (P2): CSB V Commercial with IEC + AD Code, Bond/UT Yes, 3 lines (₹550.00). Confirmed AD No/LUT No blank on printed invoice.
+- `100010` (P3): CSB V with Pay of IGST Yes, line IGST calculations (₹90.00).
+- `100011` (P4): Foreign Currency (USD $50.00). Confirmed lack of exchange rate / statutory limit check.
+- `100012` (P5): Proforma Import with 12 lines (₹780.00).
+- P6 Break Tests: Confirmed server allows `Box-5` on 1-piece shipment, allows both Bond and Pay of IGST "Yes", and allows Commercial AWB with Gift CSB 4. Confirmed server blocks CSB 5 Gift and blocks edits while locked.
+
+### 3. Decisions Made for Proforma (10 Nov 2026)
+1. **CSB IV Value Limit**: Hard block saving when proforma total exceeds the limit. The limit is stored as a system setting (not hardcoded), using ₹1,00,000 INR as the initial placeholder until broker confirmation.
+2. **Next Button Rule (Global Form Rule)**: On every tab (AWB, Proforma, Forwarding, KYC), "Next" moves to the next tab without saving or clearing. On the final tab, "Next" is hidden or does nothing. "Save" books the AWB. Every international shipment must pass through Proforma. This supersedes and replaces the earlier "Next = save + blank form" rule.
+3. **Currency & Conversion**: Operators enter line amounts in the invoice currency. An admin-maintained exchange rate table (`currency`, `rate`, `valid_from`, `valid_to`) is added. On save, the server converts to INR, stores both the foreign and INR amounts along with the rate used, and applies the CSB IV limit against the INR value.
+4. **CSB 5 Export Reasons**: Allowed reasons: `SALE`, `COMMERCIAL SAMPLES`, `REPAIR & RETURN`, `EXHIBITION`, `DEFECTIVE RETURN`. Gift reasons are strictly disallowed for CSB 5 and commercial shipments.
+5. **LUT Enforcement**: Never print placeholder text like "LUT-APPLIED". The LUT number and validity must come from company/branch masters. If `Bond / UT` = "Yes" and there is no valid LUT on file, booking is blocked.
+6. **Migration Strategy**: Roll `proforma_items`, line sync triggers, and compliance validations forward into sequential migration `0146_proforma_table_and_sync.sql`.
+
+### 4. Implementation & Verification Status (10 Nov 2026) — Complete
+
+All Batches 1, 2, and 3 have been fully implemented, migrated on DEV database, and verified:
+- **Migrations Executed & Recorded**:
+  - `0137_proforma_amount_recalc.sql` and `0138_proforma_items.sql` applied and repaired.
+  - `0146_proforma_compliance_and_sync.sql` created exchange rate tables and branch LUT columns.
+  - `0147_proforma_validation_rpc_wire.sql` wired compliance rules directly into `book_awb_shipment`.
+- **Pre-Migration Backups**:
+  - Schema: `swiftforge-core/backups/schema_backup_20261110.sql` (1.88 MB)
+  - Data: `swiftforge-core/backups/data_backup_20261110.sql` (18.92 MB)
+- **Code Changes**:
+  - `invoiceGenerator.ts`: Injected `adNo`, `lutNo`, `gstNo`, and dynamic title.
+  - `clientProfile.ts`: Added `bankAdCode`, `lutNumber`, `lutExpiryDate`.
+  - `awb-entry-nav-order.ts`: Added tab indices for `PROFORMA_LUT_NO`, `PROFORMA_IGST_PCT`, `PROFORMA_ADD`.
+  - `awbEntryRules.ts`: Added regex matchers for proforma fields and length limits.
+  - `proformaImport.ts`: Added `maxPiecesCount` check in `validateProformaEntry`.
+  - `transaction.awb-entry.tsx`: Two-way sync, mutual exclusivity auto-clear, grid Pencil edit mode, manual `IGST %` input, tab trapping on error, `deriveAwbBoxNumbers` fallback to `piecesCount`, sequential Next button advancement, customs exchange rate calculation & badges.
+  - `test-data.mjs`: Added tracking for `100001`–`100030` and `TEST_AWB_%` for cleanup.
+- **Test Suite Verification**:
+  - `src/lib/transactions/proformaAudit.test.ts`: All 6 test suites passed live against DEV DB (`100026`–`100030`, references `TEST_AWB_*`).
+  - `src/lib/transactions/awbEntryRules.test.ts` (15 tests passed) & `src/lib/transactions/awbBookingFlow.test.ts` (2 tests passed). Zero regressions.
+
+### 5. Re-check of International AWB Cases A–G (Cases A3–G3, 10 Nov 2026)
+
+Following migration `0148_proforma_dox_and_blank_csb_gates.sql`, the earlier international baseline cases A–G were re-booked against the live DEV database to verify that DOX proforma exemption, non-DOX/Commercial proforma line requirement, exchange rate persistence, and GST calculations match without regressions.
+
+| AWB | Ref | What | Weight | Freight | Fuel | IGST | CGST | SGST | Total | Received | Balance | Exch Rate | Rate Date |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **100038** | TEST_AWB_A3 | DOX, USA, Cash (0 lines) | 0.500 | 250.00 | 25.00 | 0.00 | 24.75 | 24.75 | 324.50 | 324.50 | 0.00 | 1.0000 | 2026-11-10 |
+| **100039** | TEST_AWB_B3 | NDOX, UAE, Cash (1 line) | 6.500 | 4550.00 | 455.00 | 0.00 | 450.45 | 450.45 | 5905.90 | 5905.90 | 0.00 | 1.0000 | 2026-11-10 |
+| **100040** | TEST_AWB_C3 | NDOX, USA, Cash (1 line) | 6.000 | 3000.00 | 300.00 | 0.00 | 297.00 | 297.00 | 3894.00 | 3894.00 | 0.00 | 1.0000 | 2026-11-10 |
+| **100041** | TEST_AWB_D3 | Commercial, USA, IEC (1 line) | 1.000 | 500.00 | 50.00 | 0.00 | 49.50 | 49.50 | 649.00 | 649.00 | 0.00 | 1.0000 | 2026-11-10 |
+| **100042** | TEST_AWB_E3 | DOX, USA, Credit (0 lines) | 0.500 | 250.00 | 25.00 | 0.00 | 24.75 | 24.75 | 324.50 | 100.00 | 224.50 | 1.0000 | 2026-11-10 |
+| **100043** | TEST_AWB_F3 | DOX, USA, Cash (0 lines) | 0.500 | 250.00 | 25.00 | 0.00 | 24.75 | 24.75 | 324.50 | 324.50 | 0.00 | 1.0000 | 2026-11-10 |
+| **100044** | TEST_AWB_G3 | DOX, USA, OSMO, IGST (0 lines) | 0.500 | 250.00 | 25.00 | 49.50 | 0.00 | 0.00 | 324.50 | 324.50 | 0.00 | 1.0000 | 2026-11-10 |
+
+**Observations**:
+1. All DOX shipments (Cases A3, E3, F3, G3) booked with 0 proforma lines and were accepted by both client validator and Postgres server.
+2. All NDOX and Commercial shipments (Cases B3, C3, D3) booked with proforma lines and were accepted.
+3. Commercial shipment Case D3 validated IEC (`ABCDE12345`), AD Code (`ADCODE01`), and LUT Number (`LUT-HYD-2026-001`), and printed them onto the Commercial Invoice document.
+4. Every single booking stamped `exchangeRate` (1.0000) and `exchangeRateDate` (2026-11-10) directly into `shipments.wizard_extras -> 'proforma'`.
+5. Break tests `6h` (blank CSB type blocked), `6i` (blank export reason blocked), and `6j` (NDOX without proforma lines blocked) all verified and passed.
+

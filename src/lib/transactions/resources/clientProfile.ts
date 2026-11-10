@@ -51,6 +51,9 @@ export type ClientProfile = {
   aadharNo: string;
   instructions: string;
   country: string;
+  bankAdCode: string;
+  lutNumber: string;
+  lutExpiryDate: string;
   origin: ClientLookupPair;
   salesExecutive: ClientLookupPair;
   fieldExecutive: ClientLookupPair;
@@ -224,6 +227,9 @@ function mapRowToProfile(row: CustomerRow, addresses: DbCustomerAddress[]): Clie
     aadharNo: shipper.aadharNo,
     instructions: str(row.instructions),
     country: "",
+    bankAdCode: str(row.bank_ad_code),
+    lutNumber: str(row.lut_number),
+    lutExpiryDate: str(row.lut_till_date),
     origin: pairFromExtra(row.origin),
     salesExecutive,
     fieldExecutive,
@@ -335,7 +341,7 @@ async function overlayLinkedShipper(profile: ClientProfile): Promise<ClientProfi
   const { data } = await supabase
     .from("shippers")
     .select(
-      "id, code, name, origin_id, origin_code, contact_person, address1, address2, pin_code, city, state_name, telephone1, mobile, email, iec_no, gst_no, pan_no, aadhar_no",
+      "id, code, name, origin_id, origin_code, contact_person, address1, address2, pin_code, city, state_name, telephone1, mobile, email, iec_no, gst_no, pan_no, aadhar_no, bank_ad_code, lut_number, lut_till_date",
     )
     .eq("customer_id", profile.id)
     .is("deleted_at", null)
@@ -368,6 +374,9 @@ async function overlayLinkedShipper(profile: ClientProfile): Promise<ClientProfi
     gstNo: str(data.gst_no) || profile.gstNo,
     panNo: str(data.pan_no) || profile.panNo,
     aadharNo: str(data.aadhar_no) || profile.aadharNo,
+    bankAdCode: str(data.bank_ad_code) || profile.bankAdCode,
+    lutNumber: str(data.lut_number) || profile.lutNumber,
+    lutExpiryDate: str(data.lut_till_date) || profile.lutExpiryDate,
     origin: origin.code || origin.name ? origin : profile.origin,
   };
 }
@@ -381,7 +390,7 @@ async function fetchCustomerRow(ref: ClientLookupRef): Promise<CustomerRow | nul
       .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    if (data) return data as CustomerRow;
+    if (data) return data as unknown as CustomerRow;
   }
 
   const code = str(ref.code);
@@ -393,7 +402,7 @@ async function fetchCustomerRow(ref: ClientLookupRef): Promise<CustomerRow | nul
       .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    if (data) return data as CustomerRow;
+    if (data) return data as unknown as CustomerRow;
   }
 
   const name = str(ref.name);
@@ -405,7 +414,7 @@ async function fetchCustomerRow(ref: ClientLookupRef): Promise<CustomerRow | nul
       .is("deleted_at", null)
       .limit(2);
     if (error) throw new Error(error.message);
-    if (data?.length === 1) return data[0] as CustomerRow;
+    if (data?.length === 1) return data[0] as unknown as CustomerRow;
   }
 
   return null;

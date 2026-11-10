@@ -49,6 +49,7 @@ export type InvoicePiece = {
 };
 
 export type InvoiceInput = {
+  title?: string;
   awbNo: string;
   invoiceNo: string;
   invoiceDate: string;
@@ -379,7 +380,7 @@ export function buildInvoiceHtml(input: InvoiceInput): string {
 <div class="sheet" id="invoice-root">
   <div class="title">
     <span class="awb-side">${esc(awb)}</span>
-    INVOICE
+    ${esc(input.title || "INVOICE")}
   </div>
 
   <div class="row">
@@ -669,6 +670,11 @@ export type InvoiceFormSlice = {
     exportReason: string;
     termOfInvoice: string;
     currency: string;
+    adCode?: string;
+    bondUt?: string;
+    payOfIgst?: string;
+    lutNo?: string;
+    csbType?: string;
     lines: Array<{
       boxNo: string;
       description: string;
@@ -744,7 +750,23 @@ export function formToInvoiceInput(form: InvoiceFormSlice): InvoiceInput {
   const currency = form.proforma.currency || form.shipmentCurrency || "USD";
   const pcsUnit = (form.piecesUnit || "").toUpperCase().includes("DOX") ? "PKT" : "PKT";
 
+  const csbTypeUpper = (form.proforma.csbType || "").trim().toUpperCase();
+  const isCommercial =
+    csbTypeUpper === "CSB 5" ||
+    csbTypeUpper === "COMMERCIAL" ||
+    csbTypeUpper === "CBE XIII" ||
+    /commercial/i.test(csbTypeUpper);
+  const title = isCommercial ? "COMMERCIAL INVOICE" : "PROFORMA INVOICE";
+
+  const gstNo =
+    (form.shipper.documentType === "GST" ? form.shipper.documentNo : "") ||
+    form.shipper.documentNo ||
+    "";
+  const adNo = form.proforma.adCode || "";
+  const lutNo = form.proforma.bondUt === "Yes" ? (form.proforma.lutNo || "") : "";
+
   return {
+    title,
     awbNo: form.awbNo,
     invoiceNo: invNo,
     invoiceDate: invDate,
@@ -753,6 +775,9 @@ export function formToInvoiceInput(form: InvoiceFormSlice): InvoiceInput {
     deliveryAwb: form.forwarding.deliveryAwb || "",
     pcs: form.pieces || "1",
     pcsUnit,
+    gstNo,
+    adNo,
+    lutNo,
     shipper: {
       name: form.shipper.companyName.name || form.shipper.contactName,
       companyName: form.shipper.companyName.name,

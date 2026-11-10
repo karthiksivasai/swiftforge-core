@@ -318,6 +318,7 @@ type ProformaData = {
   adCode: string;
   bondUt: string;
   payOfIgst: string;
+  lutNo: string;
   ecommerce: string;
   meis: string;
   invoiceType: string;
@@ -586,16 +587,28 @@ const TERM_OF_INVOICE = [
   "Unknown(UNK)",
 ] as const;
 
-const EXPORT_REASONS = [
+const CSB5_EXPORT_REASONS = [
+  "SALE",
+  "COMMERCIAL SAMPLES",
+  "REPAIR & RETURN",
+  "EXHIBITION",
+  "DEFECTIVE RETURN",
+] as const;
+
+const CSB4_EXPORT_REASONS = [
+  "UNSOLICITED GIFT - NOT FOR SALE",
   "Bonafide Gift",
+  "PERSONAL",
+  "Personal not for resale",
+  "Samples not for sale",
   "BUYER (IF OTHER THAN CONSIGNEE)",
   "FREE SAMPLE OF NO COMMERICAL VALUE",
   "FREE TRADE SAMPLE",
-  "PERSONAL",
-  "Personal not for resale",
-  "SALE",
-  "Samples not for sale",
-  "UNSOLICITED GIFT - NOT FOR SALE",
+] as const;
+
+const EXPORT_REASONS = [
+  ...CSB5_EXPORT_REASONS,
+  ...CSB4_EXPORT_REASONS,
 ] as const;
 
 const PROFORMA_FORMATS = ["B2B", "B2C", "C2C"] as const;
@@ -1003,18 +1016,19 @@ const emptyChargeDraft = (): ChargeDraft => ({
 });
 
 const emptyProforma = (): ProformaData => ({
-  csbType: "CSB 4",
+  csbType: "",
   termOfInvoice: "",
   gstInvoice: false,
   invoiceNo: "",
   invoiceDate: "",
   departmentNo: "",
-  exportReason: "UNSOLICITED GIFT - NOT FOR SALE",
+  exportReason: "",
   format: "",
   currency: "INR",
   adCode: "",
   bondUt: "No",
   payOfIgst: "No",
+  lutNo: "",
   ecommerce: "No",
   meis: "No",
   invoiceType: "",
@@ -1313,7 +1327,30 @@ const AWB_ERROR_NAV: Record<string, number> = {
   amountReceived: AWB_NAV.AMOUNT_RECEIVED,
   cashReceiptDate: AWB_NAV.CASH_RECEIPT_DATE,
   expectedDelivery: AWB_NAV.EXPECTED_DELIVERY,
+  adCode: AWB_NAV.PROFORMA_AD_CODE,
+  bondUt: AWB_NAV.PROFORMA_BOND_UT,
+  payOfIgst: AWB_NAV.PROFORMA_PAY_IGST,
+  lutNo: AWB_NAV.PROFORMA_LUT_NO,
+  csbType: AWB_NAV.PROFORMA_CSB_TYPE,
+  exportReason: AWB_NAV.PROFORMA_EXPORT_REASON,
+  proformaLines: AWB_NAV.PROFORMA_BOX_NO,
 };
+
+const DEFAULT_CUSTOMS_EXCHANGE_RATES: Record<string, number> = {
+  INR: 1.0,
+  USD: 86.50,
+  EUR: 93.20,
+  GBP: 110.00,
+  AED: 23.55,
+  CAD: 63.50,
+  AUD: 56.20,
+  SGD: 64.80,
+};
+
+function getCustomsExchangeRate(currency: string): number {
+  const c = (currency || "INR").trim().toUpperCase();
+  return DEFAULT_CUSTOMS_EXCHANGE_RATES[c] ?? 1.0;
+}
 
 function collectAwbProductionErrors(form: AwbFullForm): string[] {
   const errors: string[] = [];
@@ -1322,8 +1359,89 @@ function collectAwbProductionErrors(form: AwbFullForm): string[] {
   if (!form.shipper.pincode.trim()) errors.push("Shipper Pincode is required");
   if (!form.shipper.city.trim()) errors.push("Shipper City is required");
   if (!form.shipper.state.trim()) errors.push("Shipper State is required");
-  if (form.proforma.csbType.trim().toUpperCase() === "CSB 5" && !form.proforma.adCode.trim()) {
-    errors.push("Ad Code is required when CSB Type is CSB 5");
+
+  // Proforma Customs & GST checks
+  const bondUt = (form.proforma.bondUt || "No").trim().toUpperCase();
+  const payOfIgst = (form.proforma.payOfIgst || "No").trim().toUpperCase();
+  if (bondUt === "YES" && payOfIgst === "YES") {
+    errors.push("LUT (Bond/UT) and Payment of IGST are mutually exclusive under Section 16 of the IGST Act. Choose either LUT or Payment of IGST, not both.");
+  }
+
+  const csbTypeUpper = (form.proforma.csbType || "").trim().toUpperCase();
+  const exportReasonUpper = (form.proforma.exportReason || "").trim().toUpperCase();
+
+  // CSB Type and Export Reason MUST be chosen by the operator (cannot be blank)
+  if (!csbTypeUpper) {
+    errors.push("CSB Type is required. Select CSB 4, CSB 5, etc. on the Proforma tab.");
+  }
+  if (!exportReasonUpper) {
+    errors.push("Export reason is required. Select an export reason on the Proforma tab.");
+  }
+
+  const isCommercialExport = form.commercial || csbTypeUpper === "CSB 5" || csbTypeUpper === "COMMERCIAL" || csbTypeUpper === "CBE XIII";
+
+  if (isCommercialExport) {
+    if (!form.proforma.adCode.trim()) {
+      errors.push("Ad Code is required when CSB Type is CSB 5");
+    }
+    if (exportReasonUpper.includes("GIFT")) {
+      errors.push("Non-commercial gift exports cannot be filed under commercial exports / CSB-V. Select a commercial export reason.");
+    }
+    if (csbTypeUpper === "CSB 4" || csbTypeUpper === "CSB 3" || csbTypeUpper === "ECM SPX") {
+      errors.push("Commercial shipments must be filed under CSB-V or COMMERCIAL, not CSB-IV/III.");
+    }
+    const allowedCsb5 = ["SALE", "COMMERCIAL SAMPLES", "REPAIR & RETURN", "EXHIBITION", "DEFECTIVE RETURN"];
+    if (exportReasonUpper && !allowedCsb5.includes(exportReasonUpper)) {
+      errors.push(`Export reason "${form.proforma.exportReason}" is not permitted for commercial CSB-V. Allowed reasons: SALE, COMMERCIAL SAMPLES, REPAIR & RETURN, EXHIBITION, DEFECTIVE RETURN.`);
+    }
+    const shipperIec = (form.shipper.iecNo.trim() || ((form.shipper.documentType === "IEC" || form.shipper.documentType.includes("IEC")) ? form.shipper.documentNo.trim() : "")).toUpperCase();
+    if (!shipperIec) {
+      errors.push("Valid 10-character alphanumeric IEC is required on Shipper for CSB-V / Commercial export.");
+    } else if (!/^[A-Z0-9]{10}$/.test(shipperIec)) {
+      errors.push(`Invalid IEC "${shipperIec}". IEC must be exactly 10 alphanumeric characters.`);
+    }
+  } else {
+    if (exportReasonUpper === "SALE") {
+      errors.push('Commercial export reason "SALE" must be filed under CSB-V or COMMERCIAL, not CSB-IV/III.');
+    }
+  }
+
+  // LUT number check when Bond/UT is Yes
+  // Must come only from Proforma input, Shipper master, or Customer master (Branch fallback removed)
+  if (bondUt === "YES") {
+    const lutInput = (form.proforma.lutNo || "").trim();
+    const customerLut = (loadedClientProfile?.lutNumber || "").trim();
+    const lutExpiry = (loadedClientProfile?.lutExpiryDate || "").trim();
+    const bookDate = form.bookDate.trim() || new Date().toISOString().slice(0, 10);
+    const activeLut = lutInput || customerLut;
+
+    if (!activeLut) {
+      errors.push("Bond / UT is selected as Yes, but no valid LUT (Bond/UT) number is on file for the Shipper or Customer. Enter an LUT number on the Proforma tab or configure it in Client Master.");
+    } else if (lutExpiry && lutExpiry < bookDate && (!lutInput || lutInput === customerLut)) {
+      errors.push(`Bond / UT is selected as Yes, but the LUT on file (${activeLut}) expired on ${lutExpiry}. An active, unexpired LUT is required.`);
+    }
+  }
+
+  // International shipment Proforma line requirement:
+  // DOX (document) shipments do NOT need proforma lines.
+  // Non-DOX and Commercial shipments need at least one proforma line.
+  const consigneeCountry = (form.consignee.country || "").trim().toUpperCase();
+  const isDomestic = consigneeCountry === "INDIA" || consigneeCountry === "IN";
+  const isDox = (form.piecesUnit === "DOX" || form.product.code.toUpperCase() === "DOX") && !isCommercialExport;
+  if (!isDomestic && !isDox && form.proforma.lines.length === 0) {
+    errors.push("At least one Proforma line item is required for non-document and commercial shipments. Add items on the Proforma tab before booking.");
+  }
+
+  // CSB-IV Statutory Value Limit check
+  if (!isCommercialExport && (csbTypeUpper === "CSB 4" || csbTypeUpper === "CSB 3" || csbTypeUpper === "ECM SPX")) {
+    const totalProforma = form.proforma.lines.reduce((s, l) => s + (Number.parseFloat(l.amount) || 0), 0);
+    const currency = (form.proforma.currency || "INR").trim().toUpperCase();
+    const rate = getCustomsExchangeRate(currency);
+    const totalInr = totalProforma * rate;
+    const csbIvLimit = 100000;
+    if (totalInr > csbIvLimit) {
+      errors.push(`Proforma value (${totalProforma.toFixed(2)} ${currency} = ₹${totalInr.toFixed(2)} INR) exceeds the statutory CSB-IV limit of ₹1,00,000.00 INR. Commercial CSB-V export is mandatory for shipments exceeding this limit.`);
+    }
   }
   const bookDateError = futureBookDateError(form.bookDate);
   if (bookDateError) errors.push(bookDateError);
@@ -1435,14 +1553,14 @@ function summarizePieceLines(lines: PiecesLine[], roundTotal = false): {
   };
 }
 
-/** Box-1..Box-N, one box for each piece across the pieces rows. */
-function deriveAwbBoxNumbers(piecesLines: PiecesLine[]): string[] {
-  const total = piecesLines.reduce((sum, line) => {
+/** Box-1..Box-N, one box for each piece across the pieces rows, falling back to AWB pieces count. */
+function deriveAwbBoxNumbers(piecesLines: PiecesLine[], piecesCount?: string): string[] {
+  const lineTotal = piecesLines.reduce((sum, line) => {
     const pieces = Number.parseInt(line.pieces, 10);
     return sum + (Number.isFinite(pieces) && pieces > 0 ? pieces : 0);
   }, 0);
-  if (total <= 0) return [];
-  return Array.from({ length: total }, (_, index) => `Box-${index + 1}`);
+  const count = lineTotal > 0 ? lineTotal : Math.max(1, Number.parseInt(piecesCount || "1", 10) || 1);
+  return Array.from({ length: count }, (_, index) => `Box-${index + 1}`);
 }
 
 const formatListWeightDisplay = (value: string): string => {
@@ -1826,6 +1944,7 @@ function AwbEntryPage() {
   const [editingPiecesId, setEditingPiecesId] = useState<string | null>(null);
   const [chargeDraft, setChargeDraft] = useState<ChargeDraft>(emptyChargeDraft);
   const [proformaDraft, setProformaDraft] = useState<ProformaDraft>(emptyProformaDraft);
+  const [editingProformaId, setEditingProformaId] = useState<string | null>(null);
   const [proformaUnits, setProformaUnits] = useState<string[]>([...PROFORMA_UNITS]);
   const [addUnitOpen, setAddUnitOpen] = useState(false);
   const [newUnitInput, setNewUnitInput] = useState("");
@@ -2071,6 +2190,7 @@ function AwbEntryPage() {
       adCode: String(p.adCode ?? base.adCode),
       bondUt: String(p.bondUt ?? base.bondUt),
       payOfIgst: String(p.payOfIgst ?? base.payOfIgst),
+      lutNo: String(p.lutNo ?? base.lutNo),
       ecommerce: String(p.ecommerce ?? base.ecommerce),
       meis: String(p.meis ?? base.meis),
       invoiceType: String(p.invoiceType ?? base.invoiceType),
@@ -2257,8 +2377,8 @@ function AwbEntryPage() {
   }, [form.proforma.lines]);
 
   const proformaBoxNumbers = useMemo(
-    () => deriveAwbBoxNumbers(form.piecesLines),
-    [form.piecesLines],
+    () => deriveAwbBoxNumbers(form.piecesLines, form.pieces),
+    [form.piecesLines, form.pieces],
   );
 
   useEffect(() => {
@@ -2309,6 +2429,7 @@ function AwbEntryPage() {
     setActiveTab("awb");
     setPiecesDraft(emptyPiecesDraft());
     setEditingPiecesId(null);
+    setEditingProformaId(null);
     setChargeDraft(emptyChargeDraft());
     setProformaDraft(emptyProformaDraft());
     setVendorChargeDraft(emptyVendorChargeDraft());
@@ -2319,10 +2440,10 @@ function AwbEntryPage() {
     allowLeaveRef.current = true;
   };
 
-  const goNextTab = async () => {
-    const booked = await handleSave();
-    if (!booked) return;
-    openBlankAwb();
+  const goNextTab = () => {
+    if (tabIndex < AWB_TABS.length - 1) {
+      setActiveTab(AWB_TABS[tabIndex + 1]);
+    }
   };
 
   const patchProforma = (patch: Partial<ProformaData>) => {
@@ -2464,6 +2585,7 @@ function AwbEntryPage() {
     setRatingSummary(null);
     setPiecesDraft(emptyPiecesDraft());
     setEditingPiecesId(null);
+    setEditingProformaId(null);
     setChargeDraft(emptyChargeDraft());
     setProformaDraft(emptyProformaDraft());
     setVendorChargeDraft(emptyVendorChargeDraft());
@@ -3346,6 +3468,7 @@ function AwbEntryPage() {
         }
         setPiecesDraft(emptyPiecesDraft());
         setEditingPiecesId(null);
+        setEditingProformaId(null);
         setChargeDraft(emptyChargeDraft());
         setProformaDraft(emptyProformaDraft());
         setVendorChargeDraft(emptyVendorChargeDraft());
@@ -3404,6 +3527,7 @@ function AwbEntryPage() {
     setForm(normalizeForm(rest));
     setPiecesDraft(emptyPiecesDraft());
     setEditingPiecesId(null);
+    setEditingProformaId(null);
     setChargeDraft(emptyChargeDraft());
     setProformaDraft(emptyProformaDraft());
     setVendorChargeDraft(emptyVendorChargeDraft());
@@ -3421,6 +3545,7 @@ function AwbEntryPage() {
     setActiveTab("awb");
     setPiecesDraft(emptyPiecesDraft());
     setEditingPiecesId(null);
+    setEditingProformaId(null);
     setChargeDraft(emptyChargeDraft());
     setProformaDraft(emptyProformaDraft());
     setVendorChargeDraft(emptyVendorChargeDraft());
@@ -3502,11 +3627,23 @@ function AwbEntryPage() {
       return next;
     });
     const first = Math.min(...orders);
+
+    let targetTab: AwbTab = "awb";
+    if (first >= 900 && first < 1000) targetTab = "proforma";
+    else if (first >= 1000 && first < 1100) targetTab = "forwarding";
+    else if (first >= 1100 && first < 1200) targetTab = "kyc";
+    else if (first >= 1200 && first < 1300) targetTab = "notification";
+    else if (first >= 2000) targetTab = "proforma";
+
+    if (activeTab !== targetTab) {
+      setActiveTab(targetTab);
+    }
+
     window.setTimeout(() => {
       const container = awbFormNavRef.current;
       if (container) focusErpFieldByOrder(container, first);
-    }, 0);
-  }, []);
+    }, 50);
+  }, [activeTab]);
 
   const handleSave = async (): Promise<boolean> => {
     if (saveLockRef.current) return false;
@@ -3973,42 +4110,7 @@ function AwbEntryPage() {
       }
     }
 
-    // IEC compliance on Commercial / CSB-V Export (#35)
-    const csbTypeUpper = form.proforma.csbType.trim().toUpperCase();
-    const isCommercialExport =
-      form.commercial ||
-      csbTypeUpper === "CSB 5" ||
-      csbTypeUpper === "COMMERCIAL" ||
-      csbTypeUpper === "CBE XIII";
-
-    if (isCommercialExport) {
-      const shipperIec = (
-        form.shipper.iecNo.trim() ||
-        ((form.shipper.documentType === "IEC" || form.shipper.documentType.includes("IEC")) ? form.shipper.documentNo.trim() : "")
-      ).toUpperCase();
-
-      if (!shipperIec) {
-        errors.push("Valid 10-character IEC is required on Shipper for CSB-V / Commercial export");
-      } else if (!/^[A-Z0-9]{10}$/.test(shipperIec)) {
-        errors.push(`Invalid IEC "${shipperIec}". IEC must be exactly 10 alphanumeric characters`);
-      }
-    }
-
-    // CSB Type vs Export Reason Consistency
-    const exportReasonUpper = form.proforma.exportReason.trim().toUpperCase();
-    if (
-      (csbTypeUpper === "CSB 4" || csbTypeUpper === "CSB 3" || csbTypeUpper === "ECM SPX") &&
-      exportReasonUpper === "SALE"
-    ) {
-      errors.push('Commercial export reason "SALE" must be filed under CSB-V or COMMERCIAL, not CSB-IV/III');
-    } else if (
-      (csbTypeUpper === "CSB 5" || csbTypeUpper === "COMMERCIAL") &&
-      (exportReasonUpper === "BONAFIDE GIFT" || exportReasonUpper === "UNSOLICITED GIFT - NOT FOR SALE")
-    ) {
-      errors.push("Non-commercial gift exports cannot be filed under commercial CSB-V");
-    }
-
-    // Strict ID format validators for PAN, GSTIN, Aadhaar, IEC (#45)
+    // Production & Compliance checks
     errors.push(...collectAwbProductionErrors(form));
 
     const shipperDocErrors = validatePartyIdNumbers(form.shipper, "Shipper");
@@ -5040,10 +5142,24 @@ function AwbEntryPage() {
       rate: proformaDraft.rate,
       igstPercent: proformaDraft.igstPercent,
       units: proformaUnits,
+      maxPiecesCount: Number.parseInt(form.pieces, 10) || form.piecesLines.length || 1,
     });
     if (!checked.line) {
       toast.error(checked.errors[0]?.message ?? "Proforma line is not valid");
       return false;
+    }
+    if (editingProformaId) {
+      const lineId = editingProformaId;
+      const updatedLine: ProformaLine = { ...checked.line, id: lineId, source: "Manual" };
+      setForm((f) => {
+        const lines = f.proforma.lines.map((l) => (l.id === lineId ? updatedLine : l));
+        warnProformaInvoice(lines, f.shipmentValue, f.shipmentCurrency, f.proforma.currency);
+        return { ...f, proforma: { ...f.proforma, lines } };
+      });
+      setEditingProformaId(null);
+      setProformaDraft(emptyProformaDraft());
+      toast.success("Proforma line updated");
+      return true;
     }
     const line: ProformaLine = { ...checked.line, id: crypto.randomUUID(), source: "Manual" };
     setForm((f) => {
@@ -5069,6 +5185,10 @@ function AwbEntryPage() {
       ...f,
       proforma: { ...f.proforma, lines: f.proforma.lines.filter((l) => l.id !== id) },
     }));
+    if (editingProformaId === id) {
+      setEditingProformaId(null);
+      setProformaDraft(emptyProformaDraft());
+    }
   };
 
   const warnProformaInvoice = (
@@ -5401,6 +5521,8 @@ function AwbEntryPage() {
         proforma: {
           ...(f.proforma ?? emptyProforma()),
           currency: profile.defaults.currency || f.proforma?.currency || "INR",
+          adCode: f.proforma?.adCode || profile.bankAdCode || "",
+          lutNo: f.proforma?.lutNo || profile.lutNumber || "",
         },
       }));
     } catch (e) {
@@ -6686,7 +6808,27 @@ function AwbEntryPage() {
                             <ErpNavSelect
                               order={AWB_NAV.PROFORMA_CSB_TYPE}
                               value={form.proforma.csbType}
-                              onValueChange={(v) => patchProforma({ csbType: v })}
+                              onValueChange={(v) => {
+                                const isComm = v === "CSB 5" || v === "COMMERCIAL" || v === "CBE XIII";
+                                const isGiftCSB = v === "CSB 4" || v === "CSB 3" || v === "ECM SPX";
+                                setForm((f) => {
+                                  let exportReason = f.proforma.exportReason;
+                                  if (isComm && (exportReason.toUpperCase().includes("GIFT") || !exportReason)) {
+                                    exportReason = "SALE";
+                                  } else if (isGiftCSB && exportReason === "SALE") {
+                                    exportReason = "";
+                                  }
+                                  return {
+                                    ...f,
+                                    commercial: isComm ? true : isGiftCSB ? false : f.commercial,
+                                    proforma: {
+                                      ...f.proforma,
+                                      csbType: v,
+                                      exportReason,
+                                    },
+                                  };
+                                });
+                              }}
                               items={CSB_TYPES}
                               triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                             />
@@ -6737,7 +6879,11 @@ function AwbEntryPage() {
                               order={AWB_NAV.PROFORMA_EXPORT_REASON}
                               value={form.proforma.exportReason}
                               onValueChange={(v) => patchProforma({ exportReason: v })}
-                              items={EXPORT_REASONS}
+                              items={
+                                form.commercial || form.proforma.csbType === "CSB 5" || form.proforma.csbType === "COMMERCIAL"
+                                  ? CSB5_EXPORT_REASONS
+                                  : CSB4_EXPORT_REASONS
+                              }
                               triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                             />
                           </FieldWrapper>
@@ -6753,7 +6899,7 @@ function AwbEntryPage() {
                           <FieldWrapper
                             borderLabel
                             label="Ad Code"
-                            required={form.proforma.csbType.trim().toUpperCase() === "CSB 5"}
+                            required={form.proforma.csbType.trim().toUpperCase() === "CSB 5" || form.commercial}
                           >
                             <ErpNavInput
                               order={AWB_NAV.PROFORMA_AD_CODE}
@@ -6773,7 +6919,12 @@ function AwbEntryPage() {
                             <ErpNavSelect
                               order={AWB_NAV.PROFORMA_BOND_UT}
                               value={form.proforma.bondUt || "No"}
-                              onValueChange={(v) => patchProforma({ bondUt: v })}
+                              onValueChange={(v) =>
+                                patchProforma({
+                                  bondUt: v,
+                                  payOfIgst: v === "Yes" ? "No" : form.proforma.payOfIgst,
+                                })
+                              }
                               items={YES_NO}
                               triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                             />
@@ -6782,11 +6933,27 @@ function AwbEntryPage() {
                             <ErpNavSelect
                               order={AWB_NAV.PROFORMA_PAY_IGST}
                               value={form.proforma.payOfIgst || "No"}
-                              onValueChange={(v) => patchProforma({ payOfIgst: v })}
+                              onValueChange={(v) =>
+                                patchProforma({
+                                  payOfIgst: v,
+                                  bondUt: v === "Yes" ? "No" : form.proforma.bondUt,
+                                })
+                              }
                               items={YES_NO}
                               triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                             />
                           </FieldWrapper>
+                          {form.proforma.bondUt === "Yes" ? (
+                            <FieldWrapper borderLabel label="LUT No" required>
+                              <ErpNavInput
+                                order={AWB_NAV.PROFORMA_LUT_NO}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={form.proforma.lutNo}
+                                onValueChange={(v) => patchProforma({ lutNo: v })}
+                                placeholder={loadedClientProfile?.lutNumber || "Enter LUT No"}
+                              />
+                            </FieldWrapper>
+                          ) : null}
                           <FieldWrapper borderLabel label="Ecommerce">
                             <ErpNavSelect
                               order={AWB_NAV.PROFORMA_ECOMMERCE}
@@ -6879,8 +7046,23 @@ function AwbEntryPage() {
                         </div>
                       </div>
 
+                      {form.proforma.currency !== "INR" ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-blue-200 bg-blue-50/50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-200">
+                          <Info className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                          <span>
+                            Customs Exchange Rate: 1 {form.proforma.currency} = ₹{getCustomsExchangeRate(form.proforma.currency).toFixed(2)} INR.
+                            {" "}Proforma Value: {form.proforma.currency} {proformaSummary.amount} (≈ ₹{(Number(proformaSummary.amount) * getCustomsExchangeRate(form.proforma.currency)).toFixed(2)} INR).
+                            {Number(proformaSummary.amount) * getCustomsExchangeRate(form.proforma.currency) > 100000 && !form.commercial && form.proforma.csbType !== "CSB 5" && (
+                              <Badge variant="destructive" className="ml-2 text-[10px]">
+                                Exceeds CSB-IV Limit (₹1,00,000) — CSB-V Commercial Required
+                              </Badge>
+                            )}
+                          </span>
+                        </div>
+                      ) : null}
+
                       <div className="mt-4 rounded-md border bg-card">
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(4rem,0.72fr)_minmax(4.5rem,0.78fr)_minmax(8rem,1.35fr)_minmax(5rem,0.9fr)_minmax(3.75rem,0.68fr)_minmax(3.75rem,0.68fr)_minmax(6.75rem,1fr)_minmax(3.75rem,0.68fr)_minmax(4.25rem,0.75fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(4rem,0.72fr)_minmax(4.5rem,0.78fr)_minmax(8rem,1.35fr)_minmax(5rem,0.9fr)_minmax(3.75rem,0.68fr)_minmax(3.75rem,0.68fr)_minmax(6.75rem,1fr)_minmax(3.75rem,0.68fr)_minmax(4.25rem,0.75fr)_minmax(3.5rem,0.65fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                           <FieldWrapper borderLabel label="Box No">
                             <ErpNavSelect
                               key={`proforma-box-${proformaBoxNumbers.join("-") || "none"}`}
@@ -6993,16 +7175,38 @@ function AwbEntryPage() {
                               className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
                             />
                           </FieldWrapper>
-                          <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
+                          <FieldWrapper borderLabel label="IGST %">
+                            <ErpNavInput
+                              order={AWB_NAV.PROFORMA_IGST_PCT}
+                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              value={proformaDraft.igstPercent}
+                              onValueChange={(v) => patchProformaDraft({ igstPercent: v })}
+                            />
+                          </FieldWrapper>
+                          <div className="col-span-2 flex items-end justify-end gap-1.5 sm:col-span-1 xl:col-span-1">
                             <Button
                               type="button"
-                              className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                              className="h-8 w-full bg-sidebar px-4 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
                               {...erpNavSkip()}
                               onClick={addProformaLine}
                             >
                               <Plus className="mr-1 h-4 w-4" />
-                              Add line
+                              {editingProformaId ? "Update line" : "Add line"}
                             </Button>
+                            {editingProformaId ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs"
+                                onClick={() => {
+                                  setEditingProformaId(null);
+                                  setProformaDraft(emptyProformaDraft());
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            ) : null}
                           </div>
                         </div>
 
@@ -7079,15 +7283,40 @@ function AwbEntryPage() {
                                     <TableCell>{l.igstPercent}</TableCell>
                                     <TableCell>{l.igstAmount}</TableCell>
                                     <TableCell>
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="h-8 w-8 text-destructive"
-                                        onClick={() => removeProformaLine(l.id)}
-                                        aria-label="Delete proforma line"
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
+                                      <div className="flex items-center gap-1">
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-8 w-8 text-primary"
+                                          onClick={() => {
+                                            setEditingProformaId(l.id);
+                                            setProformaDraft({
+                                              boxNo: l.boxNo,
+                                              packages: l.packages,
+                                              description: l.description,
+                                              hsnCode: l.hsCode,
+                                              quantity: l.quantity,
+                                              weight: l.weight,
+                                              unit: l.unit,
+                                              rate: l.rate,
+                                              amount: l.amount,
+                                              igstPercent: l.igstPercent || "0",
+                                            });
+                                          }}
+                                          aria-label="Edit proforma line"
+                                        >
+                                          <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-8 w-8 text-destructive"
+                                          onClick={() => removeProformaLine(l.id)}
+                                          aria-label="Delete proforma line"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
                                     </TableCell>
                                   </TableRow>
                                 ))
@@ -8893,7 +9122,37 @@ function ServicesSection({
                     ? "border-foreground bg-foreground text-background"
                     : "border-input bg-background text-foreground hover:bg-muted/40",
                 )}
-                onClick={() => setForm((f) => ({ ...f, [key]: !f[key] }))}
+                onClick={() => {
+                  if (key === "commercial") {
+                    const nextCommercial = !form.commercial;
+                    setForm((f) => {
+                      let exportReason = f.proforma.exportReason;
+                      let csbType = f.proforma.csbType;
+                      if (nextCommercial) {
+                        csbType = "CSB 5";
+                        if (exportReason.toUpperCase().includes("GIFT") || !exportReason) {
+                          exportReason = "SALE";
+                        }
+                      } else {
+                        // When Commercial is unticked, do not auto-fill CSB 4 or gift defaults.
+                        // Leave blank and require operator to choose.
+                        csbType = "";
+                        exportReason = "";
+                      }
+                      return {
+                        ...f,
+                        commercial: nextCommercial,
+                        proforma: {
+                          ...f.proforma,
+                          csbType,
+                          exportReason,
+                        },
+                      };
+                    });
+                  } else {
+                    setForm((f) => ({ ...f, [key]: !f[key] }));
+                  }
+                }}
                 {...erpNavOrder(order)}
               >
                 <span

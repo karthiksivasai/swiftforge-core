@@ -1,7 +1,7 @@
 /**
  * Removes the international AWB audit seed and restores ALIASSO billing state.
  * Do not run until go-live. It deletes:
- *   - shipments 000028–000043 and any shipment whose reference starts with TEST_AWB_
+ *   - shipments 000001–000043, 100001–100044 (and up to 100060), and any shipment whose reference starts with TEST_AWB_
  *   - their pieces, charge snapshots, comments, attachments, events, rating_audit,
  *     shipment_documents (the AWB invoice, label, and KYC files), and proforma items
  *   - audit_logs rows for those shipment ids

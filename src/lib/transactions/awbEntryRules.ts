@@ -244,6 +244,12 @@ const AWB_ERROR_FIELDS: Array<{ field: string; test: RegExp }> = [
   { field: "product", test: /product is required/i },
   { field: "vendor", test: /^vendor is required/i },
   { field: "service", test: /service is required/i },
+  { field: "adCode", test: /ad code/i },
+  { field: "bondUt", test: /bond\/ut|lut \(bond\/ut\)|lut number is required|valid lut/i },
+  { field: "payOfIgst", test: /payment of igst/i },
+  { field: "csbType", test: /csb type|csb-iv\/iii|csb-v|csb 5/i },
+  { field: "exportReason", test: /export reason/i },
+  { field: "proformaLines", test: /proforma line item is required|proforma line/i },
 ];
 
 /** Which screen field a save message belongs to, when it has one. */
