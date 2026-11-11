@@ -77,6 +77,7 @@ import type { LookupKey } from "@/lib/master-lookups";
 
 import { useAuth } from "@/lib/auth";
 import { useMasterResource } from "@/lib/masters/core/useMasterResource";
+import { invalidateLookupCache } from "@/lib/masters/core/lookup";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
 import { mapCsvToImportRows, type ImportRow } from "@/lib/masters/core";
 import type { CsvRecord } from "@/lib/masters/core/csv";
@@ -681,7 +682,9 @@ function CustomerPage() {
           volumetrics: payload.volumetrics,
           kycDocuments: payload.kycDocuments,
         });
+        invalidateLookupCache("customer");
         void queryClient.invalidateQueries({ queryKey: masterKeys.all(customersResource.key) });
+        void queryClient.invalidateQueries({ queryKey: masterKeys.lookupRoot("customer") });
         toast.success(editing ? "Customer updated" : "Customer added");
         setOpen(false);
       } catch (err) {

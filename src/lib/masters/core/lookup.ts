@@ -65,6 +65,18 @@ type LookupCacheEntry = { at: number; rows: LookupItem[] };
 const lookupResultCache = new Map<string, LookupCacheEntry>();
 const lookupInflight = new Map<string, Promise<LookupItem[]>>();
 
+/** Drop cached autocomplete rows so a customer saved a moment ago can be found. */
+export function invalidateLookupCache(key?: LookupKey) {
+  if (!key) {
+    lookupResultCache.clear();
+    return;
+  }
+  const prefix = `${key}::`;
+  for (const id of lookupResultCache.keys()) {
+    if (id.startsWith(prefix)) lookupResultCache.delete(id);
+  }
+}
+
 export type LookupScope = {
   branchId?: string | null;
   locationCode?: string | null;
@@ -96,7 +108,8 @@ export async function lookup(
         : key === "field-executive"
           ? await lookupFieldExecutives(trimmed, cappedLimit, scope)
           : await lookupCatalog(key, trimmed, cappedLimit);
-    lookupResultCache.set(cacheId, { at: Date.now(), rows });
+    // An empty list is often "signed out" or "saved a second ago". Do not pin it for 5 minutes.
+    if (rows.length > 0) lookupResultCache.set(cacheId, { at: Date.now(), rows });
     return rows;
   })().finally(() => {
     lookupInflight.delete(cacheId);

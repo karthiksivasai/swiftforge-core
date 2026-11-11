@@ -30,7 +30,7 @@ import {
   type ImportResult,
   type ImportRow,
 } from "@/lib/masters/core/import";
-import type { LookupKey } from "@/lib/masters/core/lookup";
+import { invalidateLookupCache, type LookupKey } from "@/lib/masters/core/lookup";
 import { masterKeys } from "@/lib/masters/core/queryKeys";
 
 /**
@@ -95,6 +95,7 @@ export function useMasterResource<
   const invalidate = useCallback(() => {
     const tasks = [queryClient.invalidateQueries({ queryKey: masterKeys.all(resource.key) })];
     if (resource.lookupKey) {
+      invalidateLookupCache(resource.lookupKey);
       tasks.push(
         queryClient.invalidateQueries({ queryKey: masterKeys.lookupRoot(resource.lookupKey) }),
       );

@@ -193,7 +193,7 @@ export function SearchableLookupPair({
   void _emptySearchMessage;
   void _noResultsMessage;
   const resultLimit = displayLimit ?? (manualSearch ? AWB_LOOKUP_RESULT_LIMIT : 50);
-  const { isAuthenticated: live } = useAuth();
+  const { isAuthenticated: live, loading: authLoading } = useAuth();
   const queryClient = useQueryClient();
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -235,15 +235,15 @@ export function SearchableLookupPair({
     scope: lookupScope,
   });
 
-  const { data: livePopupRows, isFetching: popupFetching } = useLookup(
-    liveKey ?? "branch",
-    debouncedPopupQuery,
-    {
-      enabled: Boolean(live && liveKey && popupOpen && manualPopupRows === null),
-      limit: LOOKUP_DEFAULT_LIMIT,
-      scope: lookupScope,
-    },
-  );
+  const {
+    data: livePopupRows,
+    isFetching: popupFetching,
+    isPlaceholderData: popupPlaceholder,
+  } = useLookup(liveKey ?? "branch", debouncedPopupQuery, {
+    enabled: Boolean(live && liveKey && popupOpen && manualPopupRows === null),
+    limit: LOOKUP_DEFAULT_LIMIT,
+    scope: lookupScope,
+  });
 
   const demoInlineRows = useMemo(() => {
     if (manualSearch || (live && liveKey)) return null;
@@ -645,6 +645,8 @@ export function SearchableLookupPair({
 
   const popupDisplayRows: SearchHit[] = useMemo(() => {
     if (manualPopupRows) return manualPopupRows;
+    // keepPreviousData would otherwise filter the last list with the new text and show "No matches".
+    if (popupPlaceholder) return [];
     const hits = (livePopupRows ?? []).map((r) => ({
       id: r.id,
       code: r.code,
@@ -652,7 +654,7 @@ export function SearchableLookupPair({
       hint: r.hint,
     }));
     return rankSearchHits(hits, debouncedPopupQuery);
-  }, [livePopupRows, manualPopupRows, debouncedPopupQuery]);
+  }, [livePopupRows, manualPopupRows, debouncedPopupQuery, popupPlaceholder]);
 
   return (
     <>
@@ -744,7 +746,7 @@ export function SearchableLookupPair({
         ) : null}
       </div>
 
-      {live && liveKey ? (
+      {liveKey ? (
         <Dialog
           open={popupOpen}
           onOpenChange={(o) => {
@@ -759,36 +761,70 @@ export function SearchableLookupPair({
             <DialogTitle className="text-base font-semibold">
               {modalTitle || `Select ${MASTER_LOOKUPS[lookupKey]?.title?.replace(/^Select\s+/i, "") ?? lookupKey}`}
             </DialogTitle>
-            <Input
-              value={popupQuery}
-              onChange={(e) => {
-                setPopupQuery(e.target.value);
-                setManualPopupRows(null);
-              }}
-              placeholder={searchPlaceholder}
-              className="mb-2"
-            />
-            <div className="max-h-72 overflow-auto rounded border">
-              {popupFetching && popupDisplayRows.length === 0 ? (
-                <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Searching…
-                </div>
-              ) : null}
-              {popupDisplayRows.map((row) => (
-                <button
-                  key={row.id ?? `${row.code}-${row.name}`}
-                  type="button"
-                  className="flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted/50"
-                  onClick={() => pick(row)}
-                >
-                  <span className="font-medium">{row.name}</span>
-                  <span className="text-muted-foreground">{row.code}</span>
-                </button>
-              ))}
-              {!popupFetching && popupDisplayRows.length === 0 && (
-                <div className="px-3 py-6 text-center text-sm text-muted-foreground">No matches</div>
-              )}
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={popupQuery}
+                onChange={(e) => {
+                  setPopupQuery(e.target.value);
+                  setManualPopupRows(null);
+                }}
+                placeholder={searchPlaceholder}
+                className="pl-8"
+              />
+            </div>
+            <div className="max-h-72 overflow-auto rounded-md border">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-sidebar text-sidebar-foreground">
+                  <tr>
+                    <th className="w-28 px-3 py-2 text-left font-medium">Code</th>
+                    <th className="px-3 py-2 text-left font-medium">Name</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {authLoading || (live && (popupFetching || popupPlaceholder) && popupDisplayRows.length === 0) ? (
+                    <tr>
+                      <td colSpan={2} className="px-3 py-6 text-center text-muted-foreground">
+                        <span className="inline-flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Searching…
+                        </span>
+                      </td>
+                    </tr>
+                  ) : !live ? (
+                    <tr>
+                      <td colSpan={2} className="px-3 py-6 text-center text-muted-foreground">
+                        Sign in to search saved {(MASTER_LOOKUPS[lookupKey]?.title ?? lookupKey).replace(/^Select\s+/i, "").toLowerCase()} records.
+                      </td>
+                    </tr>
+                  ) : popupDisplayRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="px-3 py-6 text-center text-muted-foreground">
+                        No matches
+                      </td>
+                    </tr>
+                  ) : (
+                    popupDisplayRows.map((row) => (
+                      <tr
+                        key={row.id ?? `${row.code}-${row.name}`}
+                        role="button"
+                        tabIndex={0}
+                        className="cursor-pointer border-t hover:bg-muted/60"
+                        onClick={() => pick(row)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            pick(row);
+                          }
+                        }}
+                      >
+                        <td className="px-3 py-2 font-mono text-xs">{row.code}</td>
+                        <td className="px-3 py-2">{row.name}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </DialogContent>
         </Dialog>
