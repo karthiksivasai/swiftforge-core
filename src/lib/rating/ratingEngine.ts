@@ -354,6 +354,7 @@ export function computeShipmentRating(
   query: RateQueryInput,
   rateCard: CustomerRateRecord[] = SEED_CUSTOMER_RATES,
   serviceRules: ServiceWeightRuleRecord[] = SEED_SERVICE_WEIGHT_RULES,
+  zoneFreight?: number | null,
 ): RatingCalculationResult {
   const { chargeableWeight } = calculatePieceWeights(query.pieces, query.division, {
     roundHalfKg: query.roundHalfKg === true,
@@ -371,7 +372,7 @@ export function computeShipmentRating(
     throw new Error(weightValidation.message || "WEIGHT_OUT_OF_RANGE");
   }
 
-  const matchedRate = resolveCustomerRate(rateCard, {
+  let matchedRate = resolveCustomerRate(rateCard, {
     customerCode: query.customerCode,
     contractNo: query.contractNo,
     productCode: query.productCode,
@@ -385,6 +386,17 @@ export function computeShipmentRating(
     bookDate: query.bookDate,
     chargeableWeight,
   });
+
+  if (!matchedRate && zoneFreight != null && Number.isFinite(zoneFreight)) {
+    matchedRate = {
+      customer_code: query.customerCode,
+      contract_no: query.contractNo || "",
+      rate_per_kg: zoneFreight,
+      rate_type: "FLAT",
+      status: "ACTIVE",
+      from_date: query.bookDate || "2000-01-01",
+    };
+  }
 
   if (!matchedRate) {
     const lane = `${query.originCode || query.originName || "*"} to ${query.destinationCode || query.destinationName || "*"}`;

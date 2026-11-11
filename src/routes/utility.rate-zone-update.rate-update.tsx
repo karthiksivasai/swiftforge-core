@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { SearchableLookupPair, type LookupPairValue } from "@/components/masters/searchable-lookup-pair";
@@ -99,6 +99,29 @@ function RateUpdatePage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [scopeError, setScopeError] = useState("");
   const [applyNote, setApplyNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const vendorId = params.get("vendorId");
+    const customerId = params.get("customerId");
+    const originId = params.get("originId");
+    const from = params.get("from");
+    if (!vendorId && !customerId && !originId && !from) return;
+    setForm((current) => ({
+      ...current,
+      vendor: vendorId
+        ? { id: vendorId, code: params.get("vendorCode") || "", name: params.get("vendorName") || "" }
+        : current.vendor,
+      customer: customerId
+        ? { id: customerId, code: params.get("customerCode") || "", name: params.get("customerName") || "" }
+        : current.customer,
+      origin: originId
+        ? { id: originId, code: params.get("originCode") || "", name: params.get("originName") || "" }
+        : current.origin,
+      fromDate: from || current.fromDate,
+      toDate: from || current.toDate,
+    }));
+  }, []);
 
   const patch = (updates: Partial<RateUpdateForm>) =>
     setForm((current) => ({ ...current, ...updates }));
@@ -253,12 +276,14 @@ function RateUpdatePage() {
             />
           </FieldWrapper>
           <FieldWrapper label="Vendor">
+            <div data-testid="rate-update-vendor">
             <SearchableLookupPair
               lookup="vendor"
               liveLookup="vendor"
               value={form.vendor}
               onChange={(vendor) => patch({ vendor })}
             />
+            </div>
           </FieldWrapper>
           <FieldWrapper label="Destination">
             <SearchableLookupPair

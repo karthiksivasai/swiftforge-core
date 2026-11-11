@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Download, Plus, Search } from "lucide-react";
+import { Download, Loader2, Plus, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { FieldWrapper, MasterBreadcrumb } from "@/components/master-table-kit";
+import { FieldWrapper, MasterBreadcrumb, TablePager } from "@/components/master-table-kit";
 import {
   SearchableLookupPair,
   type LookupPairValue,
@@ -74,6 +74,7 @@ type MappingForm = {
 };
 
 const emptyPair = (): LookupPairValue => ({ code: "", name: "" });
+const EXPORT_PAGE_SIZE = 10;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const emptyExport = (): ExportForm => ({
@@ -116,7 +117,9 @@ function ZoneUpdatePage() {
   const [mapping, setMapping] = useState<MappingForm>(emptyMapping);
   const [addOpen, setAddOpen] = useState(false);
   const [grid, setGrid] = useState<ZoneSearchRow[]>([]);
-  const [gridNote, setGridNote] = useState("");
+  const [gridPage, setGridPage] = useState(1);
+  const [listQuery, setListQuery] = useState("");
+  const [listReady, setListReady] = useState(false);
   const [fileName, setFileName] = useState("");
   const [fileRows, setFileRows] = useState<ZoneFileRow[]>([]);
   const [importDate, setImportDate] = useState(todayIso);
@@ -125,12 +128,17 @@ function ZoneUpdatePage() {
   const [importNote, setImportNote] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [busyKind, setBusyKind] = useState<"check" | "save" | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const patchExport = (updates: Partial<ExportForm>) =>
     setExportForm((current) => ({ ...current, ...updates }));
 
   const runSearch = async () => {
+    if (!exportForm.vendor.id) {
+      toast.error("Choose a vendor before searching");
+      return;
+    }
     setBusy(true);
     try {
       const result = await searchZoneMappings({
@@ -145,7 +153,9 @@ function ZoneUpdatePage() {
         service: exportForm.service.code || exportForm.service.name,
       });
       setGrid(result.rows);
-      setGridNote(`${result.total} mapping${result.total === 1 ? "" : "s"}`);
+      setGridPage(1);
+      setListQuery("");
+      setListReady(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Search failed");
     } finally {
@@ -218,7 +228,9 @@ function ZoneUpdatePage() {
 
   const runPreview = async () => {
     if (fileRows.length === 0) return toast.error("Please select import file");
+    setBusyKind("check");
     setBusy(true);
+    setPreview(null);
     setImportNote("");
     try {
       const result = await previewZoneImport(fileRows, importDate);
@@ -227,12 +239,15 @@ function ZoneUpdatePage() {
       toast.error(err instanceof Error ? err.message : "Dry run failed");
     } finally {
       setBusy(false);
+      setBusyKind(null);
     }
   };
 
   const runApply = async () => {
     setConfirmOpen(false);
+    setBusyKind("save");
     setBusy(true);
+    setPreview(null);
     try {
       const result = await applyZoneImport(fileRows, importDate, skipFailed);
       const note = `Imported ${result.imported}. New ${result.new_count}. Replaced ${result.replace_count}. Unchanged ${result.unchanged_count}. Skipped ${result.skipped}.`;
@@ -245,6 +260,7 @@ function ZoneUpdatePage() {
       toast.error(message);
     } finally {
       setBusy(false);
+      setBusyKind(null);
     }
   };
 
@@ -310,6 +326,19 @@ function ZoneUpdatePage() {
 
   const confirmBlocked =
     !preview || preview.ok_count === 0 || (preview.failed_count > 0 && !skipFailed);
+  const needle = listQuery.trim().toLowerCase();
+  const filteredRows = needle
+    ? grid.filter((row) =>
+        [row.Origin, row.Vendor, row.Product, row.Country, row.Destination, row.destination_name, row.Zone, row.ServiceType]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(needle),
+      )
+    : grid;
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / EXPORT_PAGE_SIZE));
+  const safePage = Math.min(gridPage, pageCount);
+  const pageRows = filteredRows.slice((safePage - 1) * EXPORT_PAGE_SIZE, safePage * EXPORT_PAGE_SIZE);
 
   return (
     <div className="flex min-w-0 flex-col gap-4 p-4 md:p-6">
@@ -356,7 +385,7 @@ function ZoneUpdatePage() {
                 options={["International", "Domestic"]}
                 onChange={(exportType) => patchExport({ exportType })}
               />
-              <LiveField label="Vendor" lookup="vendor" value={exportForm.vendor} onChange={(vendor) => patchExport({ vendor, service: emptyPair() })} />
+              <LiveField label="Vendor" lookup="vendor" required value={exportForm.vendor} onChange={(vendor) => patchExport({ vendor, service: emptyPair() })} />
               <FieldWrapper label="Date">
                 <Input type="date" value={exportForm.date} onChange={(event) => patchExport({ date: event.target.value })} className="h-9" />
               </FieldWrapper>
@@ -374,10 +403,10 @@ function ZoneUpdatePage() {
               </FieldWrapper>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <Button data-testid="zone-export-search" disabled={busy} onClick={() => void runSearch()} className="h-9 rounded-full bg-green-500 px-8 text-white hover:bg-green-600">
+              <Button data-testid="zone-export-search" disabled={busy || !exportForm.vendor.id} onClick={() => void runSearch()} className="h-9 rounded-full bg-green-500 px-8 text-white hover:bg-green-600">
                 Search
               </Button>
-              <Button onClick={() => { setExportForm(emptyExport()); setGrid([]); setGridNote(""); }} className="h-9 rounded-full bg-red-500 px-8 text-white hover:bg-red-600">
+              <Button onClick={() => { setExportForm(emptyExport()); setGrid([]); setGridPage(1); setListQuery(""); setListReady(false); }} className="h-9 rounded-full bg-red-500 px-8 text-white hover:bg-red-600">
                 Reset
               </Button>
             </div>
@@ -412,9 +441,11 @@ function ZoneUpdatePage() {
             </label>
             <div className="mt-4 flex justify-end gap-2">
               <Button data-testid="zone-import-run" disabled={busy || fileRows.length === 0} onClick={() => void runPreview()} className="h-9 rounded-full bg-green-500 px-8 text-white hover:bg-green-600">
-                Import
+                {busyKind === "check" ? <Loader2 className="animate-spin" /> : null}
+                {busyKind === "check" ? "Checking…" : "Import"}
               </Button>
               <Button
+                disabled={busy}
                 onClick={() => {
                   setFileName("");
                   setFileRows([]);
@@ -432,26 +463,69 @@ function ZoneUpdatePage() {
         )}
       </Card>
 
-      {mode === "export" && gridNote ? (
+      {mode === "export" && listReady ? (
         <Card className="min-w-0 border p-4" data-testid="zone-export-grid">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-sm">{gridNote}</p>
-            <Button data-testid="zone-export-download" variant="outline" disabled={grid.length === 0} onClick={() => void downloadRows(grid, "zone-mappings.xlsx")}>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <Input
+              data-testid="zone-export-filter"
+              value={listQuery}
+              onChange={(event) => {
+                setListQuery(event.target.value);
+                setGridPage(1);
+              }}
+              placeholder="Search"
+              className="h-9 max-w-xs"
+            />
+            <Button data-testid="zone-export-download" variant="outline" disabled={filteredRows.length === 0} onClick={() => void downloadRows(filteredRows, "zone-mappings.xlsx")}>
               Download Excel
             </Button>
           </div>
-          <MappingTable rows={grid} onEdit={openEdit} onDelete={(id) => void removeMapping(id)} />
+          <MappingTable rows={pageRows} onEdit={openEdit} onDelete={(id) => void removeMapping(id)} />
+          {filteredRows.length > 0 ? (
+            <TablePager
+              totalPages={pageCount}
+              currentPage={safePage}
+              setPage={setGridPage}
+              startIdx={(safePage - 1) * EXPORT_PAGE_SIZE + 1}
+              endIdx={Math.min(safePage * EXPORT_PAGE_SIZE, filteredRows.length)}
+              total={filteredRows.length}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">No mappings match this search.</p>
+          )}
+        </Card>
+      ) : null}
+
+      {busyKind ? (
+        <Card className="flex items-center gap-3 border p-4" data-testid="zone-import-status">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <p className="text-sm font-medium">
+            {busyKind === "check"
+              ? `Checking ${fileRows.length} rows. Nothing is saved yet.`
+              : "Saving the zone rows."}
+          </p>
         </Card>
       ) : null}
 
       {preview ? (
         <Card className="min-w-0 border p-4" data-testid="zone-import-preview">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm" data-testid="zone-import-summary">
-              {preview.total} rows. {preview.ok_count} OK. {preview.failed_count} failed. {preview.new_count} new. {preview.replace_count} replace. {preview.unchanged_count} unchanged. Nothing is saved yet.
-            </p>
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Check finished. Nothing is saved yet.</p>
+              <p className="text-sm" data-testid="zone-import-summary">
+                {preview.total} rows. {preview.ok_count} OK. {preview.failed_count} failed. {preview.new_count} new. {preview.replace_count} replace. {preview.unchanged_count} unchanged. Nothing is saved yet.
+              </p>
+              {preview.failed_count > 0 && !skipFailed ? (
+                <p className="mt-1 text-sm text-amber-700" data-testid="zone-import-blocked">
+                  Confirm Import is off because {preview.failed_count} {preview.failed_count === 1 ? "row" : "rows"} failed. Fix those rows, or tick Skip failed rows.
+                </p>
+              ) : (
+                <p className="mt-1 text-sm">Press Confirm Import to save these rows.</p>
+              )}
+            </div>
             <Button data-testid="zone-import-confirm" disabled={busy || confirmBlocked} onClick={() => setConfirmOpen(true)}>
-              Confirm Import
+              {busyKind === "save" ? <Loader2 className="animate-spin" /> : null}
+              {busyKind === "save" ? "Saving…" : "Confirm Import"}
             </Button>
           </div>
           <div className="max-h-80 overflow-auto">
@@ -482,7 +556,9 @@ function ZoneUpdatePage() {
       ) : null}
 
       {importNote ? (
-        <p className="text-sm font-medium" data-testid="zone-import-result">{importNote}</p>
+        <Card className="border p-4" data-testid="zone-import-result">
+          <p className="text-sm font-medium">{importNote}</p>
+        </Card>
       ) : null}
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -547,34 +623,38 @@ function MappingTable({
   onDelete: (id: string) => void;
 }) {
   return (
-    <div className="max-h-96 overflow-auto">
-      <table className="w-full min-w-[760px] border-collapse text-xs">
-        <thead>
-          <tr className="border-b text-left">
-            {ZONE_IMPORT_COLUMNS.map((column) => (
-              <th key={column} className="px-2 py-1">{column}</th>
-            ))}
-            <th className="px-2 py-1" />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id} className="border-b" data-testid="zone-mapping-row">
-              <td className="px-2 py-1">{row.Origin}</td>
-              <td className="px-2 py-1">{row.Vendor}</td>
-              <td className="px-2 py-1">{row.Product}</td>
-              <td className="px-2 py-1">{row.Country}</td>
-              <td className="px-2 py-1">{row.destination_name || row.Destination}</td>
-              <td className="px-2 py-1">{row.Zone}</td>
-              <td className="px-2 py-1">{row.ServiceType}</td>
-              <td className="px-2 py-1">
-                <button type="button" className="mr-2 underline" onClick={() => onEdit(row)}>Edit</button>
-                <button type="button" data-testid="zone-mapping-delete" className="underline" onClick={() => onDelete(row.id)}>Delete</button>
-              </td>
-            </tr>
+    <div className="-mx-4">
+    <table className="w-full border-collapse text-sm">
+      <thead>
+        <tr className="bg-sidebar text-left text-sidebar-foreground">
+          {ZONE_IMPORT_COLUMNS.map((column) => (
+            <th key={column} className="px-3 py-3 text-xs font-semibold uppercase tracking-wide">{column}</th>
           ))}
-        </tbody>
-      </table>
+          <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wide">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={row.id} className={index % 2 === 0 ? "bg-sky-50" : "bg-white"} data-testid="zone-mapping-row">
+            <td className="px-3 py-2.5 font-medium">{row.Origin}</td>
+            <td className="px-3 py-2.5">{row.Vendor}</td>
+            <td className="px-3 py-2.5">
+              <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">{row.Product}</span>
+            </td>
+            <td className="px-3 py-2.5">{row.Country}</td>
+            <td className="px-3 py-2.5">{row.destination_name || row.Destination}</td>
+            <td className="px-3 py-2.5">
+              <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">{row.Zone}</span>
+            </td>
+            <td className="px-3 py-2.5 text-sky-900">{row.ServiceType}</td>
+            <td className="px-3 py-2.5 whitespace-nowrap">
+              <button type="button" className="mr-3 font-medium text-sky-700 hover:underline" onClick={() => onEdit(row)}>Edit</button>
+              <button type="button" data-testid="zone-mapping-delete" className="font-medium text-red-600 hover:underline" onClick={() => onDelete(row.id)}>Delete</button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
     </div>
   );
 }
@@ -584,14 +664,16 @@ function LiveField({
   lookup,
   value,
   onChange,
+  required,
 }: {
   label: string;
   lookup: "vendor" | "product" | "destination" | "zone" | "country";
   value: LookupPairValue;
   onChange: (value: LookupPairValue) => void;
+  required?: boolean;
 }) {
   return (
-    <FieldWrapper label={label}>
+    <FieldWrapper label={label} required={required}>
       <div data-testid={`zone-field-${label.toLowerCase()}`}>
         <SearchableLookupPair lookup={lookup} liveLookup={lookup} value={value} onChange={onChange} />
       </div>

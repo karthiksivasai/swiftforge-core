@@ -125,17 +125,36 @@ export const Route = createFileRoute("/api/shipments/rate")({
           if (dbRates.length === 0 && customerCode.toUpperCase() === "CKING") {
             dbRates = [...SEED_CUSTOMER_RATES];
           }
-          if (dbRates.length === 0) {
-            return Response.json(
-              {
-                error: "NO_RATE_FOUND",
-                message: `No customer rate is set for ${customerCode}. Add this client's rate for the origin and destination.`,
-              },
-              { status: 422 },
-            );
-          }
 
-          const result = computeShipmentRating(query, dbRates, serviceRules);
+          let result;
+          try {
+            result = computeShipmentRating(query, dbRates, serviceRules);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!message.startsWith("NO_RATE_FOUND:")) throw error;
+            const { data, error: quoteError } = await auth.supabase.rpc("quote_zone_rate_freight", {
+              p_vendor: query.vendorCode || "",
+              p_origin: query.originCode || query.originName || "",
+              p_destination: query.destinationCode || query.destinationName || "",
+              p_product: query.productCode || "",
+              p_service: query.serviceName || query.serviceCode || "",
+              p_weight: chargeableWeight,
+              p_as_of: query.bookDate,
+              p_customer: query.customerCode || "",
+            });
+            if (quoteError) {
+              const quoteMessage = quoteError.message || "";
+              if (/No price in the rate grid/i.test(quoteMessage)) {
+                throw new Error(`NO_RATE_FOUND: ${quoteMessage}`);
+              }
+              if (!/quote_zone_rate_freight|schema cache|PGRST202/i.test(quoteMessage)) {
+                throw new Error(quoteMessage);
+              }
+            }
+            const zoneFreight = quoteError || data == null || data === "" ? null : Number(data);
+            if (zoneFreight == null || !Number.isFinite(zoneFreight)) throw error;
+            result = computeShipmentRating(query, dbRates, serviceRules, zoneFreight);
+          }
           return Response.json(result, { status: 200 });
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
