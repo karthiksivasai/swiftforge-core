@@ -7423,7 +7423,7 @@ function AwbEntryPage() {
 
                 <TabsContent value="forwarding" className="mt-0">
                   <div className="p-4 md:p-6">
-                    <div className={cn(entryLocked && "pointer-events-none opacity-90")}>
+                    <fieldset disabled={entryLocked} className={cn("min-w-0 border-0 p-0", entryLocked && "pointer-events-none opacity-90")}>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                         <FieldWrapper borderLabel label="Delivery AWB">
                           <ErpNavInput
@@ -7458,11 +7458,16 @@ function AwbEntryPage() {
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel lookupSplit label="Delivery Service">
-                          <LookupPairInput
-                            lookup="product"
+                          <VendorServiceLookup
+                            vendor={form.forwarding.deliveryVendor}
                             value={form.forwarding.deliveryService}
                             onChange={(v) => patchForwarding({ deliveryService: v })}
+                            productId={form.forwarding.deliveryProduct.id || form.product.id}
+                            destinationId={form.consignee.origin.id}
                             navOrder={AWB_NAV.FWD_DELIVERY_SERVICE}
+                            compact
+                            splitCode
+                            manualSearch
                           />
                         </FieldWrapper>
                         <FieldWrapper borderLabel label="Vendor Weight">
@@ -7697,7 +7702,7 @@ function AwbEntryPage() {
                           </div>
                         </CollapsibleContent>
                       </Collapsible>
-                    </div>
+                    </fieldset>
                     <div className="mt-6">
                       <AwbFormFooter
                         showPrevious

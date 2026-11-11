@@ -216,6 +216,7 @@ export function uiFormToShipmentPayload(
   const piecesUnit = form.piecesUnit.trim().toUpperCase();
   const forwarding = (form.forwarding ?? {}) as {
     deliveryVendor?: LookupPair;
+    deliveryService?: LookupPair;
     deliveryAwb?: string;
     forwardingAwb?: string;
   };
@@ -268,7 +269,10 @@ export function uiFormToShipmentPayload(
       form.forwardingNo.trim() || forwarding.forwardingAwb?.trim() || null,
     delivery_awb: form.deliveryNo.trim() || forwarding.deliveryAwb?.trim() || null,
     return_awb: null,
-    delivery_service: null,
+    delivery_service:
+      forwarding.deliveryService?.code?.trim() ||
+      forwarding.deliveryService?.name?.trim() ||
+      null,
     flight_no: form.flightNo.trim() || null,
     is_locked: form.lock,
     shipper: partyToJson(form.shipper),
@@ -491,6 +495,19 @@ export function dbShipmentToFormPatch(
         id: row.delivery_vendor_id ?? undefined,
         code: row.delivery_vendor?.code ?? "",
         name: row.delivery_vendor?.name ?? "",
+      },
+      deliveryService: {
+        id: undefined,
+        code:
+          row.delivery_service ??
+          String(
+            (forwardingExtra.deliveryService as { code?: unknown } | undefined)?.code ?? "",
+          ),
+        name:
+          row.delivery_service ??
+          String(
+            (forwardingExtra.deliveryService as { name?: unknown } | undefined)?.name ?? "",
+          ),
       },
       vendorChargeLines: (() => {
         const fromExtras = Array.isArray(forwardingExtra.vendorChargeLines)

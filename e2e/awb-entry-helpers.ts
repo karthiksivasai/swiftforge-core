@@ -58,8 +58,8 @@ export async function cleanupReference(referenceNo: string) {
   }
 }
 
-export async function openAwbForm(page: Page) {
-  await page.goto('/transaction/awb-entry?view=form');
+export async function openAwbForm(page: Page, fresh = false) {
+  await page.goto(fresh ? '/transaction/awb-entry?view=form&fresh=1' : '/transaction/awb-entry?view=form');
   await page.waitForLoadState('networkidle');
   await expect(page.locator('text=Karthik Test Admin')).toBeVisible({ timeout: 15000 });
 }

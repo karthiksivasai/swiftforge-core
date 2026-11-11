@@ -49,6 +49,10 @@ export default defineConfig({
     {
       name: 'setup',
       testMatch: /auth\.setup\.ts/,
+      use: {
+        trace: 'off',
+        video: 'off',
+      },
     },
     {
       name: 'awb-tests',
