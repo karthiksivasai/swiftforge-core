@@ -68,6 +68,7 @@ function RateImportPage() {
   const [form, setForm] = useState<RateImportForm>(emptyForm);
   const [lookupOpen, setLookupOpen] = useState<LookupKey | null>(null);
   const [lookupField, setLookupField] = useState<LookupField | null>(null);
+  const [notice, setNotice] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const patch = (updates: Partial<RateImportForm>) => setForm((current) => ({ ...current, ...updates }));
@@ -88,16 +89,18 @@ function RateImportPage() {
   };
 
   const handleSave = () => {
+    setNotice("");
     if (mode === "customer" && !form.customer.name.trim()) return toast.error("Customer is required");
     if (mode === "vendor" && !form.vendor.name.trim()) return toast.error("Vendor is required");
     if (!form.origin.name.trim()) return toast.error("Origin is required");
     if (!form.format) return toast.error("Format is required");
     if (!form.fileName) return toast.error("Please select upload file");
-    toast.success("Rate import saved");
+    setNotice("Rate Import is not available yet");
   };
 
   const reset = () => {
     setForm(emptyForm());
+    setNotice("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -127,7 +130,7 @@ function RateImportPage() {
         <div className="grid gap-x-3 gap-y-2 lg:grid-cols-4">
           {mode === "customer" ? (
             <FieldWrapper label="Customer">
-              <LookupPairInput value={form.customer} onChange={(customer) => patch({ customer })} onLookupOpen={() => openLookup("customer", "customer")} />
+              <LookupPairInput testId="rate-import-customer" value={form.customer} onChange={(customer) => patch({ customer })} onLookupOpen={() => openLookup("customer", "customer")} />
             </FieldWrapper>
           ) : (
             <FieldWrapper label="Origin">
@@ -137,7 +140,7 @@ function RateImportPage() {
 
           {mode === "customer" ? (
             <FieldWrapper label="Origin">
-              <LookupPairInput value={form.origin} onChange={(origin) => patch({ origin })} onLookupOpen={() => openLookup("origin", "serviceCentre")} />
+              <LookupPairInput testId="rate-import-origin" value={form.origin} onChange={(origin) => patch({ origin })} onLookupOpen={() => openLookup("origin", "serviceCentre")} />
             </FieldWrapper>
           ) : (
             <FieldWrapper label="Vendor">
@@ -145,7 +148,7 @@ function RateImportPage() {
             </FieldWrapper>
           )}
 
-          <SelectField label="Format" value={form.format} placeholder="Select Format" options={formatOptions} onChange={(format) => patch({ format })} />
+          <SelectField label="Format" testId="rate-import-format" value={form.format} placeholder="Select Format" options={formatOptions} onChange={(format) => patch({ format })} />
           <SelectField label="DOX Product" value={form.doxProduct} placeholder="Select DOX Product" options={doxProductOptions} onChange={(doxProduct) => patch({ doxProduct })} />
           <SelectField label="SPX Product" value={form.spxProduct} placeholder="Select SPX Product" options={spxProductOptions} onChange={(spxProduct) => patch({ spxProduct })} />
           <FieldWrapper label="From Date">
@@ -157,7 +160,7 @@ function RateImportPage() {
           </label>
           <FieldWrapper label="Upload File">
             <div className="flex items-center gap-2">
-              <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFile} />
+              <input ref={fileInputRef} data-testid="rate-import-file" type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFile} />
               <Button type="button" variant="outline" className="h-9 px-6" onClick={() => fileInputRef.current?.click()}>
                 Choose
               </Button>
@@ -167,8 +170,12 @@ function RateImportPage() {
         </div>
       </Card>
 
+      {notice ? (
+        <p data-testid="rate-import-notice" className="text-sm font-medium">{notice}</p>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button onClick={handleSave} className="h-9 rounded-full bg-green-500 px-8 text-white hover:bg-green-600">
+        <Button data-testid="rate-import-save" onClick={handleSave} className="h-9 rounded-full bg-green-500 px-8 text-white hover:bg-green-600">
           Save
         </Button>
         <Button onClick={reset} className="h-9 rounded-full bg-red-500 px-8 text-white hover:bg-red-600">
@@ -192,14 +199,16 @@ function LookupPairInput({
   value,
   onChange,
   onLookupOpen,
+  testId,
 }: {
   value: LookupPair;
   onChange: (value: LookupPair) => void;
   onLookupOpen: () => void;
+  testId?: string;
 }) {
   return (
     <div className="flex gap-1">
-      <Input value={value.name} onChange={(event) => onChange({ ...value, name: event.target.value })} className="min-w-0 flex-1" />
+      <Input data-testid={testId} value={value.name} onChange={(event) => onChange({ ...value, name: event.target.value })} className="min-w-0 flex-1" />
       <Input value={value.code} onChange={(event) => onChange({ ...value, code: event.target.value })} className="w-20" />
       <Button size="icon" variant="outline" className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90" onClick={onLookupOpen} aria-label="Search">
         <Search className="h-4 w-4" />
@@ -214,17 +223,19 @@ function SelectField({
   options,
   onChange,
   placeholder,
+  testId,
 }: {
   label: string;
   value: string;
   options: string[];
   onChange: (value: string) => void;
   placeholder: string;
+  testId?: string;
 }) {
   return (
     <FieldWrapper label={label}>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-9">
+        <SelectTrigger data-testid={testId} className="h-9">
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>

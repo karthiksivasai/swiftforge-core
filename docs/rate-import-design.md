@@ -1,7 +1,7 @@
 # Rate Import design
 
 **Date:** 11 Nov 2026  
-**Status:** Design only. Nothing in this document is built. The rating engine is unchanged. Rate Import still does not read the Excel file, and Save still shows “Rate import saved” without writing a rate.
+**Status:** Design only. Nothing in this document is built. The rating engine is unchanged. Rate Import does not read the Excel file. Save says “Rate Import is not available yet” and writes no rate.
 
 This is the proposal for RZ-04, RZ-07, and RZ-13. Do not load a rate file, and do not import the UPS zone file here. That file has no weight and no rate.
 

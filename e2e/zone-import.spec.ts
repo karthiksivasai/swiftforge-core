@@ -181,10 +181,12 @@ test("zone import dry run, confirm, replace, and booking zone", async ({ page })
     await expect(page.getByTestId("zone-import-run")).toBeEnabled();
     await page.getByTestId("zone-import-run").click();
     await expect(page.getByTestId("zone-import-summary")).toContainText("0 new", { timeout: 30000 });
-    await expect(page.getByTestId("zone-import-summary")).toContainText("3 replace");
+    await expect(page.getByTestId("zone-import-summary")).toContainText("0 replace");
+    await expect(page.getByTestId("zone-import-summary")).toContainText("3 unchanged");
     await page.getByTestId("zone-import-confirm").click();
     await page.getByTestId("zone-import-apply").click();
-    await expect(page.getByTestId("zone-import-result")).toContainText("Replaced 3", { timeout: 30000 });
+    await expect(page.getByTestId("zone-import-result")).toContainText("Unchanged 3", { timeout: 30000 });
+    await expect(page.getByTestId("zone-import-result")).toContainText("Replaced 0");
 
     const { data: afterReplace } = await user.rpc("search_zone_mappings", {
       p_filters: { export_type: "ALL", vendor_id: ups!.id, as_of: BOOK },
@@ -216,7 +218,8 @@ test("zone import dry run, confirm, replace, and booking zone", async ({ page })
     const roundTrip = await page.getByTestId("zone-import-summary").innerText();
     console.log(`[ZONE ROUND TRIP] ${roundTrip}`);
     expect(roundTrip).toContain("0 new");
-    expect(roundTrip).toContain("replace");
+    expect(roundTrip).toContain("0 replace");
+    expect(roundTrip).toContain("3 unchanged");
     await expect(page.getByTestId("zone-import-confirm")).toBeEnabled();
     await page.getByRole("button", { name: "Reset" }).click();
     await expect(page.getByTestId("zone-import-preview")).toHaveCount(0);

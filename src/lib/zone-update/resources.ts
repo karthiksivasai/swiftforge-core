@@ -7,6 +7,7 @@ export type ZonePreview = {
   failed_count: number;
   new_count: number;
   replace_count: number;
+  unchanged_count: number;
   rows: Array<{
     row_no: number;
     origin: string;
@@ -17,7 +18,7 @@ export type ZonePreview = {
     zone: string;
     service: string;
     status: "OK" | "FAILED";
-    outcome: "NEW" | "REPLACE" | null;
+    outcome: "NEW" | "REPLACE" | "UNCHANGED" | null;
     reason: string | null;
   }>;
 };
@@ -26,6 +27,7 @@ export type ZoneApplyResult = {
   imported: number;
   new_count: number;
   replace_count: number;
+  unchanged_count: number;
   skipped: number;
 };
 
@@ -48,8 +50,11 @@ export type ZoneSearchRow = {
   zone_id: string | null;
 };
 
-export async function previewZoneImport(rows: ZoneFileRow[]): Promise<ZonePreview> {
-  const { data, error } = await supabase.rpc("preview_zone_import", { p_rows: rows });
+export async function previewZoneImport(rows: ZoneFileRow[], effectiveDate: string): Promise<ZonePreview> {
+  const { data, error } = await supabase.rpc("preview_zone_import", {
+    p_rows: rows,
+    p_effective_date: effectiveDate,
+  });
   if (error) throw new Error(error.message);
   return data as ZonePreview;
 }

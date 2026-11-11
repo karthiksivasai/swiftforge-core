@@ -58,6 +58,30 @@ test("rate update customer search reads the live master", async ({ page }) => {
   await expect(page.getByTestId("rate-update-customer").getByRole("combobox", { name: "Code" })).toHaveValue("ALIASSO");
 });
 
+test("rate import save does not claim the file was loaded", async ({ page }) => {
+  await page.goto("/utility/rate-zone-update/rate-import");
+  await expect(page.getByTestId("rate-import-save")).toBeVisible();
+  await page.getByTestId("rate-import-format").click();
+  await page.getByRole("option", { name: "Zone Rate" }).click();
+  const customer = page.getByTestId("rate-import-customer");
+  const origin = page.getByTestId("rate-import-origin");
+  await customer.click();
+  await customer.pressSequentially("TEST Rate Customer");
+  await origin.click();
+  await origin.pressSequentially("HYD");
+  await expect(customer).toHaveValue("TEST Rate Customer");
+  await expect(origin).toHaveValue("HYD");
+  await page.getByTestId("rate-import-file").setInputFiles({
+    name: "rates.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Branch,Account No\nHYD,TEST\n"),
+  });
+  await expect(customer).toHaveValue("TEST Rate Customer");
+  await page.getByTestId("rate-import-save").click();
+  await expect(page.getByTestId("rate-import-notice")).toHaveText("Rate Import is not available yet");
+  await expect(page.getByText(/saved|loaded|imported/i)).toHaveCount(0);
+});
+
 test("zone update no longer rewrites booked shipments", async ({ page }) => {
   await page.goto("/utility/rate-zone-update/zone-update");
   await expect(page.getByRole("button", { name: "Update Shipments" })).toHaveCount(0);

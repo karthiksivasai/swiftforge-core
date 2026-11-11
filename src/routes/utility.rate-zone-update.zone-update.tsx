@@ -221,7 +221,7 @@ function ZoneUpdatePage() {
     setBusy(true);
     setImportNote("");
     try {
-      const result = await previewZoneImport(fileRows);
+      const result = await previewZoneImport(fileRows, importDate);
       setPreview(result);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Dry run failed");
@@ -235,7 +235,7 @@ function ZoneUpdatePage() {
     setBusy(true);
     try {
       const result = await applyZoneImport(fileRows, importDate, skipFailed);
-      const note = `Imported ${result.imported}. New ${result.new_count}. Replaced ${result.replace_count}. Skipped ${result.skipped}.`;
+      const note = `Imported ${result.imported}. New ${result.new_count}. Replaced ${result.replace_count}. Unchanged ${result.unchanged_count}. Skipped ${result.skipped}.`;
       setImportNote(note);
       setPreview(null);
       toast.success(note);
@@ -448,7 +448,7 @@ function ZoneUpdatePage() {
         <Card className="min-w-0 border p-4" data-testid="zone-import-preview">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm" data-testid="zone-import-summary">
-              {preview.total} rows. {preview.ok_count} OK. {preview.failed_count} failed. {preview.new_count} new. {preview.replace_count} replace. Nothing is saved yet.
+              {preview.total} rows. {preview.ok_count} OK. {preview.failed_count} failed. {preview.new_count} new. {preview.replace_count} replace. {preview.unchanged_count} unchanged. Nothing is saved yet.
             </p>
             <Button data-testid="zone-import-confirm" disabled={busy || confirmBlocked} onClick={() => setConfirmOpen(true)}>
               Confirm Import
@@ -521,7 +521,7 @@ function ZoneUpdatePage() {
             <AlertDialogTitle>Import these zone rows?</AlertDialogTitle>
             <AlertDialogDescription>
               {preview
-                ? `${preview.new_count} new and ${preview.replace_count} replaced. Effective date ${importDate}. Booked AWBs are not changed.`
+                ? `${preview.new_count} new, ${preview.replace_count} replaced, ${preview.unchanged_count} unchanged. Effective date ${importDate}. Unchanged rows are not written. Booked AWBs are not changed.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
