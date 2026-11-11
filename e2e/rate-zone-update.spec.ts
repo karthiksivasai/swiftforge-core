@@ -40,6 +40,24 @@ test("rate update previews and does not offer the job queue", async ({ page }) =
   await expect(page.getByRole("cell", { name: "Locked" })).toBeVisible();
 });
 
+test("rate update customer search reads the live master", async ({ page }) => {
+  await page.goto("/utility/rate-zone-update/rate-update");
+  const lookup = page.waitForResponse((res) => {
+    if (!res.url().includes("/rest/v1/rpc/lookup") || res.request().method() !== "POST" || !res.ok()) return false;
+    const body = res.request().postData() ?? "";
+    return body.includes('"p_key":"customer"') && body.includes("ALIASSO");
+  });
+  await page.getByTestId("rate-update-customer").getByRole("button", { name: "Search" }).click();
+  const popup = page.getByRole("dialog");
+  await popup.getByPlaceholder("Search by code or name…").fill("ALIASSO");
+  const response = await lookup;
+  const payload = JSON.stringify(await response.json());
+  expect(payload).toContain("ALIASSO");
+  expect(payload).toContain("ALI ASSOCIATES");
+  await popup.getByRole("button", { name: /ALI ASSOCIATES/ }).click();
+  await expect(page.getByTestId("rate-update-customer").getByRole("combobox", { name: "Code" })).toHaveValue("ALIASSO");
+});
+
 test("zone update no longer rewrites booked shipments", async ({ page }) => {
   await page.goto("/utility/rate-zone-update/zone-update");
   await expect(page.getByRole("button", { name: "Update Shipments" })).toHaveCount(0);

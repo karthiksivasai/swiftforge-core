@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
@@ -35,6 +35,26 @@ const mixed = [
   "HYD,UPS,DOX,AF,Afghanistan,8,WORLDWIDE EXPRESS SAVER",
 ].join("\n");
 
+async function pickLive(page: Page, scope: Locator, label: string, typed: string, _option: RegExp) {
+  void _option;
+  const field = scope.getByTestId(`zone-field-${label}`);
+  const key = label === "origin" || label === "destination" ? "destination" : label;
+  const lookup = page.waitForResponse((res) => {
+    if (!res.url().includes("/rest/v1/rpc/lookup") || res.request().method() !== "POST" || !res.ok()) return false;
+    const body = res.request().postData() ?? "";
+    return body.includes(`"p_key":"${key}"`) && body.includes(typed);
+  }, { timeout: 8000 }).catch(() => null);
+  await field.getByRole("button", { name: "Search" }).click();
+  const popup = page.getByRole("dialog").filter({ has: page.getByPlaceholder("Search by code or name…") });
+  await popup.getByPlaceholder("Search by code or name…").fill(typed);
+  const choice = popup.getByRole("button", { name: new RegExp(` ${typed}$`) });
+  await expect(choice).toBeVisible({ timeout: 15000 });
+  const response = await lookup;
+  if (response) expect(JSON.stringify(await response.json())).toContain(typed);
+  await choice.click();
+  await expect(page.getByPlaceholder("Search by code or name…")).toBeHidden();
+}
+
 const clean = [
   "Origin,Vendor,Product,Country,Destination,Zone,ServiceType",
   "HYD,UPS,DOX,AF,Afghanistan,8,WORLDWIDE EXPRESS SAVER",
@@ -43,7 +63,7 @@ const clean = [
 ].join("\n");
 
 test("zone import dry run, confirm, replace, and booking zone", async ({ page }) => {
-  test.setTimeout(180000);
+  test.setTimeout(240000);
   const user = userClient();
   const created: string[] = [];
 
@@ -166,12 +186,44 @@ test("zone import dry run, confirm, replace, and booking zone", async ({ page })
     await page.getByTestId("zone-import-apply").click();
     await expect(page.getByTestId("zone-import-result")).toContainText("Replaced 3", { timeout: 30000 });
 
+    const { data: afterReplace } = await user.rpc("search_zone_mappings", {
+      p_filters: { export_type: "ALL", vendor_id: ups!.id, as_of: BOOK },
+    });
+    const kept = ((afterReplace as { rows?: Array<{ Destination: string | null }> } | null)?.rows ?? [])
+      .filter((row) => row.Destination && ["AF", "AR", "US"].includes(row.Destination));
+    expect(kept).toHaveLength(3);
+
     await page.getByRole("button", { name: "Export", exact: true }).click();
-    await page.getByTestId("zone-field-vendor").getByRole("combobox", { name: "Code" }).fill("UPS");
-    await page.getByRole("option", { name: /UPS/ }).first().click();
+    await pickLive(page, page.locator("body"), "vendor", "UPS", /UPS/);
     await page.getByTestId("zone-export-search").click();
     await expect(page.getByTestId("zone-export-grid")).toContainText("Afghanistan", { timeout: 30000 });
     await expect(page.getByTestId("zone-export-grid")).toContainText("ServiceType");
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByTestId("zone-export-download").click();
+    const download = await downloadPromise;
+    const exported = fs.readFileSync(await download.path());
+    await page.getByRole("button", { name: "Import" }).click();
+    await page.getByTestId("zone-import-file").setInputFiles({
+      name: download.suggestedFilename(),
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: exported,
+    });
+    await expect(page.getByTestId("zone-import-run")).toBeEnabled();
+    await page.getByTestId("zone-import-date").fill(BOOK);
+    await page.getByTestId("zone-import-run").click();
+    await expect(page.getByTestId("zone-import-summary")).toContainText("0 new", { timeout: 30000 });
+    const roundTrip = await page.getByTestId("zone-import-summary").innerText();
+    console.log(`[ZONE ROUND TRIP] ${roundTrip}`);
+    expect(roundTrip).toContain("0 new");
+    expect(roundTrip).toContain("replace");
+    await expect(page.getByTestId("zone-import-confirm")).toBeEnabled();
+    await page.getByRole("button", { name: "Reset" }).click();
+    await expect(page.getByTestId("zone-import-preview")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Export", exact: true }).click();
+    await page.getByTestId("zone-export-search").click();
+    await expect(page.getByTestId("zone-export-grid")).toContainText("Afghanistan", { timeout: 30000 });
 
     const afghan = page.getByTestId("zone-mapping-row").filter({ hasText: "Afghanistan" }).first();
     await afghan.getByRole("button", { name: "Edit" }).click();
@@ -189,7 +241,7 @@ test("zone import dry run, confirm, replace, and booking zone", async ({ page })
       p_filters: { export_type: "ALL", vendor_id: ups?.id ?? null },
     });
     const rows = ((search as { rows?: Array<{ id: string; Destination: string | null }> } | null)?.rows ?? [])
-      .filter((row) => row.Destination && ["AF", "AR", "US"].includes(row.Destination));
+      .filter((row) => row.Destination && ["AF", "AR", "US", "AD"].includes(row.Destination));
     for (const row of rows) {
       await user.rpc("delete_zone_mapping", { p_id: row.id });
     }
@@ -203,5 +255,49 @@ test("zone import dry run, confirm, replace, and booking zone", async ({ page })
         reference_no: `OLD_${String(row.id).slice(0, 12)}`,
       }).eq("id", row.id);
     }
+  }
+});
+
+test("add mapping save, edit, and delete on screen", async ({ page }) => {
+  test.setTimeout(120000);
+  const user = userClient();
+  const { data: ups } = await dbAdmin.from("vendors").select("id").eq("code", "UPS").is("deleted_at", null).limit(1).maybeSingle();
+  try {
+    await page.goto("/utility/rate-zone-update/zone-update");
+    const dialog = page.getByRole("dialog", { name: "Add/Update" });
+    await page.getByTestId("zone-add").click();
+    await expect(dialog).toBeVisible();
+    await dialog.locator('input[type="date"]').fill(BOOK);
+    await pickLive(page, dialog, "origin", "HYD", /HYD/);
+    await pickLive(page, dialog, "vendor", "UPS", /UPS/);
+    await dialog.getByPlaceholder("Service").fill("WORLDWIDE");
+    await page.getByRole("option", { name: "WORLDWIDE EXPRESS SAVER" }).click();
+    await pickLive(page, dialog, "product", "DOX", /DOX/);
+    await pickLive(page, dialog, "country", "AD", /Andorra/);
+    await pickLive(page, dialog, "destination", "AD", /Andorra/);
+    await pickLive(page, dialog, "zone", "US", /US/);
+    await page.getByTestId("zone-mapping-save").click();
+    await expect(dialog).toBeHidden({ timeout: 15000 });
+
+    await page.getByTestId("zone-export-search").click();
+    const added = page.getByTestId("zone-mapping-row").filter({ hasText: "Andorra" });
+    await expect(added).toBeVisible({ timeout: 30000 });
+    await added.getByRole("button", { name: "Edit" }).click();
+    const editDialog = page.getByRole("dialog", { name: "Edit mapping" });
+    await expect(editDialog).toBeVisible();
+    await editDialog.locator('input[type="date"]').fill("2026-11-01");
+    await page.getByTestId("zone-mapping-save").click();
+    await expect(editDialog).toBeHidden({ timeout: 15000 });
+    await page.getByTestId("zone-export-search").click();
+    await expect(page.getByTestId("zone-mapping-row").filter({ hasText: "Andorra" })).toBeVisible();
+    await page.getByTestId("zone-mapping-row").filter({ hasText: "Andorra" }).getByTestId("zone-mapping-delete").click();
+    await expect(page.getByTestId("zone-mapping-row").filter({ hasText: "Andorra" })).toHaveCount(0, { timeout: 15000 });
+  } finally {
+    const { data: search } = await user.rpc("search_zone_mappings", {
+      p_filters: { export_type: "ALL", vendor_id: ups?.id ?? null },
+    });
+    const rows = ((search as { rows?: Array<{ id: string; Destination: string | null }> } | null)?.rows ?? [])
+      .filter((row) => row.Destination === "AD");
+    for (const row of rows) await user.rpc("delete_zone_mapping", { p_id: row.id });
   }
 });
