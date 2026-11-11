@@ -54,6 +54,7 @@ async function wipeFixtures() {
         invoice_id: null,
         deleted_at: new Date().toISOString(),
         reference_no: `OLD_${String(row.id).slice(0, 12)}`,
+        awb_no: `OLD_${String(row.id).slice(0, 12)}`,
       })
       .eq("id", row.id);
     if (error) throw new Error(error.message);

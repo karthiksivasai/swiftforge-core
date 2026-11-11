@@ -62,6 +62,25 @@ const clean = [
   "HYD,UPS,DOX,US,USA,US,WORLDWIDE EXPRESS SAVER",
 ].join("\n");
 
+test("zone import shows that the file is being checked", async ({ page }) => {
+  await page.route("**/rest/v1/rpc/preview_zone_import", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await route.continue();
+  });
+  await page.goto("/utility/rate-zone-update/zone-update");
+  await page.getByRole("button", { name: "Import" }).click();
+  await page.getByTestId("zone-import-file").setInputFiles({
+    name: "zones-mixed.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(mixed),
+  });
+  await page.getByTestId("zone-import-run").click();
+  await expect(page.getByTestId("zone-import-status")).toContainText("Checking 4 rows. Nothing is saved yet.");
+  await expect(page.getByTestId("zone-import-preview")).toContainText("Check finished. Nothing is saved yet.");
+  await expect(page.getByTestId("zone-import-blocked")).toContainText(/Confirm Import is off because \d+ rows failed/);
+  await expect(page.getByTestId("zone-import-confirm")).toBeDisabled();
+});
+
 test("zone import dry run, confirm, replace, and booking zone", async ({ page }) => {
   test.setTimeout(240000);
   const user = userClient();
@@ -128,6 +147,7 @@ test("zone import dry run, confirm, replace, and booking zone", async ({ page })
       await dbAdmin.from("shipments").update({
         deleted_at: new Date().toISOString(),
         reference_no: `OLD_${String(row.id).slice(0, 12)}`,
+        awb_no: `OLD_${String(row.id).slice(0, 12)}`,
       }).eq("id", row.id);
     }
 
@@ -256,6 +276,7 @@ test("zone import dry run, confirm, replace, and booking zone", async ({ page })
       await dbAdmin.from("shipments").update({
         deleted_at: new Date().toISOString(),
         reference_no: `OLD_${String(row.id).slice(0, 12)}`,
+        awb_no: `OLD_${String(row.id).slice(0, 12)}`,
       }).eq("id", row.id);
     }
   }

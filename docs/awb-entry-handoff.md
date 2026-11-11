@@ -321,6 +321,7 @@ Go-live, in this order, and only when the owner asks:
 3. Get the CA confirmation for 18% GST on every international type, and for fuel on freight being taxed. Do not change the rule while waiting.
 4. Load official CBIC customs exchange rates into `public.customs_exchange_rates` (replacing the initial TEST placeholder rates).
 5. Run `scripts/awb-audit/cleanup-international-test-data.mjs`. Not before. That is what removes test AWBs and resets the series.
+6. Before applying 0156 in production, check for duplicate forwarding_awb per vendor.
 
 ## F. How we work
 

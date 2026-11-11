@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { uiFormToShipmentPayload, dbShipmentToFormPatch } from "./shipmentUiMap";
+import { uiFormToShipmentPayload, dbShipmentToFormPatch, type AwbLiveForm } from "./shipmentUiMap";
 import type { ShipmentChildren, ShipmentRow as ShipmentDbRow } from "./resources/shipments";
 
 describe("Forwarding Tab Batch 1 Tests", () => {
@@ -223,6 +223,9 @@ describe("Forwarding Tab Batch 1 Tests", () => {
           pincode: "500001",
           country: "India",
           telephone: "9876543210",
+          iec_no: "ABCDE12345",
+          document_type: "GST",
+          document_no: "36AAAAA0000A1Z5",
         },
         consignee: {
           origin: { code: "USA", name: "United States" },
@@ -326,6 +329,9 @@ describe("Forwarding Tab Batch 1 Tests", () => {
           pincode: "500001",
           country: "India",
           telephone: "9876543210",
+          iec_no: "ABCDE12345",
+          document_type: "GST",
+          document_no: "36AAAAA0000A1Z5",
         },
         consignee: {
           origin: { code: "USA", name: "United States" },
@@ -368,5 +374,411 @@ describe("Forwarding Tab Batch 1 Tests", () => {
     expect(entry.new_values?.forwarding_awb).toBe(newFwd);
     expect(entry.new_values?.delivery_awb).toBe(newDel);
     expect(entry.new_values?.delivery_service).toBe("EXPRESS");
+  });
+
+  it("AWB-REUSE: book -> delete -> book again strictly gives a NEW number and never reuses deleted AWB", async () => {
+    if (!admin || !client) return;
+
+    // Read full valid payload fields from an existing booked shipment
+    const { data: sample } = await admin
+      .from("shipments")
+      .select("customer_id, vendor_id, product_id, origin_destination_id, destination_id, branch_id, service, weight_unit, pieces_unit, shipper, consignee, wizard_extras")
+      .ilike("reference_no", "TEST_AWB_%")
+      .limit(1)
+      .single();
+
+    expect(sample).not.toBeNull();
+
+    const { data: cust } = await admin.from("customers").select("code").eq("id", sample.customer_id).single();
+    const { data: prod } = await admin.from("products").select("code").eq("id", sample.product_id).single();
+    const { data: orig } = await admin.from("destinations").select("code").eq("id", sample.origin_destination_id).single();
+    const { data: dest } = await admin.from("destinations").select("code").eq("id", sample.destination_id).single();
+    const { data: branch } = await admin.from("branches").select("code").eq("id", sample.branch_id).single();
+    const { data: vend } = await admin.from("vendors").select("code").eq("id", sample.vendor_id).single();
+
+    const timestamp = Date.now();
+    const ref1 = `TEST_REUSE_A_${timestamp}`;
+    const ref2 = `TEST_REUSE_B_${timestamp}`;
+
+    const baseFields = {
+      customer_id: sample.customer_id,
+      customer_code: cust?.code,
+      product_id: sample.product_id,
+      product_code: prod?.code,
+      origin_destination_id: sample.origin_destination_id,
+      origin_code: orig?.code,
+      destination_id: sample.destination_id,
+      destination_code: dest?.code,
+      vendor_id: sample.vendor_id,
+      vendor_code: vend?.code,
+      branch_id: sample.branch_id,
+      branch_code: branch?.code,
+      service: sample.service || "FEDEX",
+      book_date: "2026-11-10",
+      book_time: "1000",
+      payment_type: "CASH",
+      weight_unit: "KG",
+      pieces: "1",
+      pieces_unit: "DOX",
+      actual_weight: "0.500",
+      charge_weight: "0.500",
+      is_commercial: false,
+      content: "REUSE TEST DOCUMENTS",
+      shipper: {
+        company_name: "Ali Associates",
+        contact_name: "Karthik",
+        address1: "12 Test Road",
+        address2: "",
+        city: "Hyderabad",
+        state: "Telangana",
+        pincode: "500001",
+        country: "India",
+        telephone: "9876543210",
+        mobile: "9876543210",
+        email: "shipper@example.com",
+        iec_no: "ABCDE12345",
+        document_type: "GST",
+        document_no: "36AAAAA0000A1Z5",
+      },
+      consignee: {
+        company_name: "Acme USA Corp",
+        contact_name: "John Doe",
+        address1: "123 Fifth Ave",
+        address2: "Suite 400",
+        city: "New York",
+        state: "NY",
+        pincode: "10001",
+        country: "United States of America",
+        telephone: "+12125550199",
+        mobile: "+12125550199",
+        email: "consignee@example.com",
+      },
+      wizard_extras: {
+        proforma: {
+          csbType: "CSB 4",
+          exportReason: "UNSOLICITED GIFT - NOT FOR SALE",
+          currency: "INR",
+          lines: [
+            {
+              id: "l1",
+              description: "Gift item",
+              quantity: "1",
+              rate: "100.00",
+              amount: "100.00",
+              boxNo: "Box-1",
+              hsn: "6205",
+              packages: "1",
+              weight: "0.200",
+              igstPercent: "0",
+              igstAmount: "0.00",
+            },
+          ],
+        },
+      },
+    };
+
+    // 1. Book first shipment
+    const { data: s1, error: err1 } = await client.rpc("book_awb_shipment", {
+      p_id: null,
+      p_row_version: null,
+      p_fields: { ...baseFields, reference_no: ref1 },
+      p_pieces: [{ pieces: 1, actual_weight_per_pc: 0.5, length: 10, breadth: 10, height: 10 }],
+    });
+
+    expect(err1).toBeNull();
+    expect(s1).not.toBeNull();
+    const awb1 = s1.awb_no;
+
+    // 2. Soft-delete first shipment (simulating a fixture delete or admin deletion)
+    const { error: delErr } = await admin
+      .from("shipments")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", s1.id);
+    expect(delErr).toBeNull();
+
+    // 3. Book second shipment
+    const { data: s2, error: err2 } = await client.rpc("book_awb_shipment", {
+      p_id: null,
+      p_row_version: null,
+      p_fields: { ...baseFields, reference_no: ref2 },
+      p_pieces: [{ pieces: 1, actual_weight_per_pc: 0.5, length: 10, breadth: 10, height: 10 }],
+    });
+
+    expect(err2).toBeNull();
+    expect(s2).not.toBeNull();
+    const awb2 = s2.awb_no;
+
+    // 4. Assert awb2 is strictly greater than awb1 and NOT equal
+    expect(awb2).not.toBe(awb1);
+    expect(Number(awb2)).toBeGreaterThan(Number(awb1));
+
+    // Cleanup test data
+    await admin.from("shipments").delete().in("id", [s1.id, s2.id]);
+  });
+
+  it("AWB-REUSE: claim_awb_no ignores non-numeric awb_no values without ::bigint crash", async () => {
+    if (!admin || !client) return;
+
+    // 1. Verify there are non-numeric OLD_ awb_no rows in shipments
+    const { data: oldRows, error: oldErr } = await admin
+      .from("shipments")
+      .select("id, awb_no")
+      .like("awb_no", "OLD_%")
+      .limit(3);
+    expect(oldErr).toBeNull();
+    expect(oldRows && oldRows.length > 0).toBe(true);
+
+    // 2. Fetch sample booking fields
+    const { data: sample } = await admin
+      .from("shipments")
+      .select("customer_id, vendor_id, product_id, origin_destination_id, destination_id, branch_id, service")
+      .ilike("reference_no", "TEST_AWB_%")
+      .limit(1)
+      .single();
+
+    const { data: cust } = await admin.from("customers").select("code").eq("id", sample.customer_id).single();
+    const { data: prod } = await admin.from("products").select("code").eq("id", sample.product_id).single();
+    const { data: orig } = await admin.from("destinations").select("code").eq("id", sample.origin_destination_id).single();
+    const { data: dest } = await admin.from("destinations").select("code").eq("id", sample.destination_id).single();
+    const { data: branch } = await admin.from("branches").select("code").eq("id", sample.branch_id).single();
+    const { data: vend } = await admin.from("vendors").select("code").eq("id", sample.vendor_id).single();
+
+    const ts = Date.now().toString().slice(-8);
+    const ref = `TEST_OLD_IGN_${ts}`;
+
+    // 3. Book a shipment: book_awb_shipment invokes app.claim_awb_no internally
+    // which queries `where awb_no ~ '^[0-9]+$'` across ALL rows including OLD_*
+    const { data: booked, error: bookErr } = await client.rpc("book_awb_shipment", {
+      p_id: null,
+      p_row_version: null,
+      p_fields: {
+        customer_id: sample.customer_id,
+        customer_code: cust?.code,
+        product_id: sample.product_id,
+        product_code: prod?.code,
+        origin_destination_id: sample.origin_destination_id,
+        origin_code: orig?.code,
+        destination_id: sample.destination_id,
+        destination_code: dest?.code,
+        vendor_id: sample.vendor_id,
+        vendor_code: vend?.code,
+        branch_id: sample.branch_id,
+        branch_code: branch?.code,
+        service: sample.service || "FEDEX",
+        book_date: "2026-11-10",
+        book_time: "1000",
+        payment_type: "CASH",
+        weight_unit: "KG",
+        pieces: "1",
+        pieces_unit: "DOX",
+        actual_weight: "0.500",
+        charge_weight: "0.500",
+        is_commercial: false,
+        content: "OLD_ AWB TEST DOCS",
+        reference_no: ref,
+        shipper: {
+          company_name: "Ali Associates",
+          contact_name: "Karthik",
+          address1: "12 Test Road",
+          city: "Hyderabad",
+          state: "Telangana",
+          pincode: "500001",
+          country: "India",
+          telephone: "9876543210",
+          mobile: "9876543210",
+          email: "shipper@example.com",
+          iec_no: "ABCDE12345",
+          document_type: "GST",
+          document_no: "36AAAAA0000A1Z5",
+        },
+        consignee: {
+          company_name: "Acme USA Corp",
+          contact_name: "John Doe",
+          address1: "123 Fifth Ave",
+          city: "New York",
+          state: "NY",
+          pincode: "10001",
+          country: "United States of America",
+          telephone: "+12125550199",
+          mobile: "+12125550199",
+          email: "consignee@example.com",
+        },
+        wizard_extras: {
+          proforma: {
+            csbType: "CSB 4",
+            exportReason: "UNSOLICITED GIFT - NOT FOR SALE",
+            currency: "INR",
+            lines: [
+              {
+                id: "l1",
+                description: "Gift item",
+                quantity: "1",
+                rate: "100.00",
+                amount: "100.00",
+                boxNo: "Box-1",
+                hsn: "6205",
+                packages: "1",
+                weight: "0.200",
+                igstPercent: "0",
+                igstAmount: "0.00",
+              },
+            ],
+          },
+        },
+      },
+      p_pieces: [{ pieces: 1, actual_weight_per_pc: 0.5, length: 10, breadth: 10, height: 10 }],
+    });
+
+    expect(bookErr).toBeNull();
+    expect(booked).not.toBeNull();
+    expect(/^\d+$/.test(booked.awb_no)).toBe(true);
+
+    // Cleanup
+    await admin.from("shipments").delete().eq("id", booked.id);
+  });
+
+  it("AWB-CANCEL: cancelled AWBs retain their number and are NEVER reused on subsequent bookings", async () => {
+    if (!admin || !client) return;
+
+    const { data: sample } = await admin
+      .from("shipments")
+      .select("customer_id, vendor_id, product_id, origin_destination_id, destination_id, branch_id, service")
+      .ilike("reference_no", "TEST_AWB_%")
+      .limit(1)
+      .single();
+
+    expect(sample).not.toBeNull();
+
+    const { data: cust } = await admin.from("customers").select("code").eq("id", sample.customer_id).single();
+    const { data: prod } = await admin.from("products").select("code").eq("id", sample.product_id).single();
+    const { data: orig } = await admin.from("destinations").select("code").eq("id", sample.origin_destination_id).single();
+    const { data: dest } = await admin.from("destinations").select("code").eq("id", sample.destination_id).single();
+    const { data: branch } = await admin.from("branches").select("code").eq("id", sample.branch_id).single();
+    const { data: vend } = await admin.from("vendors").select("code").eq("id", sample.vendor_id).single();
+
+    const ts = Date.now().toString().slice(-8);
+    const refCancel = `TEST_CANC_${ts}`;
+    const refAfter = `TEST_AFT_${ts}`;
+
+    const baseFields = {
+      customer_id: sample.customer_id,
+      customer_code: cust?.code,
+      product_id: sample.product_id,
+      product_code: prod?.code,
+      origin_destination_id: sample.origin_destination_id,
+      origin_code: orig?.code,
+      destination_id: sample.destination_id,
+      destination_code: dest?.code,
+      vendor_id: sample.vendor_id,
+      vendor_code: vend?.code,
+      branch_id: sample.branch_id,
+      branch_code: branch?.code,
+      service: sample.service || "FEDEX",
+      book_date: "2026-11-10",
+      book_time: "1000",
+      payment_type: "CASH",
+      weight_unit: "KG",
+      pieces: "1",
+      pieces_unit: "DOX",
+      actual_weight: "0.500",
+      charge_weight: "0.500",
+      is_commercial: false,
+      content: "CANCEL TEST DOCUMENTS",
+      shipper: {
+        company_name: "Ali Associates",
+        contact_name: "Karthik",
+        address1: "12 Test Road",
+        city: "Hyderabad",
+        state: "Telangana",
+        pincode: "500001",
+        country: "India",
+        telephone: "9876543210",
+        mobile: "9876543210",
+        email: "shipper@example.com",
+        iec_no: "ABCDE12345",
+        document_type: "GST",
+        document_no: "36AAAAA0000A1Z5",
+      },
+      consignee: {
+        company_name: "Acme USA Corp",
+        contact_name: "John Doe",
+        address1: "123 Fifth Ave",
+        city: "New York",
+        state: "NY",
+        pincode: "10001",
+        country: "United States of America",
+        telephone: "+12125550199",
+        mobile: "+12125550199",
+        email: "consignee@example.com",
+      },
+      wizard_extras: {
+        proforma: {
+          csbType: "CSB 4",
+          exportReason: "UNSOLICITED GIFT - NOT FOR SALE",
+          currency: "INR",
+          lines: [
+            {
+              id: "l1",
+              description: "Gift item",
+              quantity: "1",
+              rate: "100.00",
+              amount: "100.00",
+              boxNo: "Box-1",
+              hsn: "6205",
+              packages: "1",
+              weight: "0.200",
+              igstPercent: "0",
+              igstAmount: "0.00",
+            },
+          ],
+        },
+      },
+    };
+
+    // 1. Book shipment
+    const { data: sCancel, error: err1 } = await client.rpc("book_awb_shipment", {
+      p_id: null,
+      p_row_version: null,
+      p_fields: { ...baseFields, reference_no: refCancel },
+      p_pieces: [{ pieces: 1, actual_weight_per_pc: 0.5, length: 10, breadth: 10, height: 10 }],
+    });
+    expect(err1).toBeNull();
+    const cancelledAwb = sCancel.awb_no;
+
+    // 2. Cancel the shipment using cancel_shipment RPC
+    const { data: cancelledRow, error: cancelErr } = await client.rpc("cancel_shipment", {
+      p_id: sCancel.id,
+      p_row_version: sCancel.row_version,
+      p_reason: "Operational test cancellation",
+    });
+    expect(cancelErr).toBeNull();
+    expect(cancelledRow.current_status).toBe("CANCELLED");
+    expect(cancelledRow.awb_no).toBe(cancelledAwb); // Cancelled shipment keeps its AWB number
+
+    // 3. Book another shipment immediately after cancellation
+    const { data: sNext, error: errNext } = await client.rpc("book_awb_shipment", {
+      p_id: null,
+      p_row_version: null,
+      p_fields: { ...baseFields, reference_no: refAfter },
+      p_pieces: [{ pieces: 1, actual_weight_per_pc: 0.5, length: 10, breadth: 10, height: 10 }],
+    });
+    expect(errNext).toBeNull();
+    const nextAwb = sNext.awb_no;
+
+    // 4. Assert next AWB strictly advances and NEVER reuses the cancelled AWB
+    expect(nextAwb).not.toBe(cancelledAwb);
+    expect(Number(nextAwb)).toBeGreaterThan(Number(cancelledAwb));
+
+    // 5. Verify the cancelled row in the database still exists with the original AWB
+    const { data: verifyRow } = await admin
+      .from("shipments")
+      .select("id, awb_no, current_status")
+      .eq("id", sCancel.id)
+      .single();
+    expect(verifyRow?.awb_no).toBe(cancelledAwb);
+    expect(verifyRow?.current_status).toBe("CANCELLED");
+
+    // Cleanup test rows
+    await admin.from("shipments").delete().in("id", [sCancel.id, sNext.id]);
   });
 });
