@@ -1,9 +1,9 @@
 # Rate Import design
 
 **Date:** 11 Nov 2026  
-**Status:** Design only. Nothing in this document is built. The rating engine is unchanged. Rate Import does not read the Excel file. Save says “Rate Import is not available yet” and writes no rate.
+**Status:** Rate Import checks and confirms a finished price grid. Zone Rate columns are zone codes. Country Rate, Country Rate New, New1, and New2 use the same grid with country codes. Customer, origin, and the DOX or SPX product limit which bookings see the price. A blank product means every product. Rate Round Off rounds each price to the nearest rupee on the server. A customer rate card still wins. Fuel and GST are still added. Booked AWBs change only after Rate Update is previewed and confirmed. The INITIAL / ADDITIONAL / UPTO / PLUS template below is the older proposal, and it is not what this import stores. The courier UPS saver workbook has been parsed and has not been confirmed.
 
-This is the proposal for RZ-04, RZ-07, and RZ-13. Do not load a rate file, and do not import the UPS zone file here. That file has no weight and no rate.
+The UPS zone file belongs on Zone Import. Do not confirm the courier rate workbook from this document.
 
 The live Xpresion screen was not open while this was written. The formulas below are the rule to approve before any code changes. If the courier team’s sheet uses a different slab rule, these examples are the ones to correct.
 
