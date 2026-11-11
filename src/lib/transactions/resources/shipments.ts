@@ -67,6 +67,7 @@ export type ShipmentRow = BaseRow & {
   medical_charges: boolean;
   customer_charges_total: number;
   vendor_charges_total: number;
+  vendor_tax_total?: number | null;
   grand_total?: number | null;
   cash_receipt_no: string | null;
   amount_received: number | null;

@@ -523,6 +523,9 @@ type VendorChargeDraft = {
   tax: string;
   taxAmt: string;
   total: string;
+  igst?: string;
+  cgst?: string;
+  sgst?: string;
 };
 
 const SEARCH_FIELDS: { value: SearchField; label: string }[] = [
@@ -1074,6 +1077,9 @@ const emptyVendorChargeDraft = (): VendorChargeDraft => ({
   tax: "No",
   taxAmt: "0.00",
   total: "0.00",
+  igst: "0.00",
+  cgst: "0.00",
+  sgst: "0.00",
 });
 
 export const emptyForm = (): AwbFullForm => ({
@@ -2416,25 +2422,108 @@ function AwbEntryPage() {
     });
   }, [proformaBoxNumbers]);
 
+  const effectiveVendorId = form.forwarding.deliveryVendor?.id || form.vendor?.id;
+  const vendorMasterQuery = useQuery({
+    queryKey: ["vendor-master-details", effectiveVendorId],
+    enabled: authed && Boolean(effectiveVendorId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("vendors")
+        .select("id, code, name, state_id, gst_no, charges_gst_on_export, states:states(id, code, name)")
+        .eq("id", effectiveVendorId!)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+
+  const vendorStateCode =
+    (vendorMasterQuery.data as unknown as { states?: { code?: string } })?.states?.code ||
+    vendorMasterQuery.data?.gst_no?.slice(0, 2) ||
+    "";
+  const hasVendorStateOrGst = Boolean(vendorStateCode.trim());
+  const vendorMissingStateWarning =
+    effectiveVendorId && !hasVendorStateOrGst
+      ? "Selected vendor has no State or GSTIN registered in vendor master. Vendor GST cannot be calculated."
+      : null;
+  const vendorIntraState =
+    hasVendorStateOrGst &&
+    vendorStateCode.trim().toUpperCase() === (branchStateQuery.data || "").trim().toUpperCase();
+  const vendorChargesGst =
+    hasVendorStateOrGst && vendorMasterQuery.data?.charges_gst_on_export !== false;
+  const vendorGstPct = vendorChargesGst ? Number(taxRateQuery.data?.igst_pct ?? 18) : 0;
+
+  const vendorFuelPct = fuelPercentFor({
+    rows: fuelRows,
+    vendorCode: (form.forwarding.deliveryVendor?.code || form.vendor?.code)?.trim(),
+    vendorName: (form.forwarding.deliveryVendor?.name || form.vendor?.name)?.trim(),
+    productCode: (form.forwarding.deliveryProduct?.code || form.product?.code)?.trim(),
+    productName: (form.forwarding.deliveryProduct?.name || form.product?.name)?.trim(),
+    destinationCode: form.consignee?.origin?.code?.trim(),
+    destinationName: form.consignee?.origin?.name?.trim(),
+    bookDate: form.bookDate,
+  });
+
+  const priceVendorChargeDraft = (draft: VendorChargeDraft) => {
+    const applyFuel = draft.fuel === "Yes";
+    const applyTaxOnFuel = draft.taxOnFuel === "Yes";
+    const applyTax = draft.tax === "Yes";
+    return manualChargeAmounts({
+      itemAmount: Number.parseFloat(draft.amount) || 0,
+      applyFuel,
+      applyTaxOnFuel,
+      applyTax,
+      fuelPct: vendorFuelPct,
+      gstPct: vendorGstPct,
+      intraState: vendorIntraState,
+    });
+  };
+
   const vendorChargeSummary = useMemo(() => {
     const lines = form.forwarding.vendorChargeLines;
-    const subTotal = lines.reduce((s, l) => s + (Number.parseFloat(l.amount) || 0), 0);
-    const totalFuel = lines.reduce((s, l) => s + (Number.parseFloat(l.fuelAmt) || 0), 0);
-    const igst = lines.reduce((s, l) => s + (Number.parseFloat(l.igst) || 0), 0);
-    const cgst = lines.reduce((s, l) => s + (Number.parseFloat(l.cgst) || 0), 0);
-    const sgst = lines.reduce((s, l) => s + (Number.parseFloat(l.sgst) || 0), 0);
-    const total = lines.reduce((s, l) => s + (Number.parseFloat(l.total) || 0), 0);
+    const contract = Number.parseFloat(ratingSummary?.vendorCost || form.vendorChargesTotal || "0") || 0;
+    const contractFuel = (contract * vendorFuelPct) / 100;
+    const contractTaxBase = contract + contractFuel;
+    const contractGst = (contractTaxBase * vendorGstPct) / 100;
+
+    const manualAmt = lines.reduce((s, l) => s + (Number.parseFloat(l.amount) || 0), 0);
+    const manualFuel = lines.reduce((s, l) => s + (Number.parseFloat(l.fuelAmt) || 0), 0);
+    const manualGst = lines.reduce(
+      (s, l) => s + (Number.parseFloat(l.igst || "0") + Number.parseFloat(l.cgst || "0") + Number.parseFloat(l.sgst || "0")),
+      0,
+    );
+
+    const totalFuel = contractFuel + manualFuel;
+    const vendorCostExGst = contract + contractFuel + manualAmt + manualFuel;
+    const totalVendorGst = contractGst + manualGst;
+    const vendorTotalInclGst = vendorCostExGst + totalVendorGst;
+
+    // Customer Total ex-GST: customer freight + customer fuel + customer other charges
+    const custGrand = Number.parseFloat(form.customerChargesTotal || "0") || 0;
+    const custTax = Number.parseFloat(chargeSummary.tax || "0") || 0;
+    const custExGst = custGrand > 0 ? (custGrand - custTax > 0 ? custGrand - custTax : custGrand) : (Number.parseFloat(chargeSummary.subTotal || "0") + Number.parseFloat(chargeSummary.fuel || "0"));
+
+    const margin = custExGst - vendorCostExGst;
+
     return {
-      contractCharges: "0.00",
-      otherCharges: subTotal.toFixed(2),
-      subTotal: subTotal.toFixed(2),
+      contractCharges: contract.toFixed(2),
+      contractFuel: contractFuel.toFixed(2),
+      manualCharges: manualAmt.toFixed(2),
+      manualFuel: manualFuel.toFixed(2),
       totalFuel: totalFuel.toFixed(2),
-      igst: igst.toFixed(2),
-      cgst: cgst.toFixed(2),
-      sgst: sgst.toFixed(2),
-      totalAmount: total.toFixed(2),
+      vendorCostExGst: vendorCostExGst.toFixed(2),
+      vendorGst: totalVendorGst.toFixed(2),
+      vendorTotalInclGst: vendorTotalInclGst.toFixed(2),
+      totalAmount: vendorTotalInclGst.toFixed(2),
+      customerExGst: custExGst.toFixed(2),
+      margin: margin.toFixed(2),
+      subTotal: (contract + manualAmt).toFixed(2),
+      otherCharges: manualAmt.toFixed(2),
+      igst: lines.reduce((s, l) => s + (Number.parseFloat(l.igst) || 0), 0).toFixed(2),
+      cgst: lines.reduce((s, l) => s + (Number.parseFloat(l.cgst) || 0), 0).toFixed(2),
+      sgst: lines.reduce((s, l) => s + (Number.parseFloat(l.sgst) || 0), 0).toFixed(2),
     };
-  }, [form.forwarding.vendorChargeLines]);
+  }, [form.forwarding.vendorChargeLines, ratingSummary?.vendorCost, form.vendorChargesTotal, vendorFuelPct, vendorGstPct, form.customerChargesTotal, chargeSummary.tax, chargeSummary.subTotal, chargeSummary.fuel]);
 
   const filteredKycDocs = useMemo(() => {
     const q = kycSearchInput.trim().toLowerCase();
@@ -2480,6 +2569,18 @@ function AwbEntryPage() {
   const patchForwarding = (patch: Partial<ForwardingData>) => {
     setForm((f) => ({ ...f, forwarding: { ...f.forwarding, ...patch } }));
   };
+
+  useEffect(() => {
+    if (
+      (activeTab === "forwarding" || activeTab === "Forwarding") &&
+      form.chargeWeight &&
+      (!form.forwarding.vendorWeight ||
+        form.forwarding.vendorWeight === "0" ||
+        form.forwarding.vendorWeight.trim() === "")
+    ) {
+      patchForwarding({ vendorWeight: form.chargeWeight });
+    }
+  }, [activeTab, form.chargeWeight, form.forwarding.vendorWeight]);
 
   const openFormSetup = () => {
     setFormSetupDraft({ ...formSetupSettings });
@@ -5397,9 +5498,9 @@ function AwbEntryPage() {
       fuelAmt: vendorChargeDraft.fuelAmt,
       taxApply: vendorChargeDraft.tax,
       taxOnFuel: vendorChargeDraft.taxOnFuel,
-      igst: "0",
-      sgst: "0",
-      cgst: "0",
+      igst: vendorChargeDraft.igst || "0.00",
+      sgst: vendorChargeDraft.sgst || "0.00",
+      cgst: vendorChargeDraft.cgst || "0.00",
       total: vendorChargeDraft.total || amount,
       chargesType: "Vendor",
     };
@@ -5424,7 +5525,22 @@ function AwbEntryPage() {
   const patchVendorChargeDraft = (patch: Partial<VendorChargeDraft>) => {
     setVendorChargeDraft((d) => {
       const next = { ...d, ...patch };
-      next.total = next.amount || "0.00";
+      const calc = priceVendorChargeDraft(next);
+      const fuelVal = Number.parseFloat(calc.fuelAmt) || 0;
+      next.fuelAmt = calc.fuelAmt;
+      next.taxOnFuelAmt =
+        next.taxOnFuel === "Yes" && fuelVal > 0 && vendorGstPct > 0
+          ? ((fuelVal * vendorGstPct) / 100).toFixed(2)
+          : "0.00";
+      const taxTotal =
+        (Number.parseFloat(calc.igst) || 0) +
+        (Number.parseFloat(calc.cgst) || 0) +
+        (Number.parseFloat(calc.sgst) || 0);
+      next.taxAmt = taxTotal.toFixed(2);
+      next.igst = calc.igst;
+      next.cgst = calc.cgst;
+      next.sgst = calc.sgst;
+      next.total = calc.total;
       return next;
     });
   };
@@ -7514,28 +7630,38 @@ function AwbEntryPage() {
                           />
                         </CollapsibleTrigger>
                         <CollapsibleContent className="border border-t-0 bg-card">
-                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-4 xl:grid-cols-8 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-3 xl:grid-cols-6 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                             {(
                               [
-                                ["Contract Charges", vendorChargeSummary.contractCharges],
-                                ["Other Charges", vendorChargeSummary.otherCharges],
-                                ["Sub Total", vendorChargeSummary.subTotal],
-                                ["Total Fuel", vendorChargeSummary.totalFuel],
-                                ["IGST", vendorChargeSummary.igst],
-                                ["CGST", vendorChargeSummary.cgst],
-                                ["SGST", vendorChargeSummary.sgst],
-                                ["Total Amount", vendorChargeSummary.totalAmount],
+                                ["Contract", vendorChargeSummary.contractCharges, "fwd-summary-contract"],
+                                ["Fuel", vendorChargeSummary.totalFuel, "fwd-summary-fuel"],
+                                ["Manual", vendorChargeSummary.manualCharges, "fwd-summary-manual"],
+                                ["Vendor GST", vendorChargeSummary.vendorGst, "fwd-summary-vendor-gst"],
+                                ["Vendor Total (incl. GST)", vendorChargeSummary.vendorTotalInclGst, "fwd-summary-vendor-total"],
+                                ["Margin", vendorChargeSummary.margin, "fwd-summary-margin"],
                               ] as const
-                            ).map(([label, val]) => (
+                            ).map(([label, val, testId]) => (
                               <FieldWrapper key={label} borderLabel label={label}>
                                 <Input
+                                  data-testid={testId}
                                   value={val}
                                   readOnly
-                                  className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  className={cn(
+                                    "h-8 rounded-none border-0 px-1.5 text-[13px] shadow-none focus-visible:ring-0",
+                                    label === "Vendor Total (incl. GST)" && "bg-muted/40 font-semibold",
+                                    label === "Margin" && (Number.parseFloat(val) >= 0 ? "bg-emerald-50 font-bold text-emerald-700" : "bg-red-50 font-bold text-red-700"),
+                                    label !== "Margin" && label !== "Vendor Total (incl. GST)" && "bg-muted/30",
+                                  )}
                                 />
                               </FieldWrapper>
                             ))}
                           </div>
+                          {vendorMissingStateWarning ? (
+                            <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="fwd-vendor-state-warning">
+                              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                              <span>{vendorMissingStateWarning}</span>
+                            </div>
+                          ) : null}
                           <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
                             <FieldWrapper borderLabel label="Description" required>
                               <ErpNavSelect
@@ -7560,7 +7686,7 @@ function AwbEntryPage() {
                                 }}
                               />
                             </FieldWrapper>
-                            <FieldWrapper borderLabel label="Fuel(0)">
+                            <FieldWrapper borderLabel label={`Fuel (${vendorFuelPct}%)`}>
                               <div className="flex w-full min-w-0 items-stretch">
                                 <ErpNavSelect
                                   order={AWB_NAV.VENDOR_CHARGE_FUEL}
@@ -7594,7 +7720,7 @@ function AwbEntryPage() {
                                 />
                               </div>
                             </FieldWrapper>
-                            <FieldWrapper borderLabel label="Tax">
+                            <FieldWrapper borderLabel label={`Tax (${vendorGstPct}%)`}>
                               <div className="flex w-full min-w-0 items-stretch">
                                 <ErpNavSelect
                                   order={AWB_NAV.VENDOR_CHARGE_TAX}

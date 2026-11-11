@@ -86,6 +86,7 @@ export const shipmentFieldsSchema = z.object({
   medical_charges: boolWithDefault(false),
   customer_charges_total: optText(32),
   vendor_charges_total: optText(32),
+  vendor_tax_total: optText(32),
   cash_receipt_no: optText(64),
   amount_received: optText(32),
   balance_amount: optText(32),

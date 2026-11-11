@@ -88,6 +88,7 @@ export type AwbLiveForm = {
   medicalCharges: boolean;
   customerChargesTotal: string;
   vendorChargesTotal: string;
+  vendorTaxTotal?: string;
   piecesLines: PiecesLine[];
   chargeLines: ChargeLine[];
   paymentType: string;
@@ -149,14 +150,14 @@ function formatListWeight(value: number | string | null | undefined): string {
 }
 
 function partyToJson(p: PartyDetails): Record<string, unknown> {
-  const text = (value: string) => value.trim();
+  const text = (value: unknown) => String(value ?? "").trim();
   return {
-    origin_code: text(p.origin.code),
-    origin_name: text(p.origin.name),
-    origin_id: p.origin.id ?? null,
-    company_code: text(p.companyName.code),
-    company_name: text(p.companyName.name),
-    company_id: p.companyName.id ?? null,
+    origin_code: text(p.origin?.code),
+    origin_name: text(p.origin?.name),
+    origin_id: p.origin?.id ?? null,
+    company_code: text(p.companyName?.code),
+    company_name: text(p.companyName?.name),
+    company_id: p.companyName?.id ?? null,
     contact_name: text(p.contactName),
     address1: text(p.address1),
     address2: text(p.address2),
@@ -240,40 +241,41 @@ export function uiFormToShipmentPayload(
     branch_code: opts?.branchCode || null,
     pickup_id: form.pickupId || null,
     book_date: form.bookDate,
-    book_time: form.bookTime.trim() || null,
+    book_time: (form.bookTime ?? "").trim() || null,
     awb_no: opts?.manualAwbNo?.trim() || null,
-    reference_no: form.referenceNo.trim() || null,
-    airline: form.airline.trim() || null,
-    service: form.service.code.trim() || form.service.name.trim() || null,
-    payment_type: form.paymentType.trim() || null,
-    content: form.content.trim() || null,
-    instruction: form.instruction.trim() || null,
-    pieces: form.pieces.trim() || "1",
+    reference_no: (form.referenceNo ?? "").trim() || null,
+    airline: (form.airline ?? "").trim() || null,
+    service: form.service?.code?.trim() || form.service?.name?.trim() || null,
+    payment_type: (form.paymentType ?? "").trim() || null,
+    content: (form.content ?? "").trim() || null,
+    instruction: (form.instruction ?? "").trim() || null,
+    pieces: (form.pieces ?? "").trim() || "1",
     pieces_unit: piecesUnit === "NDOX" || piecesUnit === "ENV" ? piecesUnit : "DOX",
-    actual_weight: form.actualWeight.trim() || "0",
-    weight_unit: form.weightUnit.trim() || "KG",
-    vol_weight: form.volWeight.trim() || "0",
-    charge_weight: form.chargeWeight.trim() || "0",
-    shipment_value: form.shipmentValue.trim() || null,
-    currency: form.shipmentCurrency.trim() || "INR",
+    actual_weight: (form.actualWeight ?? "").trim() || "0",
+    weight_unit: (form.weightUnit ?? "").trim() || "KG",
+    vol_weight: (form.volWeight ?? "").trim() || "0",
+    charge_weight: (form.chargeWeight ?? "").trim() || "0",
+    shipment_value: (form.shipmentValue ?? "").trim() || null,
+    currency: (form.shipmentCurrency ?? "").trim() || "INR",
     is_commercial: form.commercial,
     is_oda: form.oda,
     medical_charges: form.medicalCharges,
-    customer_charges_total: form.customerChargesTotal.trim() || "0",
-    vendor_charges_total: form.vendorChargesTotal.trim() || "0",
-    cash_receipt_no: form.cashReceiptNo.trim() || null,
-    amount_received: form.amountReceived.trim() || null,
-    balance_amount: form.balanceAmount.trim() || null,
-    cash_receipt_date: form.cashReceiptDate.trim() || null,
+    customer_charges_total: (form.customerChargesTotal ?? "").trim() || "0",
+    vendor_charges_total: (form.vendorChargesTotal ?? "").trim() || "0",
+    vendor_tax_total: form.vendorTaxTotal?.trim() || "0",
+    cash_receipt_no: (form.cashReceiptNo ?? "").trim() || null,
+    amount_received: (form.amountReceived ?? "").trim() || null,
+    balance_amount: (form.balanceAmount ?? "").trim() || null,
+    cash_receipt_date: (form.cashReceiptDate ?? "").trim() || null,
     forwarding_awb:
-      form.forwardingNo.trim() || forwarding.forwardingAwb?.trim() || null,
-    delivery_awb: form.deliveryNo.trim() || forwarding.deliveryAwb?.trim() || null,
+      (form.forwardingNo ?? "").trim() || forwarding.forwardingAwb?.trim() || null,
+    delivery_awb: (form.deliveryNo ?? "").trim() || forwarding.deliveryAwb?.trim() || null,
     return_awb: null,
     delivery_service:
       forwarding.deliveryService?.code?.trim() ||
       forwarding.deliveryService?.name?.trim() ||
       null,
-    flight_no: form.flightNo.trim() || null,
+    flight_no: (form.flightNo ?? "").trim() || null,
     is_locked: form.lock,
     shipper: partyToJson(form.shipper),
     consignee: partyToJson(form.consignee),
@@ -311,7 +313,7 @@ export function uiFormToShipmentPayload(
     measurement_unit: l.measurementUnit?.trim() || "Centimeter",
   }));
 
-  const charges: ShipmentChargeInput[] = (form.chargeLines ?? []).map((l) => ({
+  const customerCharges: ShipmentChargeInput[] = (form.chargeLines ?? []).map((l) => ({
     side: "CUSTOMER" as const,
     description: l.description || "Charge",
     rate: l.rate || null,
@@ -326,6 +328,25 @@ export function uiFormToShipmentPayload(
     total: l.total || null,
     charges_type: l.chargesType?.toUpperCase() === "SYSTEM" ? "SYSTEM" : "MANUAL",
   }));
+
+  const vendorChargesRaw = (form.forwarding as { vendorChargeLines?: Array<Record<string, unknown>> } | undefined)?.vendorChargeLines ?? [];
+  const vendorCharges: ShipmentChargeInput[] = vendorChargesRaw.map((l) => ({
+    side: "VENDOR" as const,
+    description: String(l.description || "Vendor Charge"),
+    rate: l.amount != null ? String(l.amount) : null,
+    amount: l.amount != null ? String(l.amount) : null,
+    fuel_applies: String(l.fuelApply ?? "").toLowerCase() === "yes" || l.fuelApply === true,
+    fuel_amount: l.fuelAmt != null ? String(l.fuelAmt) : null,
+    tax_applies: String(l.taxApply ?? "").toLowerCase() === "yes" || l.taxApply === true,
+    tax_on_fuel: String(l.taxOnFuel ?? "").toLowerCase() === "yes" || l.taxOnFuel === true,
+    igst: l.igst != null ? String(l.igst) : null,
+    sgst: l.sgst != null ? String(l.sgst) : null,
+    cgst: l.cgst != null ? String(l.cgst) : null,
+    total: l.total != null ? String(l.total) : null,
+    charges_type: "MANUAL" as const,
+  }));
+
+  const charges = [...customerCharges, ...vendorCharges];
 
   return { fields, pieces, charges };
 }
@@ -425,6 +446,7 @@ export function dbShipmentToFormPatch(
     medicalCharges: row.medical_charges,
     customerChargesTotal: formatMoney2(row.customer_charges_total ?? 0),
     vendorChargesTotal: formatMoney2(row.vendor_charges_total ?? 0),
+    vendorTaxTotal: formatMoney2((row as unknown as { vendor_tax_total?: number }).vendor_tax_total ?? 0),
     paymentType: row.payment_type ?? "",
     content: row.content ?? "",
     instruction: row.instruction ?? "",
