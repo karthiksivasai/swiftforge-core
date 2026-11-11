@@ -80,7 +80,7 @@ async function pickUps(page: Page) {
   await field.getByRole("button", { name: "Search" }).click();
   const popup = page.getByRole("dialog").filter({ has: page.getByPlaceholder("Search by code or name…") });
   await popup.getByPlaceholder("Search by code or name…").fill("UPS");
-  const choice = popup.getByRole("button", { name: / UPS$/ });
+  const choice = popup.getByRole("button", { name: /^UPS / });
   await expect(choice).toBeVisible({ timeout: 15000 });
   const response = await lookup;
   if (response) expect(JSON.stringify(await response.json())).toContain("UPS");
@@ -212,8 +212,8 @@ test("rate import stores the customer, origin, and product on the price", async 
   await removeTestRateGrid();
   try {
     await page.goto("/utility/rate-zone-update/rate-import");
-    await pickLookup(page, "rate-import-customer", "ALIASSO", /ALIASSO$/);
-    await pickLookup(page, "rate-import-origin", "HYD", /HYD$/);
+    await pickLookup(page, "rate-import-customer", "ALIASSO", /^ALIASSO /);
+    await pickLookup(page, "rate-import-origin", "HYD", /^HYD /);
     await pickUps(page);
     await page.getByTestId("rate-import-spx").click();
     await page.getByRole("option", { name: "PACK", exact: true }).click();

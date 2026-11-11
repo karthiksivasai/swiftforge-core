@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const testDocPath = path.resolve(__dirname, '../docs/production-readiness-test.md');
+const testDocPath = path.resolve(__dirname, '../test-results/playwright-log.md');
 
 function getSupabaseAdmin() {
   const envPath = path.resolve(__dirname, '../.env');
@@ -29,6 +29,7 @@ function getSupabaseAdmin() {
 export const dbAdmin = getSupabaseAdmin();
 
 export function appendTestResult(markdown: string) {
+  fs.mkdirSync(path.dirname(testDocPath), { recursive: true });
   if (!fs.existsSync(testDocPath)) {
     fs.writeFileSync(
       testDocPath,
