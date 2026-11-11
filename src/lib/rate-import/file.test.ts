@@ -49,6 +49,7 @@ describe("zone rate sheet", () => {
         weight_from: 0,
         weight_to: 0.5,
         amount: 1441.16,
+        rate_type: "TOTAL",
       },
       {
         row_no: 4,
@@ -58,8 +59,27 @@ describe("zone rate sheet", () => {
         weight_from: 20,
         weight_to: 45,
         amount: 2500,
+        rate_type: "TOTAL",
       },
     ]);
+  });
+
+  it("reads PER_KG from a Rate Type column and leaves a sheet without that column as TOTAL", () => {
+    const parsed = parseZoneRateMatrix([
+      ["Service", "Weight", "Rate Type", "8"],
+      ["WORLDWIDE EXPRESS SAVER", "20-45", "PER_KG", 350],
+      ["WORLDWIDE EXPRESS SAVER", 0.5, "", 100],
+      ["WORLDWIDE EXPRESS SAVER", 1, "PER KG", 10],
+    ]);
+    expect(parsed.error).toBeNull();
+    expect(parsed.problems).toEqual([]);
+    expect(parsed.rows.map((row) => [row.weight_to, row.amount, row.rate_type])).toEqual([
+      [45, 350, "PER_KG"],
+      [0.5, 100, "TOTAL"],
+      [1, 10, "PER_KG"],
+    ]);
+    const heavy = parsed.rows.find((row) => row.weight_to === 45);
+    expect(heavy && 30 * heavy.amount).toBe(10500);
   });
 
   it("rejects a file that is not this grid", () => {

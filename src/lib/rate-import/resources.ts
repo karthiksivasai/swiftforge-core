@@ -8,6 +8,7 @@ export type ZoneRateScope = {
   productCodes?: string[];
   rateKind: "zone" | "country";
   roundOff: boolean;
+  priceSide: "SELL" | "COST";
 };
 
 export type ZoneRatePreviewRow = {
@@ -49,6 +50,7 @@ function payload(rows: ZoneRateCell[]) {
     weight_from: row.weight_from,
     weight_to: row.weight_to,
     amount: row.amount,
+    rate_type: row.rate_type,
   }));
 }
 
@@ -59,6 +61,7 @@ function scopeArgs(scope: ZoneRateScope) {
     p_product_codes: scope.productCodes?.length ? scope.productCodes : null,
     p_rate_kind: scope.rateKind,
     p_round_off: scope.roundOff,
+    p_price_side: scope.priceSide,
   };
 }
 

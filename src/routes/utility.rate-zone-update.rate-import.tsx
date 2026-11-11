@@ -61,10 +61,12 @@ async function downloadFormat(kind: "zone" | "country") {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(kind === "country" ? "Country Rate" : "Zone wise Rate");
   sheet.addRow([kind === "country" ? "Country Rate" : "Zone wise Rate"]);
-  sheet.addRow(kind === "country" ? ["Service", "Weight", "US", "AE"] : ["Service", "Weight", "1", "8"]);
-  sheet.addRow(["WORLDWIDE EXPRESS SAVER", 0.5, 900, 1441.16]);
-  sheet.addRow(["WORLDWIDE EXPRESS SAVER", 1, 1000, 1540.61]);
-  sheet.addRow(["WORLDWIDE EXPRESS SAVER", "20-45", 2500, 4000]);
+  sheet.addRow(kind === "country"
+    ? ["Service", "Weight", "Rate Type", "US", "AE"]
+    : ["Service", "Weight", "Rate Type", "1", "8"]);
+  sheet.addRow(["WORLDWIDE EXPRESS SAVER", 0.5, "TOTAL", 900, 1441.16]);
+  sheet.addRow(["WORLDWIDE EXPRESS SAVER", 1, "TOTAL", 1000, 1540.61]);
+  sheet.addRow(["WORLDWIDE EXPRESS SAVER", "20-45", "PER_KG", 350, 400]);
   sheet.getRow(2).font = { bold: true };
   const buffer = await workbook.xlsx.writeBuffer();
   const url = URL.createObjectURL(
@@ -111,6 +113,7 @@ function RateImportPage() {
   const [origin, setOrigin] = useState<LookupPairValue>(emptyPair);
   const [vendor, setVendor] = useState<LookupPairValue>(emptyPair);
   const [format, setFormat] = useState("");
+  const [priceSide, setPriceSide] = useState("Customer selling rate");
   const [doxProduct, setDoxProduct] = useState("");
   const [spxProduct, setSpxProduct] = useState("");
   const [fromDate, setFromDate] = useState(todayIso);
@@ -138,6 +141,7 @@ function RateImportPage() {
     productCodes: [doxProduct, spxProduct].map((value) => value.trim()).filter(Boolean),
     rateKind: format === "Zone Rate" ? "zone" : "country",
     roundOff: rateRoundOff,
+    priceSide: priceSide === "Vendor cost rate" ? "COST" : "SELL",
   });
   const confirmBlocked = !preview || preview.ok_count === 0 || (preview.failed_count > 0 && !skipFailed);
 
@@ -312,6 +316,14 @@ function RateImportPage() {
           {mode === "customer" ? (
             <SelectField label="Format" testId="rate-import-format" value={format} placeholder="Select Format" options={formatOptions} onChange={(next) => { setFormat(next); clearCheck(); }} />
           ) : null}
+          <SelectField
+            label="Rate source"
+            testId="rate-import-source"
+            value={priceSide}
+            placeholder="Customer selling rate"
+            options={["Customer selling rate", "Vendor cost rate"]}
+            onChange={(next) => { setPriceSide(next); clearCheck(); }}
+          />
           <SelectField label="DOX Product" testId="rate-import-dox" value={doxProduct} placeholder="Select DOX Product" options={doxProductOptions} onChange={(next) => { setDoxProduct(next); clearCheck(); }} />
           <SelectField label="SPX Product" testId="rate-import-spx" value={spxProduct} placeholder="Select SPX Product" options={spxProductOptions} onChange={(next) => { setSpxProduct(next); clearCheck(); }} />
           <FieldWrapper label="From Date">
@@ -340,7 +352,7 @@ function RateImportPage() {
         </div>
 
         <p className="mt-3 text-xs text-muted-foreground" data-testid="rate-import-assumptions">
-          Zone Rate reads zone columns. Country Rate reads country columns. Customer, origin, and the products you pick limit which bookings use the price. A blank product means every product. Rate Round Off rounds each price to the nearest rupee. A customer rate card still wins. Fuel and GST are still added. Booked AWBs stay as they are until you preview them on Rate Update.
+          Zone Rate reads zone columns. Country Rate reads country columns. Customer selling rate sets the customer freight. Vendor cost rate sets the vendor cost only and never the customer freight. A blank Rate Type means the cell is the freight total. PER_KG means freight is the charge weight times the cell. Customer, origin, and the products you pick limit which bookings use the price. A blank product means every product. Rate Round Off rounds each price to the nearest rupee. A customer rate card still wins for customer freight. Fuel and GST are still added. Booked AWBs stay as they are until you preview them on Rate Update.
         </p>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">

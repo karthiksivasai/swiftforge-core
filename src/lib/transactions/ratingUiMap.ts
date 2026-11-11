@@ -34,7 +34,31 @@ export type RatingSummary = {
   cgst: string;
   sgst: string;
   totalAmount: string;
+  rateSource?: string;
 };
+
+const CUSTOMER_FREIGHT_SOURCE: Record<string, string> = {
+  customer_rate_card: "customer rate card",
+  zone_grid_sell: "customer selling rate",
+  none: "none",
+};
+
+const VENDOR_COST_SOURCE: Record<string, string> = {
+  zone_grid_cost: "vendor cost rate",
+  vendor_tariff: "vendor tariff",
+  none: "none",
+};
+
+export function rateSourceText(raw: Record<string, unknown> | undefined): string {
+  const source = raw?.rate_source;
+  if (!source || typeof source !== "object") return "";
+  const row = source as { customer_freight?: unknown; vendor_cost?: unknown };
+  const customerKey = String(row.customer_freight ?? "none");
+  const vendorKey = String(row.vendor_cost ?? "none");
+  const customer = CUSTOMER_FREIGHT_SOURCE[customerKey] ?? customerKey;
+  const vendor = VENDOR_COST_SOURCE[vendorKey] ?? vendorKey;
+  return `Customer freight: ${customer}. Vendor cost: ${vendor}.`;
+}
 
 function money(n: number): string {
   return (Number.isFinite(n) ? n : 0).toFixed(2);
@@ -68,6 +92,7 @@ export function ratingToSummary(b: RatingBreakdown): RatingSummary {
     cgst: customerGst(b, "cgst"),
     sgst: customerGst(b, "sgst"),
     totalAmount: money(b.total),
+    rateSource: rateSourceText(b.raw),
   };
 }
 

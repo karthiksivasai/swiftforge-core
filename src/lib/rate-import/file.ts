@@ -1,5 +1,7 @@
 import * as XLSX from "xlsx";
 
+export type ZoneRateType = "TOTAL" | "PER_KG";
+
 export type ZoneRateCell = {
   row_no: number;
   service: string;
@@ -8,6 +10,7 @@ export type ZoneRateCell = {
   weight_from: number;
   weight_to: number;
   amount: number;
+  rate_type: ZoneRateType;
 };
 
 export type ZoneRateProblem = {
@@ -46,23 +49,33 @@ function asNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+type PriceCell = { amount: number; rowNo: number; rateType: ZoneRateType };
+
 type PointRow = {
   service: string;
   weight: number;
-  amounts: Map<string, { amount: number; rowNo: number }>;
+  amounts: Map<string, PriceCell>;
 };
 type RangeRow = {
   service: string;
   from: number;
   to: number;
   label: string;
-  amounts: Map<string, { amount: number; rowNo: number }>;
+  amounts: Map<string, PriceCell>;
 };
+
+function rateTypeOf(value: unknown): ZoneRateType | null {
+  const text = cellText(value).toUpperCase().replace(/[\s-]+/g, "_");
+  if (!text || text === "TOTAL" || text === "FLAT") return "TOTAL";
+  if (text === "PER_KG" || text === "PERKG") return "PER_KG";
+  return null;
+}
 
 /**
  * The courier sheet has a title on row 1 and Service / Weight on the next header row.
- * Each zone is a column. A cell is the freight for that weight and zone, not a per-kg rate.
- * A repeated 0.5–5 kg block is the same table started again: the later copy wins.
+ * Each zone is a column. Rate Type is optional and applies to that weight row.
+ * TOTAL (the default, including a sheet with no Rate Type column) means the cell is the freight.
+ * PER_KG means freight is the charge weight times the cell. A repeated weight block keeps the later copy.
  * A label such as 20-45 is the band above the previous point, so 20 kg keeps the 20 kg price.
  */
 export function parseZoneRateMatrix(matrix: unknown[][]): ZoneRateParse {
@@ -85,10 +98,16 @@ export function parseZoneRateMatrix(matrix: unknown[][]): ZoneRateParse {
   }
 
   const header = matrix[headerIndex] ?? [];
-  const zones: string[] = [];
+  let rateTypeCol = -1;
+  const zones: Array<{ code: string; index: number }> = [];
   for (let col = 2; col < header.length; col += 1) {
     const code = cellText(header[col]);
-    if (code) zones.push(code);
+    if (!code) continue;
+    if (code.toLowerCase() === "rate type") {
+      rateTypeCol = col;
+      continue;
+    }
+    zones.push({ code, index: col });
   }
   if (zones.length === 0) {
     return {
@@ -120,17 +139,31 @@ export function parseZoneRateMatrix(matrix: unknown[][]): ZoneRateParse {
       continue;
     }
 
-    const amounts = new Map<string, { amount: number; rowNo: number }>();
-    zones.forEach((zone, index) => {
-      const raw = row[index + 2];
-      if (cellText(raw) === "") return;
+    let rateType: ZoneRateType = "TOTAL";
+    if (rateTypeCol >= 0) {
+      const parsedType = rateTypeOf(row[rateTypeCol]);
+      if (parsedType == null) {
+        problems.push({
+          row_no: rowNo,
+          zone: "",
+          reason: `Rate type "${cellText(row[rateTypeCol])}" must be TOTAL or PER_KG`,
+        });
+        continue;
+      }
+      rateType = parsedType;
+    }
+
+    const amounts = new Map<string, PriceCell>();
+    for (const zone of zones) {
+      const raw = row[zone.index];
+      if (cellText(raw) === "") continue;
       const amount = asNumber(raw);
       if (amount == null || amount < 0) {
-        problems.push({ row_no: rowNo, zone, reason: "Amount is not a valid price" });
-        return;
+        problems.push({ row_no: rowNo, zone: zone.code, reason: "Amount is not a valid price" });
+        continue;
       }
-      amounts.set(zone, { amount: roundMoney(amount), rowNo });
-    });
+      amounts.set(zone.code, { amount: roundMoney(amount), rowNo, rateType });
+    }
 
     const serviceKey = service.toUpperCase();
     if (range) {
@@ -170,6 +203,7 @@ export function parseZoneRateMatrix(matrix: unknown[][]): ZoneRateParse {
           weight_from: previous,
           weight_to: weight,
           amount: price.amount,
+          rate_type: price.rateType,
         });
       }
       previous = weight;
@@ -186,6 +220,7 @@ export function parseZoneRateMatrix(matrix: unknown[][]): ZoneRateParse {
         weight_from: range.from,
         weight_to: range.to,
         amount: price.amount,
+        rate_type: price.rateType,
       });
     }
   }

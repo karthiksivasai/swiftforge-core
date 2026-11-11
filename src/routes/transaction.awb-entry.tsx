@@ -2377,6 +2377,7 @@ function AwbEntryPage() {
       cgst: cgst.toFixed(2),
       sgst: sgst.toFixed(2),
       totalAmount: total.toFixed(2),
+      rateSource: "",
     };
   }, [form.chargeLines, ratingSummary]);
 
@@ -6521,6 +6522,11 @@ function AwbEntryPage() {
                               </FieldWrapper>
                             ))}
                           </div>
+                          {chargeSummary.rateSource ? (
+                            <p data-testid="rating-rate-source" className="border-b px-3 py-2 text-xs text-muted-foreground">
+                              {chargeSummary.rateSource}
+                            </p>
+                          ) : null}
                           <div className="flex flex-wrap gap-2 border-b px-3 py-2.5">
                             <Button
                               type="button"
