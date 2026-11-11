@@ -45,8 +45,9 @@ describe("access rights list and search enforcement", () => {
   it("maps the previously unmapped menu forms onto catalog slugs", () => {
     expect(NAV_PERMISSION_BY_PATH["/master/operation/pin-code"]).toBe("mst.pincode-master");
     expect(NAV_PERMISSION_BY_PATH["/utility/integration-configuration"]).toBe("utl.integration-configuration");
-    expect(NAV_PERMISSION_BY_PATH["/utility/rate-zone-update/rate-update-jobs"]).toBe("utl.rate-update-jobs");
-    expect(NAV_PERMISSION_BY_PATH["/utility/rate-zone-update/zone-update-jobs"]).toBe("utl.zone-update-jobs");
+    expect(NAV_PERMISSION_BY_PATH["/utility/rate-zone-update/rate-update"]).toBe("utl.rate-update");
+    expect(NAV_PERMISSION_BY_PATH["/utility/rate-zone-update/rate-update-jobs"]).toBeUndefined();
+    expect(NAV_PERMISSION_BY_PATH["/utility/rate-zone-update/zone-update-jobs"]).toBeUndefined();
     expect(NAV_PERMISSION_BY_PATH["/documents/invoice-generation"]).toBe("doc.generate-invoice");
     expect(NAV_PERMISSION_BY_PATH["/documents/invoice-print"]).toBe("doc.print-invoice");
     expect(NAV_PERMISSION_BY_PATH["/documents/invoice-finalise"]).toBe("doc.invoice-finalise");

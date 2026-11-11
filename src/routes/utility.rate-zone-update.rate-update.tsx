@@ -1,12 +1,21 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Search } from "lucide-react";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { MasterLookupDialog } from "@/components/master-lookup-dialog";
+import { SearchableLookupPair, type LookupPairValue } from "@/components/masters/searchable-lookup-pair";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -16,35 +25,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FieldWrapper, MasterBreadcrumb } from "@/components/master-table-kit";
-import { MASTER_LOOKUPS, type LookupKey, type LookupOption } from "@/lib/master-lookups";
+import { MASTER_LOOKUPS } from "@/lib/master-lookups";
 import { toErrorMessage } from "@/lib/masters/screen";
-import {
-  createRateUpdateJob,
-  executeRateUpdateJob,
-  mapUiUpdateType,
-} from "@/lib/rate-update/resources";
-import type { RateUpdateFilters } from "@/lib/rate-update/types";
+import { applyRateUpdate, previewRateUpdate, type RateUpdatePreview } from "@/lib/rate-update/resources";
+import { rateUpdateScopeBlocked, skipReasonLabel } from "@/lib/rate-update/previewMath";
+import type { RateUpdateType } from "@/lib/rate-update/types";
 
-type LookupPair = { code: string; name: string };
-type LookupField = "serviceCenter" | "origin" | "customer" | "product" | "vendor" | "destination";
 type ContractMode = "all" | "zero-contract";
 
 type RateUpdateForm = {
   updateType: string;
   fromDate: string;
   toDate: string;
-  serviceCenter: LookupPair;
-  origin: LookupPair;
-  customer: LookupPair;
-  product: LookupPair;
-  vendor: LookupPair;
-  destination: LookupPair;
+  serviceCenter: LookupPairValue;
+  origin: LookupPairValue;
+  customer: LookupPairValue;
+  product: LookupPairValue;
+  vendor: LookupPairValue;
+  destination: LookupPairValue;
   paymentType: string;
   contractMode: ContractMode;
-  addToJobQueue: boolean;
+  confirmAll: boolean;
 };
 
-const emptyPair = (): LookupPair => ({ code: "", name: "" });
+const emptyPair = (): LookupPairValue => ({ code: "", name: "" });
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const emptyForm = (): RateUpdateForm => ({
@@ -59,72 +63,96 @@ const emptyForm = (): RateUpdateForm => ({
   destination: emptyPair(),
   paymentType: "",
   contractMode: "all",
-  addToJobQueue: false,
+  confirmAll: false,
 });
 
-const updateTypes = ["AWB Entry Rate", "Vendor Rate", "Tax & Fuel", "Vendor OBC Rate"];
-const paymentTypes = MASTER_LOOKUPS.paymentType.options.map((option) => option.name);
+const updateTypes = ["AWB Entry Rate", "Vendor Rate", "Tax & Fuel"] as const;
+const paymentOptions = MASTER_LOOKUPS.paymentType.options;
+
+const SCOPE_MESSAGE =
+  "Choose a customer, vendor, or destination, or tick I confirm all shipments in this date range";
+
+function uiUpdateType(label: string): RateUpdateType {
+  if (label === "Vendor Rate") return "VENDOR_RATE";
+  if (label === "Tax & Fuel") return "TAX_FUEL";
+  return "AWB_RATE";
+}
+
+function money(value: number): string {
+  return Number(value || 0).toFixed(2);
+}
 
 export const Route = createFileRoute("/utility/rate-zone-update/rate-update")({
   head: () => ({
     meta: [
       { title: "Rate Update — Utility — Courier ERP" },
-      { name: "description", content: "Update AWB, vendor, tax, fuel, and OBC rates." },
+      { name: "description", content: "Preview and confirm AWB, vendor, tax, and fuel rate updates." },
     ],
   }),
   component: RateUpdatePage,
 });
 
 function RateUpdatePage() {
-  const navigate = useNavigate();
   const [form, setForm] = useState<RateUpdateForm>(emptyForm);
-  const [lookupOpen, setLookupOpen] = useState<LookupKey | null>(null);
-  const [lookupField, setLookupField] = useState<LookupField | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<RateUpdatePreview | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [scopeError, setScopeError] = useState("");
 
   const patch = (updates: Partial<RateUpdateForm>) =>
     setForm((current) => ({ ...current, ...updates }));
 
-  const openLookup = (field: LookupField, lookup: LookupKey) => {
-    setLookupField(field);
-    setLookupOpen(lookup);
-  };
-
-  const handleLookupSelect = (_value: string, option: LookupOption) => {
-    if (!lookupField) return;
-    patch({ [lookupField]: { code: option.code, name: option.name } });
-    setLookupOpen(null);
-  };
-
-  const handleOk = async () => {
-    if (!form.updateType) return toast.error("Update Type is required");
-    if (!form.fromDate || !form.toDate) return toast.error("Date range is required");
-
-    const filters: RateUpdateFilters = {
+  const filters = () => {
+    const payment = paymentOptions.find((option) => option.name === form.paymentType);
+    return {
       from_date: form.fromDate,
       to_date: form.toDate,
+      customer_id: form.customer.id || null,
       customer_code: form.customer.code.trim() || null,
+      product_id: form.product.id || null,
       product_code: form.product.code.trim() || null,
+      destination_id: form.destination.id || null,
       destination_code: form.destination.code.trim() || null,
+      origin_id: form.origin.id || null,
+      origin_code: form.origin.code.trim() || null,
+      vendor_id: form.vendor.id || null,
+      vendor_code: form.vendor.code.trim() || null,
+      branch_id: form.serviceCenter.id || null,
       branch_code: form.serviceCenter.code.trim() || null,
+      payment_type: form.paymentType.trim() || null,
+      payment_code: payment?.code ?? null,
+      contract_mode: form.contractMode === "zero-contract" ? "zero" : "all",
+      confirm_all: form.confirmAll,
     };
+  };
+
+  const handlePreview = async () => {
+    if (!form.updateType) return toast.error("Update Type is required");
+    if (!form.fromDate || !form.toDate) return toast.error("Date range is required");
+    if (
+      rateUpdateScopeBlocked({
+        customer: form.customer.code || form.customer.name,
+        vendor: form.vendor.code || form.vendor.name,
+        destination: form.destination.code || form.destination.name,
+        confirmAll: form.confirmAll,
+      })
+    ) {
+      setScopeError(SCOPE_MESSAGE);
+      return toast.error(SCOPE_MESSAGE);
+    }
+    setScopeError("");
 
     setBusy(true);
+    setPreview(null);
     try {
-      const job = await createRateUpdateJob({
-        updateType: mapUiUpdateType(form.updateType),
-        filters,
+      const result = await previewRateUpdate({
+        updateType: uiUpdateType(form.updateType),
+        filters: filters(),
       });
-      if (form.addToJobQueue) {
-        toast.success("Rate update job queued");
-        void navigate({ to: "/utility/rate-zone-update/rate-update-jobs" });
-        return;
+      setPreview(result);
+      if (result.change_count === 0 && result.skip_count === 0) {
+        toast.message("No shipments in this range would change");
       }
-      const result = await executeRateUpdateJob(job.id);
-      toast.success(
-        `Updated ${result.updated_shipments}, skipped ${result.skipped_shipments}, failed ${result.failed_shipments}`,
-      );
-      void navigate({ to: "/utility/rate-zone-update/rate-update-jobs" });
     } catch (err) {
       toast.error(toErrorMessage(err));
     } finally {
@@ -132,22 +160,46 @@ function RateUpdatePage() {
     }
   };
 
+  const handleApply = async () => {
+    setConfirmOpen(false);
+    setBusy(true);
+    try {
+      const result = await applyRateUpdate({
+        updateType: uiUpdateType(form.updateType),
+        filters: filters(),
+      });
+      toast.success(
+        `Updated ${result.applied} AWBs. Skipped ${result.skipped}. Difference ${money(result.difference_total)}.`,
+      );
+      setPreview(null);
+    } catch (err) {
+      toast.error(toErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const vendorMode = form.updateType === "Vendor Rate";
+
   return (
     <div className="flex min-w-0 flex-col gap-4 p-4 md:p-6">
       <MasterBreadcrumb trail={["Utility", "Rate / Zone Update", "Rate Update"]} />
 
       <Card className="min-w-0 border p-4">
         <p className="mb-3 text-xs font-semibold text-blue-700">
-          Locked Invoices / AWB Entries does not change because the master records are changed. For
-          eg.(Rate master, Taxes ,Fuel & etc), Please unlock Invoices / AWB to make any changes.
+          Nothing is saved until you preview and then confirm. Locked, invoiced, and cancelled AWBs
+          are skipped. Booked AWBs keep their charges until you confirm.
         </p>
 
         <div className="grid gap-x-3 gap-y-2 lg:grid-cols-4">
           <SelectField
             label="Update Type"
             value={form.updateType}
-            options={updateTypes}
-            onChange={(updateType) => patch({ updateType })}
+            options={[...updateTypes]}
+            onChange={(updateType) => {
+              patch({ updateType });
+              setPreview(null);
+            }}
           />
           <FieldWrapper label="From Date" required>
             <Input
@@ -166,53 +218,57 @@ function RateUpdatePage() {
             />
           </FieldWrapper>
           <FieldWrapper label="Service Center">
-            <LookupPairInput
+            <SearchableLookupPair
+              lookup="serviceCentre"
+              liveLookup="service-center"
               value={form.serviceCenter}
               onChange={(serviceCenter) => patch({ serviceCenter })}
-              onLookupOpen={() => openLookup("serviceCenter", "serviceCentre")}
             />
           </FieldWrapper>
-
           <FieldWrapper label="Origin">
-            <LookupPairInput
+            <SearchableLookupPair
+              lookup="destination"
+              liveLookup="destination"
               value={form.origin}
               onChange={(origin) => patch({ origin })}
-              onLookupOpen={() => openLookup("origin", "serviceCentre")}
             />
           </FieldWrapper>
           <FieldWrapper label="Customer">
-            <LookupPairInput
+            <SearchableLookupPair
+              lookup="customer"
+              liveLookup="customer"
               value={form.customer}
               onChange={(customer) => patch({ customer })}
-              onLookupOpen={() => openLookup("customer", "customer")}
             />
           </FieldWrapper>
           <FieldWrapper label="Product">
-            <LookupPairInput
+            <SearchableLookupPair
+              lookup="product"
+              liveLookup="product"
               value={form.product}
               onChange={(product) => patch({ product })}
-              onLookupOpen={() => openLookup("product", "product")}
             />
           </FieldWrapper>
           <FieldWrapper label="Vendor">
-            <LookupPairInput
+            <SearchableLookupPair
+              lookup="vendor"
+              liveLookup="vendor"
               value={form.vendor}
               onChange={(vendor) => patch({ vendor })}
-              onLookupOpen={() => openLookup("vendor", "vendor")}
             />
           </FieldWrapper>
-
           <FieldWrapper label="Destination">
-            <LookupPairInput
+            <SearchableLookupPair
+              lookup="destination"
+              liveLookup="destination"
               value={form.destination}
               onChange={(destination) => patch({ destination })}
-              onLookupOpen={() => openLookup("destination", "destination")}
             />
           </FieldWrapper>
           <SelectField
             label="Payment Type"
             value={form.paymentType}
-            options={paymentTypes}
+            options={paymentOptions.map((option) => option.name)}
             placeholder="Select Payment Type"
             onChange={(paymentType) => patch({ paymentType })}
           />
@@ -231,33 +287,43 @@ function RateUpdatePage() {
             </ToggleButton>
           </div>
         </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          AWB Entry Rate rerates the customer freight, fuel, and tax, and may update the zone.
+          Vendor Rate changes only the vendor cost. Tax &amp; Fuel changes only fuel and tax.
+          Vendor OBC Rate was removed: there is no separate OBC price.
+          {vendorMode ? " For Vendor Rate, Total is the vendor cost." : ""}
+        </p>
+        <label className="mt-3 flex items-center gap-2 text-sm">
+          <Checkbox
+            data-testid="rate-update-confirm-all"
+            checked={form.confirmAll}
+            onCheckedChange={(value) => patch({ confirmAll: value === true })}
+          />
+          I confirm all shipments in this date range
+        </label>
+        {scopeError ? (
+          <p className="mt-2 text-sm text-red-600" data-testid="rate-update-scope-error">
+            {scopeError}
+          </p>
+        ) : null}
       </Card>
 
       <div className="flex flex-wrap items-center justify-between gap-3 px-2">
         <p className="text-base font-semibold text-red-500">Note : Data Update Limit - 92 Days</p>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Link
-            to="/utility/rate-zone-update/rate-update-jobs"
-            className="text-sm font-semibold text-blue-700 underline"
-          >
-            Click Here Open Job Queue
-          </Link>
-          <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-xs text-muted-foreground">
-            <Checkbox
-              checked={form.addToJobQueue}
-              onCheckedChange={(value) => patch({ addToJobQueue: Boolean(value) })}
-            />
-            Add to Job Queue
-          </label>
           <Button
+            data-testid="rate-update-ok"
             disabled={busy}
-            onClick={() => void handleOk()}
+            onClick={() => void handlePreview()}
             className="h-9 rounded-full bg-green-500 px-8 text-white hover:bg-green-600"
           >
             Ok
           </Button>
           <Button
-            onClick={() => setForm(emptyForm())}
+            onClick={() => {
+              setForm(emptyForm());
+              setPreview(null);
+            }}
             className="h-9 rounded-full bg-red-500 px-8 text-white hover:bg-red-600"
           >
             Reset
@@ -265,48 +331,106 @@ function RateUpdatePage() {
         </div>
       </div>
 
-      <MasterLookupDialog
-        open={lookupOpen !== null}
-        lookup={lookupOpen ?? "customer"}
-        onOpenChange={(open) => {
-          if (!open) setLookupOpen(null);
-        }}
-        onSelect={handleLookupSelect}
-      />
-    </div>
-  );
-}
+      {preview ? (
+        <Card className="min-w-0 border p-4" data-testid="rate-update-preview">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm">
+              {preview.change_count} would change. {preview.skip_count} skipped.{" "}
+              {preview.unchanged_count} already match and are not listed.
+              {preview.omitted_count > 0
+                ? ` ${preview.omitted_count} more not included.`
+                : ""}
+            </p>
+            <Button
+              data-testid="rate-update-confirm"
+              disabled={busy || preview.change_count === 0}
+              onClick={() => setConfirmOpen(true)}
+              className="h-9 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+            >
+              Confirm &amp; Apply
+            </Button>
+          </div>
+          <div className="max-h-[28rem] overflow-auto">
+            <table className="w-full min-w-[960px] border-collapse text-xs">
+              <thead className="sticky top-0 bg-background">
+                <tr className="border-b text-left">
+                  <th className="px-2 py-1">AWB</th>
+                  <th className="px-2 py-1">Customer</th>
+                  <th className="px-2 py-1">Zone</th>
+                  <th className="px-2 py-1">Old freight</th>
+                  <th className="px-2 py-1">New freight</th>
+                  <th className="px-2 py-1">Old fuel</th>
+                  <th className="px-2 py-1">New fuel</th>
+                  <th className="px-2 py-1">Old tax</th>
+                  <th className="px-2 py-1">New tax</th>
+                  <th className="px-2 py-1">Old total</th>
+                  <th className="px-2 py-1">New total</th>
+                  <th className="px-2 py-1">Difference</th>
+                  <th className="px-2 py-1">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.rows.map((row) => (
+                  <tr key={row.shipment_id || row.awb_no} className="border-b">
+                    <td className="px-2 py-1">{row.awb_no}</td>
+                    <td className="px-2 py-1">
+                      {row.customer_code ? `${row.customer_code} ` : ""}
+                      {row.customer_name ?? ""}
+                    </td>
+                    <td className="px-2 py-1">
+                      {row.old_zone ?? "—"} → {row.new_zone ?? "—"}
+                    </td>
+                    <td className="px-2 py-1">{money(row.old_freight)}</td>
+                    <td className="px-2 py-1">{money(row.new_freight)}</td>
+                    <td className="px-2 py-1">{money(row.old_fuel)}</td>
+                    <td className="px-2 py-1">{money(row.new_fuel)}</td>
+                    <td className="px-2 py-1">{money(row.old_tax)}</td>
+                    <td className="px-2 py-1">{money(row.new_tax)}</td>
+                    <td className="px-2 py-1">{money(row.old_total)}</td>
+                    <td className="px-2 py-1">{money(row.new_total)}</td>
+                    <td className="px-2 py-1" data-testid="rate-update-diff">
+                      {money(row.difference)}
+                    </td>
+                    <td className="px-2 py-1">
+                      {row.skip_reason ? skipReasonLabel(row.skip_reason) : "Will change"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="font-semibold">
+                  <td className="px-2 py-2" colSpan={11}>
+                    Grand total difference
+                  </td>
+                  <td className="px-2 py-2" data-testid="rate-update-grand">
+                    {money(preview.difference_total)}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </Card>
+      ) : null}
 
-function LookupPairInput({
-  value,
-  onChange,
-  onLookupOpen,
-}: {
-  value: LookupPair;
-  onChange: (value: LookupPair) => void;
-  onLookupOpen: () => void;
-}) {
-  return (
-    <div className="flex gap-1">
-      <Input
-        value={value.name}
-        onChange={(event) => onChange({ ...value, name: event.target.value })}
-        className="min-w-0 flex-1"
-      />
-      <Input
-        value={value.code}
-        onChange={(event) => onChange({ ...value, code: event.target.value })}
-        className="w-20"
-      />
-      <Button
-        size="icon"
-        variant="outline"
-        className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-        onClick={onLookupOpen}
-        aria-label="Search"
-      >
-        <Search className="h-4 w-4" />
-      </Button>
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apply this rate update?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will change {preview?.change_count ?? 0} AWBs. The total difference is{" "}
+              {money(preview?.difference_total ?? 0)}. Locked, invoiced, and cancelled AWBs are not
+              changed. This writes the new amounts.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction data-testid="rate-update-apply" onClick={() => void handleApply()}>
+              Confirm &amp; Apply
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -326,7 +450,7 @@ function SelectField({
 }) {
   return (
     <FieldWrapper label={label}>
-      <Select value={value} onValueChange={onChange}>
+      <Select value={value || undefined} onValueChange={onChange}>
         <SelectTrigger className="h-9">
           <SelectValue placeholder={placeholder ?? label} />
         </SelectTrigger>

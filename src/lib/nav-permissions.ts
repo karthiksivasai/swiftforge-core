@@ -96,9 +96,10 @@ export const NAV_PERMISSION_BY_PATH: Record<string, string | readonly string[]> 
   "/utility/rate-zone-update/rate-update": "utl.rate-update",
   "/utility/rate-zone-update/zone-update": "utl.zone-update",
   "/utility/rate-zone-update/rate-import": "utl.rate-import",
-  "/utility/rate-zone-update/rate-update-jobs": "utl.rate-update-jobs",
-  "/utility/rate-zone-update/zone-update-jobs": "utl.zone-update-jobs",
 };
+
+/** Screens that need Modify to open, not only List or Search. */
+const OPEN_REQUIRES_MODIFY = new Set(["/utility/rate-zone-update/rate-update"]);
 
 type Can = (slug: string, action: PermissionAction) => boolean;
 
@@ -118,6 +119,9 @@ function slugsFor(pathname: string): string[] | null {
 /** True when this path is a screen the signed-in group may open. */
 export function canOpenPath(pathname: string, hasPermission: Can, isAdmin: boolean): boolean {
   const slugs = slugsFor(pathname);
+  if (slugs && OPEN_REQUIRES_MODIFY.has(pathname)) {
+    return slugs.some((slug) => hasPermission(slug, "modify")) || isAdmin;
+  }
   if (slugs) return slugs.some((slug) => hasPermission(slug, "list") || hasPermission(slug, "search"));
   const appScreen =
     pathname === "/dashboard" ||

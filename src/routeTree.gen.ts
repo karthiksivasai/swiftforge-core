@@ -114,9 +114,7 @@ import { Route as UtilityExcelImportForwardingMergingRouteImport } from './route
 import { Route as UtilityExcelImportPodMergingRouteImport } from './routes/utility.excel-import.pod-merging'
 import { Route as UtilityRateZoneUpdateRateImportRouteImport } from './routes/utility.rate-zone-update.rate-import'
 import { Route as UtilityRateZoneUpdateRateUpdateRouteImport } from './routes/utility.rate-zone-update.rate-update'
-import { Route as UtilityRateZoneUpdateRateUpdateJobsRouteImport } from './routes/utility.rate-zone-update.rate-update-jobs'
 import { Route as UtilityRateZoneUpdateZoneUpdateRouteImport } from './routes/utility.rate-zone-update.zone-update'
-import { Route as UtilityRateZoneUpdateZoneUpdateJobsRouteImport } from './routes/utility.rate-zone-update.zone-update-jobs'
 import { Route as UtilityTaxChargesSetupFuelSetupRouteImport } from './routes/utility.tax-charges-setup.fuel-setup'
 import { Route as UtilityTaxChargesSetupSetupRouteImport } from './routes/utility.tax-charges-setup.setup'
 import { Route as UtilityTaxChargesSetupTaxSetupRouteImport } from './routes/utility.tax-charges-setup.tax-setup'
@@ -690,22 +688,10 @@ const UtilityRateZoneUpdateRateUpdateRoute =
     path: '/utility/rate-zone-update/rate-update',
     getParentRoute: () => rootRouteImport,
   } as any)
-const UtilityRateZoneUpdateRateUpdateJobsRoute =
-  UtilityRateZoneUpdateRateUpdateJobsRouteImport.update({
-    id: '/utility/rate-zone-update/rate-update-jobs',
-    path: '/utility/rate-zone-update/rate-update-jobs',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const UtilityRateZoneUpdateZoneUpdateRoute =
   UtilityRateZoneUpdateZoneUpdateRouteImport.update({
     id: '/utility/rate-zone-update/zone-update',
     path: '/utility/rate-zone-update/zone-update',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const UtilityRateZoneUpdateZoneUpdateJobsRoute =
-  UtilityRateZoneUpdateZoneUpdateJobsRouteImport.update({
-    id: '/utility/rate-zone-update/zone-update-jobs',
-    path: '/utility/rate-zone-update/zone-update-jobs',
     getParentRoute: () => rootRouteImport,
   } as any)
 const UtilityTaxChargesSetupFuelSetupRoute =
@@ -860,9 +846,7 @@ export interface FileRoutesByFullPath {
   '/utility/excel-import/pod-merging': typeof UtilityExcelImportPodMergingRoute
   '/utility/rate-zone-update/rate-import': typeof UtilityRateZoneUpdateRateImportRoute
   '/utility/rate-zone-update/rate-update': typeof UtilityRateZoneUpdateRateUpdateRoute
-  '/utility/rate-zone-update/rate-update-jobs': typeof UtilityRateZoneUpdateRateUpdateJobsRoute
   '/utility/rate-zone-update/zone-update': typeof UtilityRateZoneUpdateZoneUpdateRoute
-  '/utility/rate-zone-update/zone-update-jobs': typeof UtilityRateZoneUpdateZoneUpdateJobsRoute
   '/utility/tax-charges-setup/fuel-setup': typeof UtilityTaxChargesSetupFuelSetupRoute
   '/utility/tax-charges-setup/setup': typeof UtilityTaxChargesSetupSetupRoute
   '/utility/tax-charges-setup/tax-setup': typeof UtilityTaxChargesSetupTaxSetupRoute
@@ -978,9 +962,7 @@ export interface FileRoutesByTo {
   '/utility/excel-import/pod-merging': typeof UtilityExcelImportPodMergingRoute
   '/utility/rate-zone-update/rate-import': typeof UtilityRateZoneUpdateRateImportRoute
   '/utility/rate-zone-update/rate-update': typeof UtilityRateZoneUpdateRateUpdateRoute
-  '/utility/rate-zone-update/rate-update-jobs': typeof UtilityRateZoneUpdateRateUpdateJobsRoute
   '/utility/rate-zone-update/zone-update': typeof UtilityRateZoneUpdateZoneUpdateRoute
-  '/utility/rate-zone-update/zone-update-jobs': typeof UtilityRateZoneUpdateZoneUpdateJobsRoute
   '/utility/tax-charges-setup/fuel-setup': typeof UtilityTaxChargesSetupFuelSetupRoute
   '/utility/tax-charges-setup/setup': typeof UtilityTaxChargesSetupSetupRoute
   '/utility/tax-charges-setup/tax-setup': typeof UtilityTaxChargesSetupTaxSetupRoute
@@ -1097,9 +1079,7 @@ export interface FileRoutesById {
   '/utility/excel-import/pod-merging': typeof UtilityExcelImportPodMergingRoute
   '/utility/rate-zone-update/rate-import': typeof UtilityRateZoneUpdateRateImportRoute
   '/utility/rate-zone-update/rate-update': typeof UtilityRateZoneUpdateRateUpdateRoute
-  '/utility/rate-zone-update/rate-update-jobs': typeof UtilityRateZoneUpdateRateUpdateJobsRoute
   '/utility/rate-zone-update/zone-update': typeof UtilityRateZoneUpdateZoneUpdateRoute
-  '/utility/rate-zone-update/zone-update-jobs': typeof UtilityRateZoneUpdateZoneUpdateJobsRoute
   '/utility/tax-charges-setup/fuel-setup': typeof UtilityTaxChargesSetupFuelSetupRoute
   '/utility/tax-charges-setup/setup': typeof UtilityTaxChargesSetupSetupRoute
   '/utility/tax-charges-setup/tax-setup': typeof UtilityTaxChargesSetupTaxSetupRoute
@@ -1217,9 +1197,7 @@ export interface FileRouteTypes {
     | '/utility/excel-import/pod-merging'
     | '/utility/rate-zone-update/rate-import'
     | '/utility/rate-zone-update/rate-update'
-    | '/utility/rate-zone-update/rate-update-jobs'
     | '/utility/rate-zone-update/zone-update'
-    | '/utility/rate-zone-update/zone-update-jobs'
     | '/utility/tax-charges-setup/fuel-setup'
     | '/utility/tax-charges-setup/setup'
     | '/utility/tax-charges-setup/tax-setup'
@@ -1335,9 +1313,7 @@ export interface FileRouteTypes {
     | '/utility/excel-import/pod-merging'
     | '/utility/rate-zone-update/rate-import'
     | '/utility/rate-zone-update/rate-update'
-    | '/utility/rate-zone-update/rate-update-jobs'
     | '/utility/rate-zone-update/zone-update'
-    | '/utility/rate-zone-update/zone-update-jobs'
     | '/utility/tax-charges-setup/fuel-setup'
     | '/utility/tax-charges-setup/setup'
     | '/utility/tax-charges-setup/tax-setup'
@@ -1453,9 +1429,7 @@ export interface FileRouteTypes {
     | '/utility/excel-import/pod-merging'
     | '/utility/rate-zone-update/rate-import'
     | '/utility/rate-zone-update/rate-update'
-    | '/utility/rate-zone-update/rate-update-jobs'
     | '/utility/rate-zone-update/zone-update'
-    | '/utility/rate-zone-update/zone-update-jobs'
     | '/utility/tax-charges-setup/fuel-setup'
     | '/utility/tax-charges-setup/setup'
     | '/utility/tax-charges-setup/tax-setup'
@@ -1572,9 +1546,7 @@ export interface RootRouteChildren {
   UtilityExcelImportPodMergingRoute: typeof UtilityExcelImportPodMergingRoute
   UtilityRateZoneUpdateRateImportRoute: typeof UtilityRateZoneUpdateRateImportRoute
   UtilityRateZoneUpdateRateUpdateRoute: typeof UtilityRateZoneUpdateRateUpdateRoute
-  UtilityRateZoneUpdateRateUpdateJobsRoute: typeof UtilityRateZoneUpdateRateUpdateJobsRoute
   UtilityRateZoneUpdateZoneUpdateRoute: typeof UtilityRateZoneUpdateZoneUpdateRoute
-  UtilityRateZoneUpdateZoneUpdateJobsRoute: typeof UtilityRateZoneUpdateZoneUpdateJobsRoute
   UtilityTaxChargesSetupFuelSetupRoute: typeof UtilityTaxChargesSetupFuelSetupRoute
   UtilityTaxChargesSetupSetupRoute: typeof UtilityTaxChargesSetupSetupRoute
   UtilityTaxChargesSetupTaxSetupRoute: typeof UtilityTaxChargesSetupTaxSetupRoute
@@ -2323,25 +2295,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UtilityRateZoneUpdateRateUpdateRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/utility/rate-zone-update/rate-update-jobs': {
-      id: '/utility/rate-zone-update/rate-update-jobs'
-      path: '/utility/rate-zone-update/rate-update-jobs'
-      fullPath: '/utility/rate-zone-update/rate-update-jobs'
-      preLoaderRoute: typeof UtilityRateZoneUpdateRateUpdateJobsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/utility/rate-zone-update/zone-update': {
       id: '/utility/rate-zone-update/zone-update'
       path: '/utility/rate-zone-update/zone-update'
       fullPath: '/utility/rate-zone-update/zone-update'
       preLoaderRoute: typeof UtilityRateZoneUpdateZoneUpdateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/utility/rate-zone-update/zone-update-jobs': {
-      id: '/utility/rate-zone-update/zone-update-jobs'
-      path: '/utility/rate-zone-update/zone-update-jobs'
-      fullPath: '/utility/rate-zone-update/zone-update-jobs'
-      preLoaderRoute: typeof UtilityRateZoneUpdateZoneUpdateJobsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/utility/tax-charges-setup/fuel-setup': {
@@ -2515,11 +2473,7 @@ const rootRouteChildren: RootRouteChildren = {
   UtilityExcelImportPodMergingRoute: UtilityExcelImportPodMergingRoute,
   UtilityRateZoneUpdateRateImportRoute: UtilityRateZoneUpdateRateImportRoute,
   UtilityRateZoneUpdateRateUpdateRoute: UtilityRateZoneUpdateRateUpdateRoute,
-  UtilityRateZoneUpdateRateUpdateJobsRoute:
-    UtilityRateZoneUpdateRateUpdateJobsRoute,
   UtilityRateZoneUpdateZoneUpdateRoute: UtilityRateZoneUpdateZoneUpdateRoute,
-  UtilityRateZoneUpdateZoneUpdateJobsRoute:
-    UtilityRateZoneUpdateZoneUpdateJobsRoute,
   UtilityTaxChargesSetupFuelSetupRoute: UtilityTaxChargesSetupFuelSetupRoute,
   UtilityTaxChargesSetupSetupRoute: UtilityTaxChargesSetupSetupRoute,
   UtilityTaxChargesSetupTaxSetupRoute: UtilityTaxChargesSetupTaxSetupRoute,

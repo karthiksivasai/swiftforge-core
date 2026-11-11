@@ -32,7 +32,6 @@ type RateImportForm = {
   fromDate: string;
   rateRoundOff: boolean;
   fileName: string;
-  addRateUpdateJob: boolean;
 };
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
@@ -48,7 +47,6 @@ const emptyForm = (): RateImportForm => ({
   fromDate: todayIso(),
   rateRoundOff: false,
   fileName: "",
-  addRateUpdateJob: false,
 });
 
 const formatOptions = ["Zone Rate", "Country Rate", "Country Rate New", "Country Rate New1", "Country Rate New2"];
@@ -95,7 +93,7 @@ function RateImportPage() {
     if (!form.origin.name.trim()) return toast.error("Origin is required");
     if (!form.format) return toast.error("Format is required");
     if (!form.fileName) return toast.error("Please select upload file");
-    toast.success(form.addRateUpdateJob ? "Rate import saved and rate update queued" : "Rate import saved");
+    toast.success("Rate import saved");
   };
 
   const reset = () => {
@@ -170,13 +168,6 @@ function RateImportPage() {
       </Card>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <button type="button" onClick={() => toast.info("Job queue opened")} className="mr-2 text-sm font-semibold text-blue-700 underline">
-          Click Here Open Job Queue
-        </button>
-        <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-xs text-muted-foreground">
-          <Checkbox checked={form.addRateUpdateJob} onCheckedChange={(value) => patch({ addRateUpdateJob: Boolean(value) })} />
-          Add Rate Update in Job Queue after Rate Import
-        </label>
         <Button onClick={handleSave} className="h-9 rounded-full bg-green-500 px-8 text-white hover:bg-green-600">
           Save
         </Button>

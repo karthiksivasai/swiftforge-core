@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { Download, Plus, Search } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { MasterLookupDialog } from "@/components/master-lookup-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,9 +17,6 @@ import {
 } from "@/components/ui/select";
 import { FieldWrapper, MasterBreadcrumb } from "@/components/master-table-kit";
 import type { LookupKey, LookupOption } from "@/lib/master-lookups";
-import { toErrorMessage } from "@/lib/masters/screen";
-import { createZoneUpdateJob, executeZoneUpdateJob } from "@/lib/zone-update/resources";
-import type { ZoneUpdateFilters } from "@/lib/zone-update/types";
 
 type LookupPair = { code: string; name: string };
 type LookupField =
@@ -33,7 +29,7 @@ type LookupField =
   | "customer"
   | "service"
   | "branch";
-type ZoneMode = "export" | "import" | "update";
+type ZoneMode = "export" | "import";
 
 type ExportForm = {
   exportType: string;
@@ -63,18 +59,6 @@ type ZoneUpdateForm = {
   country: LookupPair;
   destination: LookupPair;
   zone: LookupPair;
-};
-
-type ShipmentZoneForm = {
-  fromDate: string;
-  toDate: string;
-  branch: LookupPair;
-  customer: LookupPair;
-  product: LookupPair;
-  destination: LookupPair;
-  zone: LookupPair;
-  rerateAfterUpdate: boolean;
-  addToJobQueue: boolean;
 };
 
 const emptyPair = (): LookupPair => ({ code: "", name: "" });
@@ -110,40 +94,25 @@ const emptyZoneUpdateForm = (): ZoneUpdateForm => ({
   zone: emptyPair(),
 });
 
-const emptyShipmentZoneForm = (): ShipmentZoneForm => ({
-  fromDate: todayIso(),
-  toDate: todayIso(),
-  branch: emptyPair(),
-  customer: emptyPair(),
-  product: emptyPair(),
-  destination: emptyPair(),
-  zone: emptyPair(),
-  rerateAfterUpdate: false,
-  addToJobQueue: false,
-});
-
 export const Route = createFileRoute("/utility/rate-zone-update/zone-update")({
   head: () => ({
     meta: [
       { title: "Zone Update — Utility — Courier ERP" },
-      { name: "description", content: "Export, import, and update shipment zones." },
+      { name: "description", content: "Export and import zone mappings. Booked AWBs are not changed." },
     ],
   }),
   component: ZoneUpdatePage,
 });
 
 function ZoneUpdatePage() {
-  const navigate = useNavigate();
-  const [mode, setMode] = useState<ZoneMode>("update");
+  const [mode, setMode] = useState<ZoneMode>("export");
   const [exportForm, setExportForm] = useState<ExportForm>(emptyExportForm);
   const [importForm, setImportForm] = useState<ImportForm>(emptyImportForm);
-  const [shipmentForm, setShipmentForm] = useState<ShipmentZoneForm>(emptyShipmentZoneForm);
   const [addOpen, setAddOpen] = useState(false);
   const [zoneForm, setZoneForm] = useState<ZoneUpdateForm>(emptyZoneUpdateForm);
   const [lookupOpen, setLookupOpen] = useState<LookupKey | null>(null);
   const [lookupField, setLookupField] = useState<LookupField | null>(null);
-  const [lookupTarget, setLookupTarget] = useState<"export" | "add" | "update">("update");
-  const [busy, setBusy] = useState(false);
+  const [lookupTarget, setLookupTarget] = useState<"export" | "add">("export");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const patchExport = (updates: Partial<ExportForm>) =>
@@ -152,11 +121,9 @@ function ZoneUpdatePage() {
     setImportForm((current) => ({ ...current, ...updates }));
   const patchZone = (updates: Partial<ZoneUpdateForm>) =>
     setZoneForm((current) => ({ ...current, ...updates }));
-  const patchShipment = (updates: Partial<ShipmentZoneForm>) =>
-    setShipmentForm((current) => ({ ...current, ...updates }));
 
   const openLookup = (
-    target: "export" | "add" | "update",
+    target: "export" | "add",
     field: LookupField,
     lookup: LookupKey,
   ) => {
@@ -169,8 +136,7 @@ function ZoneUpdatePage() {
     if (!lookupField) return;
     const pair = { code: option.code, name: option.name };
     if (lookupTarget === "export") patchExport({ [lookupField]: pair });
-    else if (lookupTarget === "add") patchZone({ [lookupField]: pair });
-    else patchShipment({ [lookupField]: pair });
+    else patchZone({ [lookupField]: pair });
     setLookupOpen(null);
   };
 
@@ -181,44 +147,6 @@ function ZoneUpdatePage() {
   const resetImport = () => {
     setImportForm(emptyImportForm());
     if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleShipmentOk = async () => {
-    if (!shipmentForm.fromDate || !shipmentForm.toDate) {
-      return toast.error("Date range is required");
-    }
-
-    const filters: ZoneUpdateFilters = {
-      from_date: shipmentForm.fromDate,
-      to_date: shipmentForm.toDate,
-      customer_code: shipmentForm.customer.code.trim() || null,
-      product_code: shipmentForm.product.code.trim() || null,
-      destination_code: shipmentForm.destination.code.trim() || null,
-      branch_code: shipmentForm.branch.code.trim() || null,
-      zone_code: shipmentForm.zone.code.trim() || null,
-    };
-
-    setBusy(true);
-    try {
-      const job = await createZoneUpdateJob({
-        filters,
-        rerateAfterUpdate: shipmentForm.rerateAfterUpdate,
-      });
-      if (shipmentForm.addToJobQueue) {
-        toast.success("Zone update job queued");
-        void navigate({ to: "/utility/rate-zone-update/zone-update-jobs" });
-        return;
-      }
-      const result = await executeZoneUpdateJob(job.id);
-      toast.success(
-        `Updated ${result.updated_shipments}, skipped ${result.skipped_shipments}, failed ${result.failed_shipments}`,
-      );
-      void navigate({ to: "/utility/rate-zone-update/zone-update-jobs" });
-    } catch (err) {
-      toast.error(toErrorMessage(err));
-    } finally {
-      setBusy(false);
-    }
   };
 
   return (
@@ -239,9 +167,6 @@ function ZoneUpdatePage() {
 
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <TabButton active={mode === "update"} onClick={() => setMode("update")}>
-              Update Shipments
-            </TabButton>
             <TabButton active={mode === "export"} onClick={() => setMode("export")}>
               Export
             </TabButton>
@@ -267,21 +192,13 @@ function ZoneUpdatePage() {
             patch={patchExport}
             onLookupOpen={(field, lookup) => openLookup("export", field, lookup)}
           />
-        ) : mode === "import" ? (
+        ) : (
           <ImportPanel
             form={importForm}
             patch={patchImport}
             fileInputRef={fileInputRef}
             onFile={handleFile}
             onReset={resetImport}
-          />
-        ) : (
-          <ShipmentUpdatePanel
-            form={shipmentForm}
-            patch={patchShipment}
-            busy={busy}
-            onOk={() => void handleShipmentOk()}
-            onLookupOpen={(field, lookup) => openLookup("update", field, lookup)}
           />
         )}
       </Card>
@@ -303,120 +220,6 @@ function ZoneUpdatePage() {
         onSelect={handleLookupSelect}
       />
     </div>
-  );
-}
-
-function ShipmentUpdatePanel({
-  form,
-  patch,
-  busy,
-  onOk,
-  onLookupOpen,
-}: {
-  form: ShipmentZoneForm;
-  patch: (updates: Partial<ShipmentZoneForm>) => void;
-  busy: boolean;
-  onOk: () => void;
-  onLookupOpen: (field: LookupField, lookup: LookupKey) => void;
-}) {
-  return (
-    <>
-      <p className="mb-3 text-xs text-muted-foreground">
-        Resolves each shipment zone via existing zone mappings. Locked / invoiced / cancelled AWBs
-        and unchanged zones are skipped.
-      </p>
-      <div className="grid gap-x-3 gap-y-2 lg:grid-cols-4">
-        <FieldWrapper label="From Date" required>
-          <Input
-            type="date"
-            value={form.fromDate}
-            onChange={(event) => patch({ fromDate: event.target.value })}
-            className="h-9"
-          />
-        </FieldWrapper>
-        <FieldWrapper label="To Date" required>
-          <Input
-            type="date"
-            value={form.toDate}
-            onChange={(event) => patch({ toDate: event.target.value })}
-            className="h-9"
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Branch">
-          <LookupPairInput
-            value={form.branch}
-            onChange={(branch) => patch({ branch })}
-            onLookupOpen={() => onLookupOpen("branch", "serviceCentre")}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Customer">
-          <LookupPairInput
-            value={form.customer}
-            onChange={(customer) => patch({ customer })}
-            onLookupOpen={() => onLookupOpen("customer", "customer")}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Product">
-          <LookupPairInput
-            value={form.product}
-            onChange={(product) => patch({ product })}
-            onLookupOpen={() => onLookupOpen("product", "product")}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Destination">
-          <LookupPairInput
-            value={form.destination}
-            onChange={(destination) => patch({ destination })}
-            onLookupOpen={() => onLookupOpen("destination", "destination")}
-          />
-        </FieldWrapper>
-        <FieldWrapper label="Current Zone">
-          <LookupPairInput
-            value={form.zone}
-            onChange={(zone) => patch({ zone })}
-            onLookupOpen={() => onLookupOpen("zone", "zone")}
-          />
-        </FieldWrapper>
-      </div>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-red-500">Note : Data Update Limit - 92 Days</p>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Link
-            to="/utility/rate-zone-update/zone-update-jobs"
-            className="text-sm font-semibold text-blue-700 underline"
-          >
-            Click Here Open Job Queue
-          </Link>
-          <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-xs text-muted-foreground">
-            <Checkbox
-              checked={form.rerateAfterUpdate}
-              onCheckedChange={(value) => patch({ rerateAfterUpdate: Boolean(value) })}
-            />
-            Recalculate Rating After Zone Update
-          </label>
-          <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-xs text-muted-foreground">
-            <Checkbox
-              checked={form.addToJobQueue}
-              onCheckedChange={(value) => patch({ addToJobQueue: Boolean(value) })}
-            />
-            Add to Job Queue
-          </label>
-          <Button
-            disabled={busy}
-            onClick={onOk}
-            className="h-9 rounded-full bg-green-500 px-8 text-white hover:bg-green-600"
-          >
-            Ok
-          </Button>
-          <Button
-            onClick={() => patch(emptyShipmentZoneForm())}
-            className="h-9 rounded-full bg-red-500 px-8 text-white hover:bg-red-600"
-          >
-            Reset
-          </Button>
-        </div>
-      </div>
-    </>
   );
 }
 

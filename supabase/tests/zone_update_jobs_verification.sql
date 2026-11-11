@@ -199,18 +199,17 @@ begin
   end if;
   v_id := (v_job->>'id')::uuid;
 
-  v_exec := public.execute_zone_update_job(v_id);
-  if v_exec->>'status' <> 'COMPLETED' then raise exception 'FAIL [exec] %', v_exec; end if;
-  if (v_exec->>'updated_shipments')::int < 1 then raise exception 'FAIL [updated]'; end if;
-  -- locked + invoiced + cancelled + unchanged = at least 4 skips
-  if (v_exec->>'skipped_shipments')::int < 4 then
-    raise exception 'FAIL [skipped] %', v_exec;
-  end if;
+  begin
+    perform public.execute_zone_update_job(v_id);
+    raise exception 'FAIL [exec retired]';
+  exception when sqlstate 'CMS04' then null;
+  end;
 
+  -- A retired zone job must not move a booked AWB onto the new zone.
   select zone_id into v_zone from public.shipments
    where id = current_setting('zu.ship_ok')::uuid;
-  if v_zone is distinct from current_setting('zu.zone_new')::uuid then
-    raise exception 'FAIL [zone recalc]';
+  if v_zone is not distinct from current_setting('zu.zone_new')::uuid then
+    raise exception 'FAIL [zone job wrote a booked AWB]';
   end if;
 
   -- unchanged shipment still ZZNEW
@@ -220,51 +219,11 @@ begin
     raise exception 'FAIL [unchanged preserve]';
   end if;
 
-  if not exists (
-    select 1 from public.audit_logs a
-     where a.entity_type = 'shipments'
-       and a.entity_id = current_setting('zu.ship_ok')::uuid
-       and a.module_slug = 'utl.zone-update'
-  ) then
-    raise exception 'FAIL [shipment audit]';
-  end if;
-
-  if not exists (
-    select 1 from public.audit_logs a
-     where a.entity_type = 'zone_update_jobs'
-       and a.entity_id = v_id
-  ) then
-    raise exception 'FAIL [job audit]';
-  end if;
-
   v_get := public.get_zone_update_job(v_id);
-  if (v_get->>'progress')::int <> 100 then raise exception 'FAIL [progress]'; end if;
+  if v_get->>'status' <> 'QUEUED' then raise exception 'FAIL [job stays queued]'; end if;
 
-  v_list := public.list_zone_update_jobs('COMPLETED', 1, 20);
+  v_list := public.list_zone_update_jobs('QUEUED', 1, 20);
   if (v_list->>'total')::int < 1 then raise exception 'FAIL [list]'; end if;
-
-  -- Optional rerate path: reset zone, run with rerate_after_update=true
-  update public.shipments
-     set zone_id = (
-       select id from public.zones
-        where tenant_id = current_setting('zu.tenant')::uuid and code = 'ZZOLD'
-     ),
-         rated_at = null
-   where id = current_setting('zu.ship_ok')::uuid;
-
-  v_job := public.create_zone_update_job(v_filters, true);
-  v_id := (v_job->>'id')::uuid;
-  v_exec := public.execute_zone_update_job(v_id);
-  if v_exec->>'status' <> 'COMPLETED' then raise exception 'FAIL [rerate exec] %', v_exec; end if;
-  if (v_exec->>'updated_shipments')::int < 1 then raise exception 'FAIL [rerate updated]'; end if;
-
-  select rated_at into v_rated_at from public.shipments
-   where id = current_setting('zu.ship_ok')::uuid;
-  if v_rated_at is null then raise exception 'FAIL [optional rerate]'; end if;
-
-  select count(*) into v_audit from public.rating_audit
-   where shipment_id = current_setting('zu.ship_ok')::uuid;
-  if v_audit < 1 then raise exception 'FAIL [rating audit]'; end if;
 
   -- cancel before complete
   v_job := public.create_zone_update_job(v_filters, false);

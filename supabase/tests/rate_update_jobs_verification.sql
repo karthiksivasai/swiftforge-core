@@ -149,6 +149,7 @@ declare
     'to_date', current_date::text,
     'customer_code', 'RATECUST');
   v_rated numeric;
+  v_zone uuid;
   v_audit int;
 begin
   v_job := public.create_rate_update_job('AWB_RATE', v_filters);
@@ -156,31 +157,32 @@ begin
   if (v_job->>'total_shipments')::int < 4 then raise exception 'FAIL [total filter]'; end if;
   v_id := (v_job->>'id')::uuid;
 
-  v_exec := public.execute_rate_update_job(v_id);
-  if v_exec->>'status' <> 'COMPLETED' then raise exception 'FAIL [exec] %', v_exec; end if;
-  if (v_exec->>'updated_shipments')::int < 1 then raise exception 'FAIL [updated]'; end if;
-  if (v_exec->>'skipped_shipments')::int < 3 then raise exception 'FAIL [skipped] %', v_exec; end if;
+  begin
+    perform public.execute_rate_update_job(v_id);
+    raise exception 'FAIL [exec retired]';
+  exception when sqlstate 'CMS04' then null;
+  end;
 
-  select grand_total into v_rated from public.shipments
-   where id = current_setting('ru.ship_ok')::uuid;
-  if v_rated is null then raise exception 'FAIL [snapshot]'; end if;
-
-  select count(*) into v_audit from public.rating_audit
-   where shipment_id = current_setting('ru.ship_ok')::uuid;
-  if v_audit < 1 then raise exception 'FAIL [rating audit]'; end if;
-
-  if not exists (
-    select 1 from public.audit_logs a
-     where a.entity_type = 'rate_update_jobs'
-       and a.entity_id = v_id
+  v_exec := public.preview_rate_update('AWB_RATE', v_filters);
+  if (v_exec->>'skip_count')::int < 3 then
+    raise exception 'FAIL [preview skip] %', v_exec;
+  end if;
+  if exists (
+    select 1 from jsonb_array_elements(v_exec->'rows') row
+     where row->>'awb_no' = 'RATE-LOCK-1' and row->>'skip_reason' is distinct from 'locked'
   ) then
-    raise exception 'FAIL [job audit]';
+    raise exception 'FAIL [locked still listed as change]';
   end if;
 
-  v_get := public.get_rate_update_job(v_id);
-  if (v_get->>'progress')::int <> 100 then raise exception 'FAIL [progress]'; end if;
+  select zone_id into v_zone from public.shipments
+   where id = current_setting('ru.ship_ok')::uuid;
+  -- Preview must not write. The seeded AWB has no zone yet.
+  if v_zone is not null then raise exception 'FAIL [preview wrote]'; end if;
 
-  v_list := public.list_rate_update_jobs('COMPLETED', 1, 20);
+  v_get := public.get_rate_update_job(v_id);
+  if v_get->>'status' <> 'QUEUED' then raise exception 'FAIL [job stays queued]'; end if;
+
+  v_list := public.list_rate_update_jobs('QUEUED', 1, 20);
   if (v_list->>'total')::int < 1 then raise exception 'FAIL [list]'; end if;
 
   -- cancel before complete

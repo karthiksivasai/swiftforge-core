@@ -36,6 +36,9 @@ supabase/.env
 backups/
 *.dump
 
+# Real courier import files (zone linking, rate sheets). Never commit.
+imports/
+
 
 # Wrangler / Cloudflare
 .wrangler/

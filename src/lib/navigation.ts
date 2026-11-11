@@ -269,9 +269,7 @@ export const NAVIGATION: NavSection[] = [
         slug: "rate-zone-update",
         items: [
           { label: "Rate Update", slug: "rate-update" },
-          { label: "Rate Update Jobs", slug: "rate-update-jobs" },
           { label: "Zone Update", slug: "zone-update" },
-          { label: "Zone Update Jobs", slug: "zone-update-jobs" },
           { label: "Rate Import", slug: "rate-import" },
         ],
       }),
