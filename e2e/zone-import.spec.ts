@@ -62,6 +62,20 @@ const clean = [
   "HYD,UPS,DOX,US,USA,US,WORLDWIDE EXPRESS SAVER",
 ].join("\n");
 
+test("zone export requires a vendor and pages the list", async ({ page }) => {
+  test.setTimeout(90000);
+  await page.goto("/utility/rate-zone-update/zone-update");
+  await expect(page.getByTestId("zone-export-search")).toBeDisabled();
+  await pickLive(page, page.locator("body"), "vendor", "UPS", /UPS/);
+  await expect(page.getByTestId("zone-export-search")).toBeEnabled();
+  await page.getByTestId("zone-export-search").click();
+  await expect(page.getByText(/Showing 1 to 10 of \d+ entries/)).toBeVisible({ timeout: 30000 });
+  await page.getByRole("button", { name: "2", exact: true }).click();
+  await expect(page.getByText(/Showing 11 to 20 of \d+ entries/)).toBeVisible();
+  await page.getByTestId("zone-export-filter").fill("Afghanistan");
+  await expect(page.getByTestId("zone-mapping-row")).toHaveCount(4);
+});
+
 test("zone import shows that the file is being checked", async ({ page }) => {
   await page.route("**/rest/v1/rpc/preview_zone_import", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 1200));

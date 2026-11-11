@@ -322,4 +322,35 @@ describe("Courier Charge Details Rating Engine", () => {
       "weight allowed between 0.500 to 999.000 For COURIER PLEASE service",
     );
   });
+
+  it("uses a zone rate as the freight only when the customer has no rate card", () => {
+    const query: RateQueryInput = {
+      customerCode: "NOCARD",
+      contractNo: "",
+      productCode: "DOX",
+      vendorCode: "UPS",
+      serviceCode: "WORLDWIDE EXPRESS SAVER",
+      originCode: "HYD",
+      destinationCode: "AF",
+      bookDate: "2026-11-11",
+      customerBillingStateCode: "TELANGANA",
+      branchStateCode: "TELANGANA",
+      gstPct: 18,
+      fuelPct: 10,
+      pieces: [{ actualWeight: 0.5, pieces: 1, length: 1, width: 1, height: 1 }],
+    };
+
+    const priced = computeShipmentRating(query, [], sampleRules, 1441.16);
+    expect(priced.contractCharges).toBe(1441.16);
+    expect(priced.fuelAmount).toBeCloseTo(144.116, 5);
+
+    const ownCard = computeShipmentRating(
+      { ...query, customerCode: "CKING", contractNo: "243792", productCode: "SPX", vendorCode: "DTAU", destinationCode: "AUSTRALIA" },
+      sampleRateCard,
+      sampleRules,
+      1441.16,
+    );
+    expect(ownCard.ratePerKg).toBe(444.91);
+    expect(ownCard.contractCharges).toBeCloseTo(444.91 * 0.5, 5);
+  });
 });
