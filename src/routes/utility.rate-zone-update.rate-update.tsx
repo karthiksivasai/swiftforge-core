@@ -98,6 +98,7 @@ function RateUpdatePage() {
   const [preview, setPreview] = useState<RateUpdatePreview | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [scopeError, setScopeError] = useState("");
+  const [applyNote, setApplyNote] = useState<string | null>(null);
 
   const patch = (updates: Partial<RateUpdateForm>) =>
     setForm((current) => ({ ...current, ...updates }));
@@ -168,9 +169,9 @@ function RateUpdatePage() {
         updateType: uiUpdateType(form.updateType),
         filters: filters(),
       });
-      toast.success(
-        `Updated ${result.applied} AWBs. Skipped ${result.skipped}. Difference ${money(result.difference_total)}.`,
-      );
+      const note = `Updated ${result.applied} AWBs. Skipped ${result.skipped}. Difference ${money(result.difference_total)}.`;
+      setApplyNote(note);
+      toast.success(note);
       setPreview(null);
     } catch (err) {
       toast.error(toErrorMessage(err));
@@ -234,12 +235,14 @@ function RateUpdatePage() {
             />
           </FieldWrapper>
           <FieldWrapper label="Customer">
-            <SearchableLookupPair
-              lookup="customer"
-              liveLookup="customer"
-              value={form.customer}
-              onChange={(customer) => patch({ customer })}
-            />
+            <div data-testid="rate-update-customer">
+              <SearchableLookupPair
+                lookup="customer"
+                liveLookup="customer"
+                value={form.customer}
+                onChange={(customer) => patch({ customer })}
+              />
+            </div>
           </FieldWrapper>
           <FieldWrapper label="Product">
             <SearchableLookupPair
@@ -330,6 +333,12 @@ function RateUpdatePage() {
           </Button>
         </div>
       </div>
+
+      {applyNote ? (
+        <p className="text-sm font-medium text-green-800" data-testid="rate-update-applied">
+          {applyNote}
+        </p>
+      ) : null}
 
       {preview ? (
         <Card className="min-w-0 border p-4" data-testid="rate-update-preview">

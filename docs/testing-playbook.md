@@ -214,6 +214,9 @@ Follow the exact procedure and rules in docs/testing-playbook.md:
   - `shipments.wizard_extras -> 'forwarding'`: Stores full forwarding object and vendor charge lines.
 - **Navigation Order**: Tab indices defined in `awb-entry-nav-order.ts` (`AWB_NAV.FWD_DELIVERY_AWB: 701`, `FWD_FORWARDING_AWB: 702`, etc.).
 
+#### Known failure for the Forwarding audit (do not treat as fixed):
+`e2e/forwarding-audit.spec.ts` books an AWB, then its own database read fails. PostgREST returns PGRST201: “Could not embed because more than one relationship was found for 'shipments' and 'vendors'”. The two links are `shipments_delivery_vendor_fk` and `shipments_vendor_fk`. The hint is to name one: `vendors!shipments_delivery_vendor_fk` or `vendors!shipments_vendor_fk`. The booking itself succeeded. This note is only a record for the Forwarding audit. The spec and the schema are left as they are.
+
 #### Open Questions for the Forwarding Audit:
 1. Are `forwardingAwb` and `deliveryAwb` mandatory at booking time, or can an AWB be booked first and forwarded later during dispatch/manifesting?
 2. Does entering a vendor AWB require validation against vendor number series or carrier tracking check digits?

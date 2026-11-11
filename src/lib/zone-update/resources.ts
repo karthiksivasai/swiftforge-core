@@ -1,99 +1,108 @@
-/**
- * Zone update job RPCs — Milestone 6C.
- */
 import { supabase } from "@/integrations/supabase/client";
-import { translateDbError } from "@/lib/masters/core/baseCrud";
-import type {
-  ZoneUpdateFilters,
-  ZoneUpdateJob,
-  ZoneUpdateJobListResult,
-  ZoneUpdateJobStatus,
-} from "@/lib/zone-update/types";
+import type { ZoneFileRow } from "./file";
 
-function asObject(data: unknown): Record<string, unknown> {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as Record<string, unknown>;
-  }
-  return {};
+export type ZonePreview = {
+  total: number;
+  ok_count: number;
+  failed_count: number;
+  new_count: number;
+  replace_count: number;
+  rows: Array<{
+    row_no: number;
+    origin: string;
+    vendor: string;
+    product: string;
+    country: string;
+    destination: string;
+    zone: string;
+    service: string;
+    status: "OK" | "FAILED";
+    outcome: "NEW" | "REPLACE" | null;
+    reason: string | null;
+  }>;
+};
+
+export type ZoneApplyResult = {
+  imported: number;
+  new_count: number;
+  replace_count: number;
+  skipped: number;
+};
+
+export type ZoneSearchRow = {
+  id: string;
+  Origin: string | null;
+  Vendor: string | null;
+  Product: string | null;
+  Country: string | null;
+  Destination: string | null;
+  destination_name: string | null;
+  Zone: string | null;
+  ServiceType: string | null;
+  effective_date: string;
+  origin_id: string | null;
+  vendor_id: string | null;
+  product_id: string | null;
+  country_id: string | null;
+  destination_id: string | null;
+  zone_id: string | null;
+};
+
+export async function previewZoneImport(rows: ZoneFileRow[]): Promise<ZonePreview> {
+  const { data, error } = await supabase.rpc("preview_zone_import", { p_rows: rows });
+  if (error) throw new Error(error.message);
+  return data as ZonePreview;
 }
 
-function asArray<T>(data: unknown): T[] {
-  return Array.isArray(data) ? (data as T[]) : [];
-}
-
-function mapJob(row: Record<string, unknown>): ZoneUpdateJob {
-  return {
-    id: String(row.id ?? ""),
-    filters: (row.filters as ZoneUpdateFilters) ?? {},
-    rerate_after_update: row.rerate_after_update === true || row.rerate_after_update === "true",
-    status: String(row.status ?? "QUEUED") as ZoneUpdateJobStatus,
-    progress: Number(row.progress ?? 0),
-    total_shipments: Number(row.total_shipments ?? 0),
-    processed_shipments: Number(row.processed_shipments ?? 0),
-    updated_shipments: Number(row.updated_shipments ?? 0),
-    skipped_shipments: Number(row.skipped_shipments ?? 0),
-    failed_shipments: Number(row.failed_shipments ?? 0),
-    error_message: (row.error_message as string | null) ?? null,
-    created_by: (row.created_by as string | null) ?? null,
-    started_at: (row.started_at as string | null) ?? null,
-    completed_at: (row.completed_at as string | null) ?? null,
-    created_at: String(row.created_at ?? ""),
-    updated_at: row.updated_at ? String(row.updated_at) : undefined,
-  };
-}
-
-export async function createZoneUpdateJob(params: {
-  filters: ZoneUpdateFilters;
-  rerateAfterUpdate?: boolean;
-}): Promise<ZoneUpdateJob> {
-  const { data, error } = await supabase.rpc("create_zone_update_job", {
-    p_filters: params.filters,
-    p_rerate_after_update: params.rerateAfterUpdate ?? false,
+export async function applyZoneImport(
+  rows: ZoneFileRow[],
+  effectiveDate: string,
+  skipFailed: boolean,
+): Promise<ZoneApplyResult> {
+  const { data, error } = await supabase.rpc("apply_zone_import", {
+    p_rows: rows,
+    p_effective_date: effectiveDate,
+    p_skip_failed: skipFailed,
   });
-  if (error) throw translateDbError(error);
-  return mapJob(asObject(data));
+  if (error) throw new Error(error.message);
+  return data as ZoneApplyResult;
 }
 
-export async function listZoneUpdateJobs(params?: {
-  status?: string | null;
-  page?: number;
-  pageSize?: number;
-}): Promise<ZoneUpdateJobListResult> {
-  const { data, error } = await supabase.rpc("list_zone_update_jobs", {
-    p_status: params?.status ?? null,
-    p_page: params?.page ?? 1,
-    p_page_size: params?.pageSize ?? 20,
+export async function searchZoneMappings(filters: {
+  exportType: string;
+  asOf: string;
+  vendorId?: string;
+  productId?: string;
+  originId?: string;
+  zoneId?: string;
+  countryId?: string;
+  destinationId?: string;
+  service?: string;
+}): Promise<{ total: number; rows: ZoneSearchRow[] }> {
+  const { data, error } = await supabase.rpc("search_zone_mappings", {
+    p_filters: {
+      export_type: filters.exportType,
+      as_of: filters.asOf,
+      vendor_id: filters.vendorId || null,
+      product_id: filters.productId || null,
+      origin_id: filters.originId || null,
+      zone_id: filters.zoneId || null,
+      country_id: filters.countryId || null,
+      destination_id: filters.destinationId || null,
+      service: filters.service || null,
+    },
   });
-  if (error) throw translateDbError(error);
-  const row = asObject(data);
-  return {
-    rows: asArray<Record<string, unknown>>(row.rows).map(mapJob),
-    total: Number(row.total ?? 0),
-    page: Number(row.page ?? 1),
-    page_size: Number(row.page_size ?? 20),
-  };
+  if (error) throw new Error(error.message);
+  return data as { total: number; rows: ZoneSearchRow[] };
 }
 
-export async function getZoneUpdateJob(jobId: string): Promise<ZoneUpdateJob> {
-  const { data, error } = await supabase.rpc("get_zone_update_job", {
-    p_job_id: jobId,
-  });
-  if (error) throw translateDbError(error);
-  return mapJob(asObject(data));
+export async function saveZoneMapping(id: string | null, fields: Record<string, string | null>) {
+  const { data, error } = await supabase.rpc("save_zone_mapping", { p_id: id, p_fields: fields });
+  if (error) throw new Error(error.message);
+  return data as string;
 }
 
-export async function cancelZoneUpdateJob(jobId: string): Promise<ZoneUpdateJob> {
-  const { data, error } = await supabase.rpc("cancel_zone_update_job", {
-    p_job_id: jobId,
-  });
-  if (error) throw translateDbError(error);
-  return mapJob(asObject(data));
-}
-
-export async function executeZoneUpdateJob(jobId: string): Promise<ZoneUpdateJob> {
-  const { data, error } = await supabase.rpc("execute_zone_update_job", {
-    p_job_id: jobId,
-  });
-  if (error) throw translateDbError(error);
-  return mapJob(asObject(data));
+export async function deleteZoneMapping(id: string) {
+  const { error } = await supabase.rpc("delete_zone_mapping", { p_id: id });
+  if (error) throw new Error(error.message);
 }
