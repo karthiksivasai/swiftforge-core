@@ -251,6 +251,35 @@ describe("Forwarding Tab Batch 1 Tests", () => {
     expect(rpcErr?.message).toContain("already in use for this vendor");
   });
 
+  it("FW-13: server RPC book_awb_shipment rejects updating forwarding on a LOCKED shipment", async () => {
+    if (!admin || !client) return;
+
+    // Pick an existing test shipment that is locked
+    const { data: locked } = await admin
+      .from("shipments")
+      .select("id, awb_no, row_version, vendor_id, delivery_vendor_id, forwarding_awb, delivery_awb, customer_id, product_id, origin_destination_id, destination_id, service")
+      .eq("is_locked", true)
+      .limit(1)
+      .single();
+
+    if (!locked) return;
+
+    // Attempt to update forwarding details on the locked shipment
+    const { error: rpcErr } = await client.rpc("book_awb_shipment", {
+      p_id: locked.id,
+      p_row_version: locked.row_version,
+      p_fields: {
+        vendor_id: locked.vendor_id,
+        forwarding_awb: "ILLEGAL_FWD_UPDATE_ON_LOCKED",
+        book_date: "2026-11-11",
+      },
+      p_pieces: [],
+    });
+
+    expect(rpcErr).not.toBeNull();
+    expect(rpcErr?.message).toMatch(/locked|cannot be saved|An admin has to unlock it/i);
+  });
+
   it("FW-14: records old and new forwarding fields in audit_logs on shipment update", async () => {
     if (!admin || !client) return;
 
