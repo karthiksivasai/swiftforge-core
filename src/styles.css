@@ -350,3 +350,131 @@
   .ap-r3 { transform: rotate(-28deg); }
   .ap-core { transform: scale(1); opacity: 1; }
 }
+
+/*
+ * Toast alerts. Solid rounded bars: icon, message, close.
+ * primary #e5e5e5, success #00c94f, destructive #ff6567, info #8022fe, warning #f0b100.
+ */
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] {
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  background: #e5e5e5;
+  color: #111111;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.35;
+  overflow-wrap: break-word;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"][data-type="success"] {
+  background: #00c94f;
+  color: #ffffff;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"][data-type="error"] {
+  background: #ff6567;
+  color: #ffffff;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"][data-type="info"] {
+  background: #8022fe;
+  color: #ffffff;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"][data-type="warning"] {
+  background: #f0b100;
+  color: #ffffff;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-title],
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-description] {
+  color: inherit;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-content] {
+  flex: 1;
+  gap: 2px;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-icon] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  color: inherit;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-icon] svg {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-close-button] {
+  position: static;
+  top: auto;
+  right: auto;
+  left: auto;
+  order: 1;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  transform: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  flex-shrink: 0;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-close-button] svg {
+  width: 16px;
+  height: 16px;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"]:hover [data-close-button]:hover,
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-close-button]:hover {
+  background: transparent;
+  border-color: transparent;
+  opacity: 0.7;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"]:not([data-type]) {
+  padding-left: 46px;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"]:not([data-type])::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translateY(-50%);
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'%3E%3Cpath d='M5.25 9a6.75 6.75 0 0 1 13.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 0 1-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 1 1-7.48 0 24.585 24.585 0 0 1-4.831-1.243.75.75 0 0 1-.298-1.206A8.217 8.217 0 0 0 5.25 9.75V9Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'%3E%3Cpath d='M5.25 9a6.75 6.75 0 0 1 13.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 0 1-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 1 1-7.48 0 24.585 24.585 0 0 1-4.831-1.243.75.75 0 0 1-.298-1.206A8.217 8.217 0 0 0 5.25 9.75V9Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"][data-expanded="false"][data-front="false"]:not([data-type])::before,
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"][data-swiping="true"]:not([data-type])::before,
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"][data-removed="true"]:not([data-type])::before {
+  content: "";
+  position: absolute;
+  left: -100%;
+  right: -100%;
+  top: auto;
+  width: auto;
+  height: 100%;
+  background: none;
+  -webkit-mask: none;
+  mask: none;
+  transform: none;
+  opacity: 0;
+}
