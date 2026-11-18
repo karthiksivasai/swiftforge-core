@@ -32,7 +32,7 @@ export function FieldWrapper({
   borderLabel,
   lookupSplit,
 }: {
-  label: string;
+  label: React.ReactNode;
   required?: boolean;
   invalid?: boolean;
   error?: string;
@@ -65,28 +65,37 @@ export function FieldWrapper({
       {error}
     </p>
   ) : null;
-  const invalidLookupSplitClass = marked
-    ? "[&_.lookup-name]:border-destructive [&_.lookup-name]:ring-1 [&_.lookup-name]:ring-destructive"
-    : undefined;
   const invalidAttrs = marked ? ({ "data-invalid": "true" } as const) : undefined;
-  const focusRing =
-    "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-1";
+  const borderLabelText = (focusClass: string) =>
+    cn(
+      "erp-field-label pointer-events-none absolute left-1.5 top-0 z-10 -translate-y-1/2 bg-card px-0.5 text-[12px] font-medium leading-none text-muted-foreground",
+      focusClass,
+      marked && "text-destructive group-focus-within/field:!text-destructive",
+    );
 
   if (borderLabel && lookupSplit) {
-    const blank = !label.trim();
+    const blank = typeof label === "string" ? !label.trim() : !label;
     return (
       <div ref={rootRef} className={cn("relative min-w-0", className)}>
         <div className="pt-1.5">
-          <div className={cn("relative rounded", focusRing, invalidLookupSplitClass)} {...invalidAttrs}>
+          <div
+            className={cn(
+              "group/field relative",
+              "[&_.lookup-name]:rounded-[8px] [&_.lookup-name]:border [&_.lookup-name]:border-border [&_.lookup-name]:shadow-none",
+              "[&_.lookup-name]:focus-within:border-primary",
+              "[&_.lookup-code-box]:rounded-[8px] [&_.lookup-code-box]:border [&_.lookup-code-box]:border-border [&_.lookup-code-box]:bg-[#e9ecef] [&_.lookup-code-box]:shadow-none",
+              marked && "[&_.lookup-name]:border-destructive [&_.lookup-name]:focus-within:border-destructive",
+            )}
+            {...invalidAttrs}
+          >
             {!blank ? (
               <Label
-                className={cn(
-                  "pointer-events-none absolute left-1.5 top-0 z-10 -translate-y-1/2 bg-card px-0.5 text-[12px] font-medium leading-none",
-                  marked ? "text-destructive" : "text-foreground",
+                className={borderLabelText(
+                  "group-has-[.lookup-name:focus-within]/field:text-primary",
                 )}
               >
                 {label}
-                {required ? <span className="ml-0.5 text-destructive">*</span> : null}
+                {required ? <span className="ml-0.5">*</span> : null}
               </Label>
             ) : null}
             {children}
@@ -98,32 +107,27 @@ export function FieldWrapper({
   }
 
   if (borderLabel) {
-    const blank = !label.trim();
+    const blank = typeof label === "string" ? !label.trim() : !label;
     return (
       <div ref={rootRef} className={cn("relative min-w-0", className)}>
         <div
           className={cn(
-            "relative mt-1.5 flex h-8 w-full min-w-0 items-stretch overflow-visible rounded border bg-background erp-field-shell",
-            focusRing,
-            marked ? "border-destructive ring-1 ring-destructive" : "border-input",
+            "group/field erp-field-shell relative mt-1.5 flex h-8 w-full min-w-0 items-stretch overflow-visible rounded-[8px] border border-border bg-background shadow-none",
+            "focus-within:border-primary",
+            marked && "border-destructive focus-within:border-destructive",
             // Flatten nested controls so the group reads as one outlined field
-            "[&_input]:h-8 [&_input]:min-h-8 [&_input]:rounded-none [&_input]:border-0 [&_input]:bg-transparent [&_input]:px-1.5 [&_input]:text-[13px] [&_input]:shadow-none [&_input]:focus-visible:ring-0",
-            "[&_button[role=combobox]]:h-8 [&_button[role=combobox]]:rounded-none [&_button[role=combobox]]:border-0 [&_button[role=combobox]]:bg-transparent [&_button[role=combobox]]:px-1.5 [&_button[role=combobox]]:text-[13px] [&_button[role=combobox]]:shadow-none [&_button[role=combobox]]:focus:ring-0",
-            "[&_button[aria-label=Search]]:h-8 [&_button[aria-label=Search]]:w-8 [&_button[aria-label=Search]]:shrink-0 [&_button[aria-label=Search]]:rounded-none [&_button[aria-label=Search]]:border-0 [&_button[aria-label=Search]]:border-l [&_button[aria-label=Search]]:border-input",
+            "[&_input]:h-8 [&_input]:min-h-8 [&_input]:rounded-none [&_input]:border-0 [&_input]:bg-transparent [&_input]:px-1.5 [&_input]:text-[13px] [&_input]:shadow-none [&_input]:outline-none [&_input]:focus-visible:ring-0",
+            "[&_button[role=combobox]]:h-8 [&_button[role=combobox]]:rounded-none [&_button[role=combobox]]:border-0 [&_button[role=combobox]]:bg-transparent [&_button[role=combobox]]:px-1.5 [&_button[role=combobox]]:text-[13px] [&_button[role=combobox]]:shadow-none [&_button[role=combobox]]:outline-none [&_button[role=combobox]]:focus:ring-0",
+            "[&_button[aria-label=Search]]:h-8 [&_button[aria-label=Search]]:w-8 [&_button[aria-label=Search]]:shrink-0 [&_button[aria-label=Search]]:rounded-none [&_button[aria-label=Search]]:border-0 [&_button[aria-label=Search]]:border-l [&_button[aria-label=Search]]:border-border [&_button[aria-label=Search]]:shadow-none",
             "[&>.relative]:min-w-0 [&>.relative]:flex-1 [&_.flex.gap-1]:gap-0",
-            "[&_.flex_input:nth-child(2)]:border-l [&_.flex_input:nth-child(2)]:border-input",
+            "[&_.flex_input:nth-child(2)]:border-l [&_.flex_input:nth-child(2)]:border-border",
           )}
           {...invalidAttrs}
         >
           {!blank ? (
-            <Label
-              className={cn(
-                "pointer-events-none absolute left-1.5 top-0 z-10 -translate-y-1/2 bg-card px-0.5 text-[12px] font-medium leading-none",
-                marked ? "text-destructive" : "text-foreground",
-              )}
-            >
+            <Label className={borderLabelText("group-focus-within/field:text-primary")}>
               {label}
-              {required ? <span className="ml-0.5 text-destructive">*</span> : null}
+              {required ? <span className="ml-0.5">*</span> : null}
             </Label>
           ) : null}
           {children}
@@ -134,7 +138,14 @@ export function FieldWrapper({
   }
 
   return (
-    <div ref={rootRef} className={cn("flex flex-col", dense ? "gap-0.5" : "gap-1.5", focusRing, className)}>
+    <div
+      ref={rootRef}
+      className={cn(
+        "flex flex-col has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-1",
+        dense ? "gap-0.5" : "gap-1.5",
+        className,
+      )}
+    >
       <Label
         className={cn(
           "font-medium",
@@ -143,7 +154,7 @@ export function FieldWrapper({
         )}
       >
         {label}
-        {required ? <span className="ml-0.5 text-destructive">*</span> : null}
+        {required ? <span className="ml-0.5">*</span> : null}
       </Label>
       {children}
       {errorText}
@@ -171,7 +182,7 @@ export function IconTooltipBubble({
   side = "top",
 }: {
   anchorRef: React.RefObject<HTMLButtonElement | null>;
-  label: string;
+  label: React.ReactNode;
   visible: boolean;
   side?: "top" | "left" | "right" | "bottom";
 }) {
@@ -216,7 +227,7 @@ export function IconButton({
   size = "toolbar",
   tooltipSide = "top",
 }: {
-  label: string;
+  label: React.ReactNode;
   onClick: () => void;
   children: React.ReactNode;
   variant?: "outline" | "ghost";

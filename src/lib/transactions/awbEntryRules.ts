@@ -479,24 +479,48 @@ export function loosePostcodeOk(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9 -]{0,15}$/.test(value.trim());
 }
 
-export function consigneeBookingErrors(party: {
-  companyName?: string;
-  address1?: string;
-  city?: string;
-  postcode?: string;
-  country?: string;
-  phone?: string;
-}): string[] {
+export function consigneeBookingErrors(
+  party: {
+    companyName?: string;
+    address1?: string;
+    city?: string;
+    postcode?: string;
+    country?: string;
+    phone?: string;
+  },
+  requirements?: {
+    consigneeCompany?: boolean;
+    consigneeAddress1?: boolean;
+    consigneeCity?: boolean;
+    consigneePostcode?: boolean;
+    consigneeCountry?: boolean;
+    consigneePhone?: boolean;
+  },
+): string[] {
+  const required = {
+    consigneeCompany: true,
+    consigneeAddress1: true,
+    consigneeCity: true,
+    consigneePostcode: true,
+    consigneeCountry: true,
+    consigneePhone: true,
+    ...requirements,
+  };
   const errors: string[] = [];
-  if (!party.companyName?.trim()) errors.push("Consignee company name is required");
-  if (!party.address1?.trim()) errors.push("Consignee address 1 is required");
-  if (!party.city?.trim()) errors.push("Consignee city is required");
-  if (!party.postcode?.trim()) errors.push("Consignee postcode is required");
-  else if (!loosePostcodeOk(party.postcode)) {
+  if (required.consigneeCompany && !party.companyName?.trim()) {
+    errors.push("Consignee company name is required");
+  }
+  if (required.consigneeAddress1 && !party.address1?.trim()) {
+    errors.push("Consignee address 1 is required");
+  }
+  if (required.consigneeCity && !party.city?.trim()) errors.push("Consignee city is required");
+  if (required.consigneePostcode && !party.postcode?.trim()) {
+    errors.push("Consignee postcode is required");
+  } else if (party.postcode?.trim() && !loosePostcodeOk(party.postcode)) {
     errors.push("Consignee postcode can use letters, numbers, spaces, and hyphens only");
   }
-  if (!party.country?.trim()) errors.push("Consignee country is required");
-  if (!party.phone?.trim()) errors.push("Consignee phone is required");
+  if (required.consigneeCountry && !party.country?.trim()) errors.push("Consignee country is required");
+  if (required.consigneePhone && !party.phone?.trim()) errors.push("Consignee phone is required");
   return errors;
 }
 

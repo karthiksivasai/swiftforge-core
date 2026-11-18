@@ -135,6 +135,7 @@ describe("Forwarding Tab Batch 2 Tests (FW-02, FW-03, FW-04, FW-06)", () => {
           cgst: "0.00",
           sgst: "0.00",
           total: "259.60",
+          chargesType: "MANUAL",
         },
       ],
       customerChargesTotal: "259.60",

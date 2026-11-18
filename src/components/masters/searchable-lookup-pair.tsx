@@ -666,13 +666,13 @@ export function SearchableLookupPair({
       >
         {splitCode ? (
           <div className="flex w-full min-w-0 items-stretch gap-1">
-            <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded border border-input bg-background">
+            <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded-[8px] border border-border bg-background shadow-none">
               {nameInput}
             </div>
             <div className="lookup-code flex w-[5.75rem] shrink-0 items-stretch gap-1">
               <div
                 className={cn(
-                  "overflow-hidden rounded border border-input bg-background",
+                  "lookup-code-box overflow-hidden rounded-[8px] border border-border bg-[#e9ecef] shadow-none",
                   inputH,
                   codeW,
                 )}
@@ -687,12 +687,12 @@ export function SearchableLookupPair({
           <div className="flex w-full min-w-0 items-stretch gap-1">
             <div
               className={cn(
-                "flex min-w-0 flex-1 items-stretch overflow-hidden rounded border border-input bg-background",
+                "flex min-w-0 flex-1 items-stretch overflow-hidden rounded-[8px] border border-border bg-background shadow-none",
                 inputH,
               )}
             >
               {nameInput}
-              <div className={cn("flex shrink-0 items-stretch border-l border-input", codeW)}>
+              <div className={cn("flex shrink-0 items-stretch border-l border-border", codeW)}>
                 {codeInput}
               </div>
             </div>

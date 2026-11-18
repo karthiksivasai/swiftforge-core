@@ -662,13 +662,13 @@ export function PartyContactLookup({
       <div ref={wrapRef} className="relative w-full" {...navGroupProps} {...manualSearchProps}>
         {splitCode ? (
           <div className="flex w-full min-w-0 items-stretch gap-1">
-            <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded border border-input bg-background">
+            <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded-[8px] border border-border bg-background shadow-none">
               {nameInput}
             </div>
             <div className="lookup-code flex w-[5.75rem] shrink-0 items-stretch gap-1">
               <div
                 className={cn(
-                  "overflow-hidden rounded border border-input bg-background",
+                  "lookup-code-box overflow-hidden rounded-[8px] border border-border bg-[#e9ecef] shadow-none",
                   inputH,
                   codeW,
                 )}

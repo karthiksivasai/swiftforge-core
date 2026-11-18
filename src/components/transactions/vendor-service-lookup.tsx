@@ -454,7 +454,7 @@ export function VendorServiceLookup({
       <div ref={wrapRef} className="relative w-full" {...navGroupProps} {...manualSearchProps}>
         {splitCode ? (
           <div className="flex w-full min-w-0 items-stretch gap-1">
-            <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded border border-input bg-background">
+            <div className="lookup-name relative min-h-8 min-w-0 flex-1 overflow-hidden rounded-[8px] border border-border bg-background shadow-none">
               <Input
                 value={value.name}
                 disabled={inputDisabled}

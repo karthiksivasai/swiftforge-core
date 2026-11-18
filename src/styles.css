@@ -171,18 +171,38 @@
 }
 
 /*
- * AWB Entry (`/transaction/awb-entry`): solid black focus on the active field.
- * Most fields draw their border on a wrapper (FieldWrapper / lookup boxes) with
- * nested inputs set to border-0, so we highlight the shell via :focus-within.
- * Visual 2px black uses the existing 1px border + 1px inset shadow (no layout shift).
+ * AWB Entry fields: one 1px border on the outer shell.
+ * Inner inputs stay borderless. Red is only for [data-invalid] after validation.
+ * The lookup code box keeps its own neutral border and never inherits the error colour.
  */
 .erp-form-nav {
-  --awb-focus-border: #000000;
-  --awb-error-border: var(--destructive);
   --awb-readonly-bg: #e9ecef;
 }
 
-/* Read-only values, including lookup code boxes, use the gray mask. */
+.erp-form-nav input:invalid,
+.erp-form-nav textarea:invalid,
+.erp-form-nav select:invalid {
+  box-shadow: none;
+  outline: none;
+}
+
+.erp-form-nav .erp-field-shell,
+.erp-form-nav .lookup-name {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: none;
+  outline: none;
+}
+
+.erp-form-nav :is(.erp-field-shell, .lookup-name, .lookup-code) :is(input, textarea, select, button[role="combobox"]) {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background-color: transparent;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
 .erp-form-nav input:read-only:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"]) {
   background-color: var(--awb-readonly-bg);
   cursor: default;
@@ -192,80 +212,62 @@
   background-color: var(--awb-readonly-bg);
 }
 
-/* Read-only fields keep the normal outline. The thick focus border is for fields you can edit. */
-.erp-form-nav .erp-field-shell:has(input:read-only):not(:has(button, select, input:not(:read-only))):focus-within {
-  border-color: var(--input);
+.erp-form-nav .lookup-code-box,
+.erp-form-nav .lookup-code > div:first-child {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--awb-readonly-bg);
   box-shadow: none;
-}
-
-.erp-form-nav input:read-only:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"]):is(:focus, :focus-visible) {
-  border-color: var(--input);
-  box-shadow: none;
-}
-
-.erp-form-nav :is(.erp-field-shell, .lookup-name, .lookup-code) input:read-only:is(:focus, :focus-visible) {
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.erp-form-nav :is(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible) {
   outline: none;
-  --tw-ring-shadow: 0 0 #0000;
-  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+.erp-form-nav .erp-field-label {
+  color: var(--muted-foreground);
 }
 
 .erp-form-nav .erp-field-shell:focus-within,
 .erp-form-nav .erp-field-shell:has(button[role="combobox"][data-state="open"]),
-.erp-form-nav .lookup-name:focus-within,
-.erp-form-nav .lookup-code>div:first-child:focus-within {
-  border-color: var(--awb-focus-border);
-  border-style: solid;
-  box-shadow: inset 0 0 0 1px var(--awb-focus-border);
-  --tw-ring-shadow: 0 0 #0000;
-  --tw-ring-offset-shadow: 0 0 #0000;
+.erp-form-nav .lookup-name:focus-within {
+  border-color: var(--primary);
+  box-shadow: none;
 }
 
-.erp-form-nav .lookup-code > div:first-child,
-.erp-form-nav .lookup-code > div:first-child:focus-within {
+.erp-form-nav .erp-field-shell:focus-within > .erp-field-label,
+.erp-form-nav .group\/field:has(.lookup-name:focus-within) > .erp-field-label {
+  color: var(--primary);
+}
+
+.erp-form-nav .erp-field-shell:focus-within:has(input:read-only):not(:has(button, select, input:not(:read-only))) {
+  border-color: var(--border);
+}
+
+.erp-form-nav .erp-field-shell:focus-within:has(input:read-only):not(:has(button, select, input:not(:read-only))) > .erp-field-label {
+  color: var(--muted-foreground);
+}
+
+.erp-form-nav .lookup-code-box:focus-within,
+.erp-form-nav .lookup-code > div:first-child:focus-within,
+.erp-form-nav [data-invalid="true"] .lookup-code-box,
+.erp-form-nav [data-invalid="true"] .lookup-code > div:first-child,
+.erp-form-nav [data-invalid="true"] .lookup-code-box:focus-within,
+.erp-form-nav [data-invalid="true"] .lookup-code > div:first-child:focus-within {
+  border-color: var(--border);
   background-color: var(--awb-readonly-bg);
-  border-color: var(--input);
   box-shadow: none;
 }
 
-.erp-form-nav .erp-field-shell:focus-within:has(input:read-only) {
-  border-color: var(--input);
-  box-shadow: none;
-}
-
-.erp-form-nav :where(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible):not([type="checkbox"],
-  [type="radio"],
-  [type="hidden"]) {
-  border-color: var(--awb-focus-border);
-  border-style: solid;
-  box-shadow: inset 0 0 0 1px var(--awb-focus-border);
-}
-
-.erp-form-nav :is(.erp-field-shell, .lookup-name, .lookup-code) :where(input, textarea, select, button[role="combobox"]):is(:focus, :focus-visible) {
-  border-color: transparent;
-  box-shadow: none;
-}
-
-/* Error / invalid wins over focus (FieldWrapper `invalid` → data-invalid, or aria-invalid). */
 .erp-form-nav .erp-field-shell[data-invalid="true"],
 .erp-form-nav .erp-field-shell[data-invalid="true"]:focus-within,
 .erp-form-nav .erp-field-shell[data-invalid="true"]:has(button[role="combobox"][data-state="open"]),
 .erp-form-nav [data-invalid="true"] .lookup-name,
-.erp-form-nav [data-invalid="true"] .lookup-name:focus-within,
-.erp-form-nav [data-invalid="true"] .lookup-code>div:first-child,
-.erp-form-nav [data-invalid="true"] .lookup-code>div:first-child:focus-within,
-.erp-form-nav :where(input, textarea, select, button[role="combobox"])[aria-invalid="true"],
-.erp-form-nav :where(input, textarea, select, button[role="combobox"])[aria-invalid="true"]:is( :focus,
-  :focus-visible) {
-  border-color: var(--awb-error-border);
-  border-style: solid;
-  box-shadow: inset 0 0 0 1px var(--awb-error-border);
-  --tw-ring-shadow: 0 0 #0000;
-  --tw-ring-offset-shadow: 0 0 #0000;
+.erp-form-nav [data-invalid="true"] .lookup-name:focus-within {
+  border-color: var(--destructive);
+  box-shadow: none;
+}
+
+.erp-form-nav [data-invalid="true"] > .erp-field-label,
+.erp-form-nav [data-invalid="true"] .erp-field-label {
+  color: var(--destructive);
 }
 
 /* Session loader. Color is the ink; --rate multiplies every duration. */

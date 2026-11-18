@@ -20,6 +20,8 @@ import {
   Loader2,
   Check,
   AlertTriangle,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -169,12 +171,25 @@ import {
   formToInvoiceInput,
 } from "@/lib/transactions/invoiceGenerator";
 import {
+  base64ToBlob,
+  deleteShipmentDocument,
   documentObjectUrl,
   getShipmentDocument,
+  getShipmentDocumentDownloadUrl,
+  listShipmentDocumentBytes,
+  logKycReveal,
   revokeDocumentObjectUrl,
   saveShipmentDocument,
+  uploadKycFileToStorage,
   type ShipmentDocumentItem,
 } from "@/lib/transactions/shipmentDocuments";
+import {
+  isDocExpired,
+  isMaskableType,
+  maskAadhaar,
+  maskDocumentNumber,
+  maskPan,
+} from "@/lib/security/kycMasking";
 import {
   calculateShipmentRating,
   getRatingBreakdown,
@@ -362,6 +377,11 @@ type KycDocument = {
   contentB64?: string;
   mimeType?: string;
   uploaded?: boolean;
+  documentNo?: string;
+  expiryDate?: string;
+  side?: "FRONT" | "BACK" | "BOTH";
+  fileUrl?: string;
+  fileBytes?: Uint8Array;
 };
 
 type KycData = {
@@ -793,7 +813,7 @@ const KYC_TYPES = [
   "Passport Number",
   "TAN Number",
   "Voter Id",
-  "Performa Invoice",
+  "Proforma Invoice",
   "Document",
 ] as const;
 
@@ -1984,6 +2004,22 @@ function AwbEntryPage() {
   const [vendorChargeDraft, setVendorChargeDraft] =
     useState<VendorChargeDraft>(emptyVendorChargeDraft);
   const [kycDocType, setKycDocType] = useState<string>(KYC_TYPES[0]);
+  const [kycDocNo, setKycDocNo] = useState("");
+  const [kycExpiryDate, setKycExpiryDate] = useState("");
+  const [kycDocSide, setKycDocSide] = useState<"FRONT" | "BACK" | "BOTH">("FRONT");
+  const [revealedKycIds, setRevealedKycIds] = useState<Set<string>>(new Set());
+  const [shipperDocMasked, setShipperDocMasked] = useState(true);
+
+  useEffect(() => {
+    if (activeTab === "kyc") {
+      if (form.shipper.documentType && (KYC_TYPES as readonly string[]).includes(form.shipper.documentType)) {
+        setKycDocType(form.shipper.documentType);
+      }
+      if (form.shipper.documentNo && !kycDocNo) {
+        setKycDocNo(form.shipper.documentNo);
+      }
+    }
+  }, [activeTab, form.shipper.documentType, form.shipper.documentNo]);
   const [kycSearchField, setKycSearchField] = useState<SearchField>("awbNo");
   const [kycSearchInput, setKycSearchInput] = useState("");
   const kycFileRef = useRef<HTMLInputElement | null>(null);
@@ -2014,6 +2050,7 @@ function AwbEntryPage() {
     useState<AwbFormSetupSettings>(defaultAwbFormSetup);
   const [formSetupDraft, setFormSetupDraft] = useState<AwbFormSetupSettings>(defaultAwbFormSetup);
   const [chargeHeads, setChargeHeads] = useState<AwbChargeHead[]>([]);
+  const [vendorChargeHeads, setVendorChargeHeads] = useState<{ code: string; name: string }[]>([]);
   const [volumetricRows, setVolumetricRows] = useState<VolumetricFactor[]>([]);
   const [fuelRows, setFuelRows] = useState<FuelSurchargeRow[]>([]);
   const [vendorRoundOff, setVendorRoundOff] = useState(false);
@@ -2568,8 +2605,54 @@ function AwbEntryPage() {
   };
 
   const patchForwarding = (patch: Partial<ForwardingData>) => {
-    setForm((f) => ({ ...f, forwarding: { ...f.forwarding, ...patch } }));
+    setForm((f) => {
+      const updated = { ...f.forwarding, ...patch };
+      return {
+        ...f,
+        forwarding: updated,
+        ...(patch.forwardingAwb !== undefined ? { forwardingNo: patch.forwardingAwb } : {}),
+        ...(patch.deliveryAwb !== undefined ? { deliveryNo: patch.deliveryAwb } : {}),
+      };
+    });
   };
+
+  const vendorChargeDescriptions = useMemo(() => {
+    if (vendorChargeHeads.length > 0) {
+      return vendorChargeHeads.map((h) => h.name);
+    }
+    return [...VENDOR_CHARGE_DESCRIPTIONS];
+  }, [vendorChargeHeads]);
+
+  const fwdFormatWarning = useMemo(() => {
+    const fwd = (form.forwarding?.forwardingAwb || form.forwardingNo || "").trim();
+    if (!fwd) return null;
+    const vCode = (
+      form.forwarding?.deliveryVendor?.code ||
+      form.vendor?.code ||
+      ""
+    ).toUpperCase().trim();
+    const vName = (
+      form.forwarding?.deliveryVendor?.name ||
+      form.vendor?.name ||
+      ""
+    ).toUpperCase().trim();
+    const vendorStr = `${vCode} ${vName}`;
+
+    if (vendorStr.includes("FEDEX") || vendorStr.includes("FEDE") || vendorStr.includes("FDX")) {
+      if (!/^\d{12}$/.test(fwd)) {
+        return `Standard FedEx tracking numbers are 12 digits (entered: ${fwd.length} chars). Booking is still permitted.`;
+      }
+    } else if (vendorStr.includes("DHL")) {
+      if (!/^\d{10}$/.test(fwd)) {
+        return `Standard DHL Express tracking numbers are 10 digits (entered: ${fwd.length} chars). Booking is still permitted.`;
+      }
+    } else if (vendorStr.includes("UPS")) {
+      if (!/^1Z[A-Za-z0-9]{16}$/i.test(fwd)) {
+        return `Standard UPS tracking numbers start with "1Z" followed by 16 alphanumeric characters (18 total, entered: ${fwd.length} chars). Booking is still permitted.`;
+      }
+    }
+    return null;
+  }, [form.forwarding?.forwardingAwb, form.forwardingNo, form.forwarding?.deliveryVendor, form.vendor]);
 
   useEffect(() => {
     if (
@@ -3304,6 +3387,7 @@ function AwbEntryPage() {
   useEffect(() => {
     if (!authed) {
       setChargeHeads([]);
+      setVendorChargeHeads([]);
       return;
     }
     let cancelled = false;
@@ -3326,6 +3410,23 @@ function AwbEntryPage() {
           })),
         );
       });
+
+    void supabase
+      .from("charges")
+      .select("code, name, side, sequence")
+      .is("deleted_at", null)
+      .in("side", ["VENDOR", "BOTH"])
+      .order("sequence", { ascending: true })
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setVendorChargeHeads(
+          data.map((row) => ({
+            code: String(row.code ?? ""),
+            name: String(row.name ?? row.code ?? ""),
+          })),
+        );
+      });
+
     return () => {
       cancelled = true;
     };
@@ -3989,142 +4090,154 @@ function AwbEntryPage() {
         const fresh = (await getShipmentById(saved.id)) ?? saved;
         const children = await fetchShipmentChildren(saved.id);
         for (const doc of payload.kyc.documents) {
-          if (!doc.contentB64 || doc.uploaded) continue;
+          if ((!doc.contentB64 && !doc.fileUrl) || doc.uploaded) continue;
           try {
-            await saveShipmentDocument({
+            let storagePath = doc.fileUrl;
+            // D13: Upload to Supabase Storage private bucket `tenant-files`
+            if (!storagePath && (doc.fileBytes || doc.contentB64) && saved.tenant_id) {
+              const filePayload =
+                doc.fileBytes ||
+                base64ToBlob(doc.contentB64!, doc.mimeType || "application/octet-stream");
+              const uploadRes = await uploadKycFileToStorage({
+                tenantId: saved.tenant_id,
+                shipmentId: saved.id,
+                fileName: doc.fileName,
+                fileBytes: filePayload,
+                mimeType: doc.mimeType || "application/octet-stream",
+              });
+              if (uploadRes.storagePath) {
+                storagePath = uploadRes.storagePath;
+                doc.fileUrl = storagePath;
+              }
+            }
+
+            const docId = await saveShipmentDocument({
               shipmentId: saved.id,
               documentType: "KYC",
               source: "USER_UPLOAD",
               fileName: doc.fileName,
+              fileUrl: storagePath ?? null,
               contentB64: doc.contentB64,
               mimeType: doc.mimeType || "application/octet-stream",
               status: "AVAILABLE",
+              rawMeta: {
+                kycDocType: doc.entryType || "Aadhaar Number",
+                documentNo: doc.documentNo || null,
+                expiryDate: doc.expiryDate || null,
+                side: doc.side || null,
+                fileName: doc.fileName,
+                storagePath: storagePath ?? null,
+              },
             });
-          } catch (kycError) {
-            toast.warning(toErrorMessage(kycError, "KYC file could not be stored"));
-          }
-        }
-        if (carrierDocsToPersist.length > 0) {
-          for (const doc of carrierDocsToPersist) {
-            try {
-              const vType = doc.docType === "INVOICE" ? "VENDOR_INVOICE" : "VENDOR_AWB";
-              const cType = doc.docType === "INVOICE" ? "INVOICE" : "AWB_LABEL";
-              await saveShipmentDocument({
-                shipmentId: saved.id,
-                documentType: vType as any,
-                source: "VENDOR",
-                vendor: payload.vendor.code || payload.vendor.name || "UPS",
-                fileName: `${payload.vendor.code || "UPS"}_${doc.docType}_${saved.awb_no}.pdf`,
-                contentB64: doc.contentB64,
-                mimeType: doc.mimeType || "application/pdf",
-                status: "AVAILABLE",
-                rawMeta: { awbNo: saved.awb_no, forwardingAwb: payload.forwardingNo },
-              });
-              await saveShipmentDocument({
-                shipmentId: saved.id,
-                documentType: cType as any,
-                source: "VENDOR",
-                vendor: payload.vendor.code || payload.vendor.name || "UPS",
-                fileName: `${payload.vendor.code || "UPS"}_${cType}_${saved.awb_no}.pdf`,
-                contentB64: doc.contentB64,
-                mimeType: doc.mimeType || "application/pdf",
-                status: "AVAILABLE",
-                rawMeta: { awbNo: saved.awb_no, forwardingAwb: payload.forwardingNo },
-              });
-            } catch (e) {
-              console.warn("Could not save carrier document:", e);
+              doc.uploaded = true;
+              if(docId) doc.id = docId;
+            } catch (kycError) {
+              toast.warning(toErrorMessage(kycError, "KYC file could not be stored"));
             }
           }
-        }
-        await rememberPartiesAfterAwbSave({
-          shipper: payload.shipper,
-          consignee: payload.consignee,
-        });
-        await refreshLive();
-        // Keep form open in saved/edit mode so the document-button row can appear.
-        const allocatedAwb = fresh.awb_no || saved.awb_no || payload.awbNo;
-        const money = (value: number | null | undefined) => (Number(value) || 0).toFixed(2);
-        const weightText = (value: number | null | undefined) => (Number(value) || 0).toFixed(3);
-        const customerLines = children.charges.filter((line) => line.side !== "VENDOR");
-        const vendorLines = children.charges.filter((line) => line.side === "VENDOR");
-        const gstOf = (key: "igst" | "cgst" | "sgst") =>
-          customerLines.reduce((sum, line) => sum + (Number(line[key]) || 0), 0);
-        const freightLine = customerLines.find((line) => /freight/i.test(line.description));
-        const otherLines = customerLines.filter((line) => line !== freightLine);
-        const otherAmount = otherLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
-        const fuelAmount = customerLines.reduce((sum, line) => sum + (Number(line.fuel_amount) || 0), 0);
-        const payable = Number(fresh.grand_total ?? fresh.customer_charges_total) || 0;
-        const lockDisplay = await lockDisplayFor(fresh);
-        setEditing((prev) => ({
-          ...(prev ?? ({ ...payload, id: fresh.id } as AwbRow)),
-          id: fresh.id,
-          rowVersion: fresh.row_version,
-          status: fresh.current_status || "BOOKED",
-          awbNo: allocatedAwb,
-          lockedByName: lockDisplay.lockedByName,
-          lockedAt: lockDisplay.lockedAt,
-          serverLocked: Boolean(fresh.is_locked),
-        }));
-        setRatingSummary({
-          freight: money(freightLine?.amount),
-          fuel: money(fuelAmount),
-          tax: money(gstOf("igst") + gstOf("cgst") + gstOf("sgst")),
-          otherCharges: money(otherAmount),
-          vendorCost: money(fresh.vendor_charges_total),
-          total: money(payable),
-          contractCharges: money(freightLine?.amount),
-          subTotal: money((Number(freightLine?.amount) || 0) + otherAmount),
-          totalFuel: money(fuelAmount),
-          igst: money(gstOf("igst")),
-          cgst: money(gstOf("cgst")),
-          sgst: money(gstOf("sgst")),
-          totalAmount: money(payable),
-        });
-        setForm((f) => ({
-          ...f,
-          awbNo: allocatedAwb,
-          lock: Boolean(fresh.is_locked),
-          pieces: String(fresh.pieces ?? f.pieces),
-          piecesUnit: fresh.pieces_unit || f.piecesUnit,
-          actualWeight: weightText(fresh.actual_weight),
-          volWeight: weightText(fresh.vol_weight),
-          chargeWeight: weightText(fresh.charge_weight),
-          customerChargesTotal: money(payable),
-          vendorChargesTotal: money(fresh.vendor_charges_total),
-          balanceAmount: fresh.balance_amount == null ? f.balanceAmount : money(fresh.balance_amount),
-          piecesLines: children.pieces.map((piece, index) => ({
-            id: `pc-${piece.seq || index}`,
-            childAwb: piece.child_awb || (allocatedAwb ? `${allocatedAwb}-${piece.seq || index + 1}` : ""),
-            actualWeightPerPc: weightText(piece.actual_weight_per_pc),
-            pieces: String(piece.pieces ?? ""),
-            length: piece.length == null ? "" : String(piece.length),
-            breadth: piece.breadth == null ? "" : String(piece.breadth),
-            height: piece.height == null ? "" : String(piece.height),
-            volWeight: weightText(piece.vol_weight),
-            chargeWeight: weightText(piece.charge_weight),
-            division: piece.divisor == null ? "" : String(piece.divisor),
-            measurementUnit: piece.measurement_unit || "Centimeter",
-          })),
-          chargeLines: customerLines.map((line, index) => ({
-            id: `ch-${line.seq || index}`,
-            description: line.description,
-            rate: money(line.rate),
-            amount: money(line.amount),
-            fuelApply: line.fuel_applies ? "Yes" : "No",
-            fuelAmt: money(line.fuel_amount),
-            taxApply: line.tax_applies ? "Yes" : "No",
-            taxOnFuel: line.tax_on_fuel ? "Yes" : "No",
-            igst: money(line.igst),
-            sgst: money(line.sgst),
-            cgst: money(line.cgst),
-            total: money(line.total),
-            chargesType: line.charges_type || "SYSTEM",
-          })),
-          forwarding: {
-            ...f.forwarding,
-            vendorAmount: money(fresh.vendor_charges_total),
-            vendorChargeLines: vendorLines.map((line, index) => ({
-              id: `vch-${line.seq || index}`,
+        if (carrierDocsToPersist.length > 0) {
+            for (const doc of carrierDocsToPersist) {
+              try {
+                const vType = doc.docType === "INVOICE" ? "VENDOR_INVOICE" : "VENDOR_AWB";
+                const cType = doc.docType === "INVOICE" ? "INVOICE" : "AWB_LABEL";
+                await saveShipmentDocument({
+                  shipmentId: saved.id,
+                  documentType: vType as any,
+                  source: "VENDOR",
+                  vendor: payload.vendor.code || payload.vendor.name || "UPS",
+                  fileName: `${payload.vendor.code || "UPS"}_${doc.docType}_${saved.awb_no}.pdf`,
+                  contentB64: doc.contentB64,
+                  mimeType: doc.mimeType || "application/pdf",
+                  status: "AVAILABLE",
+                  rawMeta: { awbNo: saved.awb_no, forwardingAwb: payload.forwardingNo },
+                });
+                await saveShipmentDocument({
+                  shipmentId: saved.id,
+                  documentType: cType as any,
+                  source: "VENDOR",
+                  vendor: payload.vendor.code || payload.vendor.name || "UPS",
+                  fileName: `${payload.vendor.code || "UPS"}_${cType}_${saved.awb_no}.pdf`,
+                  contentB64: doc.contentB64,
+                  mimeType: doc.mimeType || "application/pdf",
+                  status: "AVAILABLE",
+                  rawMeta: { awbNo: saved.awb_no, forwardingAwb: payload.forwardingNo },
+                });
+              } catch (e) {
+                console.warn("Could not save carrier document:", e);
+              }
+            }
+          }
+          await rememberPartiesAfterAwbSave({
+            shipper: payload.shipper,
+            consignee: payload.consignee,
+          });
+          await refreshLive();
+          // Keep form open in saved/edit mode so the document-button row can appear.
+          const allocatedAwb = fresh.awb_no || saved.awb_no || payload.awbNo;
+          const money = (value: number | null | undefined) => (Number(value) || 0).toFixed(2);
+          const weightText = (value: number | null | undefined) => (Number(value) || 0).toFixed(3);
+          const customerLines = children.charges.filter((line) => line.side !== "VENDOR");
+          const vendorLines = children.charges.filter((line) => line.side === "VENDOR");
+          const gstOf = (key: "igst" | "cgst" | "sgst") =>
+            customerLines.reduce((sum, line) => sum + (Number(line[key]) || 0), 0);
+          const freightLine = customerLines.find((line) => /freight/i.test(line.description));
+          const otherLines = customerLines.filter((line) => line !== freightLine);
+          const otherAmount = otherLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
+          const fuelAmount = customerLines.reduce((sum, line) => sum + (Number(line.fuel_amount) || 0), 0);
+          const payable = Number(fresh.grand_total ?? fresh.customer_charges_total) || 0;
+          const lockDisplay = await lockDisplayFor(fresh);
+          setEditing((prev) => ({
+            ...(prev ?? ({ ...payload, id: fresh.id } as AwbRow)),
+            id: fresh.id,
+            rowVersion: fresh.row_version,
+            status: fresh.current_status || "BOOKED",
+            awbNo: allocatedAwb,
+            lockedByName: lockDisplay.lockedByName,
+            lockedAt: lockDisplay.lockedAt,
+            serverLocked: Boolean(fresh.is_locked),
+          }));
+          setRatingSummary({
+            freight: money(freightLine?.amount),
+            fuel: money(fuelAmount),
+            tax: money(gstOf("igst") + gstOf("cgst") + gstOf("sgst")),
+            otherCharges: money(otherAmount),
+            vendorCost: money(fresh.vendor_charges_total),
+            total: money(payable),
+            contractCharges: money(freightLine?.amount),
+            subTotal: money((Number(freightLine?.amount) || 0) + otherAmount),
+            totalFuel: money(fuelAmount),
+            igst: money(gstOf("igst")),
+            cgst: money(gstOf("cgst")),
+            sgst: money(gstOf("sgst")),
+            totalAmount: money(payable),
+          });
+          setForm((f) => ({
+            ...f,
+            awbNo: allocatedAwb,
+            lock: Boolean(fresh.is_locked),
+            pieces: String(fresh.pieces ?? f.pieces),
+            piecesUnit: fresh.pieces_unit || f.piecesUnit,
+            actualWeight: weightText(fresh.actual_weight),
+            volWeight: weightText(fresh.vol_weight),
+            chargeWeight: weightText(fresh.charge_weight),
+            customerChargesTotal: money(payable),
+            vendorChargesTotal: money(fresh.vendor_charges_total),
+            balanceAmount: fresh.balance_amount == null ? f.balanceAmount : money(fresh.balance_amount),
+            piecesLines: children.pieces.map((piece, index) => ({
+              id: `pc-${piece.seq || index}`,
+              childAwb: piece.child_awb || (allocatedAwb ? `${allocatedAwb}-${piece.seq || index + 1}` : ""),
+              actualWeightPerPc: weightText(piece.actual_weight_per_pc),
+              pieces: String(piece.pieces ?? ""),
+              length: piece.length == null ? "" : String(piece.length),
+              breadth: piece.breadth == null ? "" : String(piece.breadth),
+              height: piece.height == null ? "" : String(piece.height),
+              volWeight: weightText(piece.vol_weight),
+              chargeWeight: weightText(piece.charge_weight),
+              division: piece.divisor == null ? "" : String(piece.divisor),
+              measurementUnit: piece.measurement_unit || "Centimeter",
+            })),
+            chargeLines: customerLines.map((line, index) => ({
+              id: `ch-${line.seq || index}`,
               description: line.description,
               rate: money(line.rate),
               amount: money(line.amount),
@@ -4138,1455 +4251,1500 @@ function AwbEntryPage() {
               total: money(line.total),
               chargesType: line.charges_type || "SYSTEM",
             })),
-          },
-          kyc: {
-            documents: f.kyc.documents.map((doc) => ({ ...doc, contentB64: undefined, uploaded: true })),
-          },
-        }));
-        setLastSavedForm({ ...payload, awbNo: allocatedAwb });
-        setVendorPanelKey((k) => k + 1);
-        allowLeaveRef.current = true;
-        await clearDraftState();
-        void awbStatusQuery.refetch();
-        void branchStockQuery.refetch();
-        toast.success(`AWB ${allocatedAwb} booked`);
-        await notifySavedAwb({ ...payload, awbNo: allocatedAwb });
-        return true;
-      } catch (e) {
-        const message = toErrorMessage(e);
-        const jsonMatch = message.match(/Booking validation failed:\s*(\[.+\])/);
-        if (jsonMatch) {
-          try {
-            const parsed = JSON.parse(jsonMatch[1]);
-            const serverMsgs = parsed.map((item: { message?: string }) => item.message).filter(Boolean);
-            if (serverMsgs.length > 0) {
-              reportSaveErrors(serverMsgs);
-              return false;
+            forwarding: {
+              ...f.forwarding,
+              vendorAmount: money(fresh.vendor_charges_total),
+              vendorChargeLines: vendorLines.map((line, index) => ({
+                id: `vch-${line.seq || index}`,
+                description: line.description,
+                rate: money(line.rate),
+                amount: money(line.amount),
+                fuelApply: line.fuel_applies ? "Yes" : "No",
+                fuelAmt: money(line.fuel_amount),
+                taxApply: line.tax_applies ? "Yes" : "No",
+                taxOnFuel: line.tax_on_fuel ? "Yes" : "No",
+                igst: money(line.igst),
+                sgst: money(line.sgst),
+                cgst: money(line.cgst),
+                total: money(line.total),
+                chargesType: line.charges_type || "SYSTEM",
+              })),
+            },
+            kyc: {
+              documents: f.kyc.documents.map((doc) => ({ ...doc, contentB64: undefined, uploaded: true })),
+            },
+          }));
+          setLastSavedForm({ ...payload, awbNo: allocatedAwb });
+          setVendorPanelKey((k) => k + 1);
+          allowLeaveRef.current = true;
+          await clearDraftState();
+          void awbStatusQuery.refetch();
+          void branchStockQuery.refetch();
+          toast.success(`AWB ${allocatedAwb} booked`);
+          await notifySavedAwb({ ...payload, awbNo: allocatedAwb });
+          return true;
+        } catch (e) {
+          const message = toErrorMessage(e);
+          const jsonMatch = message.match(/Booking validation failed:\s*(\[.+\])/);
+          if (jsonMatch) {
+            try {
+              const parsed = JSON.parse(jsonMatch[1]);
+              const serverMsgs = parsed.map((item: { message?: string }) => item.message).filter(Boolean);
+              if (serverMsgs.length > 0) {
+                reportSaveErrors(serverMsgs);
+                return false;
+              }
+            } catch {
+              // fall through
             }
-          } catch {
-            // fall through
           }
+          toast.error(message);
+          if (message.includes(";")) setWeightErrorModal({ open: true, message: message.replaceAll("; ", "\n") });
+          return false;
         }
-        toast.error(message);
-        if (message.includes(";")) setWeightErrorModal({ open: true, message: message.replaceAll("; ", "\n") });
-        return false;
       }
-    }
 
     if (editing) {
-      setDemoRows((prev) =>
-        prev.map((r) =>
-          r.id === editing.id
-            ? { ...payload, id: editing.id, rowVersion: r.rowVersion, status: r.status ?? "DRAFT" }
-            : r,
-        ),
-      );
-      setEditing((prev) =>
-        prev
-          ? { ...payload, id: prev.id, rowVersion: prev.rowVersion, status: prev.status ?? "DRAFT" }
-          : prev,
-      );
-      toast.success("AWB entry updated");
-      await notifySavedAwb(payload);
-    } else {
-      if (demoRows.some((r) => r.awbNo === payload.awbNo))
-        return toast.error("AWB No already exists"), false;
-      const id = crypto.randomUUID();
-      const row: AwbRow = { id, status: "DRAFT", ...payload };
-      setDemoRows((prev) => [row, ...prev]);
-      setEditing(row);
-      toast.success("AWB entry saved");
-      await notifySavedAwb(payload);
-    }
-    setLastSavedForm(payload);
-    setVendorPanelKey((k) => k + 1);
-    allowLeaveRef.current = true;
-    await clearDraftState();
-    return true;
-  };
+        setDemoRows((prev) =>
+          prev.map((r) =>
+            r.id === editing.id
+              ? { ...payload, id: editing.id, rowVersion: r.rowVersion, status: r.status ?? "DRAFT" }
+              : r,
+          ),
+        );
+        setEditing((prev) =>
+          prev
+            ? { ...payload, id: prev.id, rowVersion: prev.rowVersion, status: prev.status ?? "DRAFT" }
+            : prev,
+        );
+        toast.success("AWB entry updated");
+        await notifySavedAwb(payload);
+      } else {
+        if (demoRows.some((r) => r.awbNo === payload.awbNo))
+          return toast.error("AWB No already exists"), false;
+        const id = crypto.randomUUID();
+        const row: AwbRow = { id, status: "DRAFT", ...payload };
+        setDemoRows((prev) => [row, ...prev]);
+        setEditing(row);
+        toast.success("AWB entry saved");
+        await notifySavedAwb(payload);
+      }
+      setLastSavedForm(payload);
+      setVendorPanelKey((k) => k + 1);
+      allowLeaveRef.current = true;
+      await clearDraftState();
+      return true;
+    };
 
-  const collectClientBookingErrors = (): string[] => {
-    const errors: string[] = [];
-    if (authed && !editing && branchStockQuery.data?.is_exhausted) {
-      errors.push("Branch AWB stock quota is exhausted (Balance: 0)");
-    }
-    if (awbMode === "MANUAL" && !editing && !form.awbNo.trim()) {
-      errors.push("Manual AWB mode requires entering an AWB Number");
-    }
-    if (!form.clientName.code.trim() && !form.clientName.name.trim())
-      errors.push("Customer is required");
-    if (!form.shipper.origin.code.trim() && !form.shipper.origin.name.trim())
-      errors.push("Origin is required");
-    if (!form.consignee.origin.code.trim() && !form.consignee.origin.name.trim()) {
-      errors.push("Destination is required");
-    }
-    if (!form.product.code.trim()) errors.push("Product is required");
-    if (!form.bookDate.trim()) errors.push("Book date is required");
-    if (form.piecesLines.length < 1) errors.push("At least one shipment piece is required");
-    if (form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim()) {
-      if (!form.service.code.trim() && !form.service.name.trim()) {
-        errors.push("Service is required when Vendor is selected");
+    const collectClientBookingErrors = (): string[] => {
+      const errors: string[] = [];
+      if (authed && !editing && branchStockQuery.data?.is_exhausted) {
+        errors.push("Branch AWB stock quota is exhausted (Balance: 0)");
       }
-      if (!form.shipper.mobileNo.trim() && !form.shipper.telephone.trim()) {
-        errors.push("Shipper mobile number is required for vendor OTP");
+      if (awbMode === "MANUAL" && !editing && !form.awbNo.trim()) {
+        errors.push("Manual AWB mode requires entering an AWB Number");
       }
-      if (!form.shipper.documentType.trim()) {
-        errors.push("Shipper Document Type is required for vendor booking");
+      if (!form.clientName.code.trim() && !form.clientName.name.trim())
+        errors.push("Customer is required");
+      if (!form.shipper.origin.code.trim() && !form.shipper.origin.name.trim())
+        errors.push("Origin is required");
+      if (!form.consignee.origin.code.trim() && !form.consignee.origin.name.trim()) {
+        errors.push("Destination is required");
       }
-      if (!form.shipper.documentNo.trim()) {
-        errors.push("Shipper Document No is required for vendor booking");
-      }
-      if (!form.shipper.address1.trim()) {
-        errors.push("Shipper Address 1 is required for vendor booking");
-      }
-      if (!form.content.trim() && !(form.proforma.lines ?? []).some((l) => l.description.trim())) {
-        errors.push("Content (or proforma description) is required for vendor booking");
-      }
-      const valueNum = Number.parseFloat(form.shipmentValue.trim() || "0");
-      const proformaSum = (form.proforma.lines ?? []).reduce((acc, l) => {
-        const n = Number.parseFloat(l.amount.trim() || "0");
-        return acc + (Number.isFinite(n) ? n : 0);
-      }, 0);
-      if ((!Number.isFinite(valueNum) || valueNum <= 0) && proformaSum <= 0) {
-        errors.push("Shipment Value must be greater than 0 for vendor booking");
-      }
-      if (!form.proforma.invoiceNo.trim() && !form.awbNo.trim()) {
-        errors.push("Invoice No is required on the Proforma tab for vendor booking");
-      }
-      const product = form.product.code.trim().toUpperCase();
-      if (product.includes("MEDICINE")) {
-        const w = Number.parseFloat(form.chargeWeight.trim() || form.actualWeight.trim() || "0");
-        if (!Number.isFinite(w) || w < 0.5) {
-          errors.push("MEDICINE product requires charge weight of at least 0.500 kg");
+      if (!form.product.code.trim()) errors.push("Product is required");
+      if (!form.bookDate.trim()) errors.push("Book date is required");
+      if (form.piecesLines.length < 1) errors.push("At least one shipment piece is required");
+      if (form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim()) {
+        if (!form.service.code.trim() && !form.service.name.trim()) {
+          errors.push("Service is required when Vendor is selected");
+        }
+        if (!form.shipper.mobileNo.trim() && !form.shipper.telephone.trim()) {
+          errors.push("Shipper mobile number is required for vendor OTP");
+        }
+        if (!form.shipper.documentType.trim()) {
+          errors.push("Shipper Document Type is required for vendor booking");
+        }
+        if (!form.shipper.documentNo.trim()) {
+          errors.push("Shipper Document No is required for vendor booking");
+        }
+        if (!form.shipper.address1.trim()) {
+          errors.push("Shipper Address 1 is required for vendor booking");
+        }
+        if (!form.content.trim() && !(form.proforma.lines ?? []).some((l) => l.description.trim())) {
+          errors.push("Content (or proforma description) is required for vendor booking");
+        }
+        const valueNum = Number.parseFloat(form.shipmentValue.trim() || "0");
+        const proformaSum = (form.proforma.lines ?? []).reduce((acc, l) => {
+          const n = Number.parseFloat(l.amount.trim() || "0");
+          return acc + (Number.isFinite(n) ? n : 0);
+        }, 0);
+        if ((!Number.isFinite(valueNum) || valueNum <= 0) && proformaSum <= 0) {
+          errors.push("Shipment Value must be greater than 0 for vendor booking");
+        }
+        if (!form.proforma.invoiceNo.trim() && !form.awbNo.trim()) {
+          errors.push("Invoice No is required on the Proforma tab for vendor booking");
+        }
+        const product = form.product.code.trim().toUpperCase();
+        if (product.includes("MEDICINE")) {
+          const w = Number.parseFloat(form.chargeWeight.trim() || form.actualWeight.trim() || "0");
+          if (!Number.isFinite(w) || w < 0.5) {
+            errors.push("MEDICINE product requires charge weight of at least 0.500 kg");
+          }
         }
       }
-    }
 
-    // Production & Compliance checks
-    errors.push(...collectAwbProductionErrors(form, loadedClientProfile));
-    if (form.piecesLines.length === 0) {
+      // Production & Compliance checks
+      errors.push(...collectAwbProductionErrors(form, loadedClientProfile));
+      if (form.piecesLines.length === 0) {
+        const isInch = (piecesDraft.measurementUnit || "").toUpperCase().startsWith("INCH");
+        const hasDims = Number(piecesDraft.length) > 0 || Number(piecesDraft.width) > 0 || Number(piecesDraft.height) > 0;
+        if (isInch && hasDims) {
+          const div = Number(piecesDraft.division);
+          if (!div || div === 5000) {
+            errors.push("No inch volumetric divisor (e.g. 305 or 166) is configured for this customer or vendor. Configure an inch divisor or enter dimensions in cm.");
+          }
+        }
+      }
+
+      const shipperDocErrors = validatePartyIdNumbers(form.shipper, "Shipper");
+      const consigneeDocErrors = validatePartyIdNumbers(form.consignee, "Consignee");
+      errors.push(...shipperDocErrors);
+      errors.push(...consigneeDocErrors);
+
+      return errors;
+    };
+
+    const handleBook = async () => {
+      if (isReadOnly) return;
+      const clientErrors = collectClientBookingErrors();
+      if (clientErrors.length > 0) {
+        setBookingErrors(clientErrors);
+        toast.error(clientErrors.join("; "));
+        return;
+      }
+      setBookingErrors([]);
+
+      const payload = normalizeForm({
+        ...form,
+        awbNo: form.awbNo.trim(),
+        deliveryNo: form.forwarding.deliveryAwb.trim(),
+        forwardingNo: form.forwarding.forwardingAwb.trim(),
+      });
+
+      if (authed) {
+        setSaving(true);
+        try {
+          if (awbMode === "MANUAL" && payload.awbNo.trim()) {
+            const manualCheck = await validateManualAwb({
+              branchId: activeBranchId || profile?.home_branch_id || undefined,
+              awbNo: payload.awbNo,
+            });
+            if (!manualCheck.valid) {
+              setBookingErrors([manualCheck.message || "Manual AWB number is invalid"]);
+              toast.error(manualCheck.message || "Manual AWB number is invalid");
+              return;
+            }
+          }
+
+          const vendorServiceError = await validateVendorServicePair(payload);
+          if (vendorServiceError) {
+            setBookingErrors([vendorServiceError]);
+            toast.error(vendorServiceError);
+            return;
+          }
+
+          let carrierDocsToPersist: Array<{ docType: string; label: string; contentB64: string; mimeType: string }> = [];
+
+          // Trigger World-First AWB Booking API if vendor is World Freight Transportation
+          if (isWorldFirstVendor(payload.vendor)) {
+            const wfPayload = buildWfBookingPayload(payload as unknown as Record<string, unknown>);
+            const validation = validateWfBookingRequest(wfPayload);
+            if (!validation.valid) {
+              const msg = `World-First Validation Error: ${validation.errors.join("; ")}`;
+              toast.error(msg);
+              setBookingErrors(validation.errors);
+              return;
+            }
+
+            const wfResult = await callWorldFirstBookingApi(wfPayload);
+            if (wfResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
+              toast.warning(
+                wfResult.message ||
+                "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
+              );
+            } else if (!wfResult.success) {
+              const err = wfResult.message || wfResult.apiError || "World-First AWB Booking Failed";
+              toast.error(`World-First API Error: ${err}`);
+              console.error("World-First AWB Booking Failed:", wfResult);
+              setBookingErrors([err]);
+              return; // Abort booking if World-First booking fails
+            }
+
+            if (wfResult.awbNo) {
+              payload.forwarding.forwardingAwb = wfResult.awbNo;
+              payload.forwardingNo = wfResult.awbNo;
+            }
+            if (wfResult.documents?.length) {
+              carrierDocsToPersist = wfResult.documents;
+            }
+            toast.success(`World-First AWB Booking Successful! (Ref: ${wfResult.awbNo || wfResult.refNo})`);
+          } else if (isUpsVendor(payload.vendor)) {
+            // Trigger UPS AWB Booking API if vendor is UPS
+            const upsPayload = buildUpsBookingPayload(payload as unknown as Record<string, unknown>, {
+              serviceName: payload.service.name || payload.service.code || "WORLDWIDE EXPRESS SAVER",
+            });
+            const validation = validateWfBookingRequest(upsPayload);
+            if (!validation.valid) {
+              const msg = `UPS Validation Error: ${validation.errors.join("; ")}`;
+              toast.error(msg);
+              setBookingErrors(validation.errors);
+              return;
+            }
+
+            const upsResult = await callWorldFirstBookingApi(upsPayload, getUpsClientConfig());
+            if (upsResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
+              toast.warning(
+                upsResult.message ||
+                "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
+              );
+            } else if (!upsResult.success) {
+              const err = upsResult.message || upsResult.apiError || "UPS AWB Booking Failed";
+              toast.error(`UPS API Error: ${err}`);
+              console.error("UPS AWB Booking Failed:", upsResult);
+              setBookingErrors([err]);
+              return; // Abort booking if UPS booking fails
+            }
+
+            if (upsResult.awbNo) {
+              payload.forwarding.forwardingAwb = upsResult.awbNo;
+              payload.forwardingNo = upsResult.awbNo;
+            }
+            if (upsResult.documents?.length) {
+              carrierDocsToPersist = upsResult.documents;
+            }
+            toast.success(`UPS AWB Booking Successful! (AWB: ${upsResult.awbNo || upsResult.refNo})`);
+          }
+          const { fields, pieces, charges } = uiFormToShipmentPayload(
+            {
+              ...payload,
+              pickupId: editing?.pickupId ?? payload.pickupId,
+            },
+            {
+              manualAwbNo: awbMode === "MANUAL" ? payload.awbNo : null,
+              branchId: activeBranchId || profile?.home_branch_id,
+            },
+          );
+          const booked = await bookAwbShipment({
+            id: editing?.id ?? null,
+            rowVersion: editing?.rowVersion ?? null,
+            fields,
+            pieces,
+            charges,
+          });
+          if (carrierDocsToPersist.length > 0) {
+            for (const doc of carrierDocsToPersist) {
+              try {
+                const vType = doc.docType === "INVOICE" ? "VENDOR_INVOICE" : "VENDOR_AWB";
+                const cType = doc.docType === "INVOICE" ? "INVOICE" : "AWB_LABEL";
+                await saveShipmentDocument({
+                  shipmentId: booked.id,
+                  documentType: vType as any,
+                  source: "VENDOR",
+                  vendor: payload.vendor.code || payload.vendor.name || "UPS",
+                  fileName: `${payload.vendor.code || "UPS"}_${doc.docType}_${booked.awb_no}.pdf`,
+                  contentB64: doc.contentB64,
+                  mimeType: doc.mimeType || "application/pdf",
+                  status: "AVAILABLE",
+                  rawMeta: { awbNo: booked.awb_no, forwardingAwb: payload.forwardingNo },
+                });
+                await saveShipmentDocument({
+                  shipmentId: booked.id,
+                  documentType: cType as any,
+                  source: "VENDOR",
+                  vendor: payload.vendor.code || payload.vendor.name || "UPS",
+                  fileName: `${payload.vendor.code || "UPS"}_${cType}_${booked.awb_no}.pdf`,
+                  contentB64: doc.contentB64,
+                  mimeType: doc.mimeType || "application/pdf",
+                  status: "AVAILABLE",
+                  rawMeta: { awbNo: booked.awb_no, forwardingAwb: payload.forwardingNo },
+                });
+              } catch (e) {
+                console.warn("Could not save carrier document:", e);
+              }
+            }
+          }
+          await rememberPartiesAfterAwbSave({
+            shipper: payload.shipper,
+            consignee: payload.consignee,
+          });
+          try {
+            const breakdown = await getRatingBreakdown(booked.id);
+            applyServerRating(breakdown);
+            toast.success(
+              `AWB ${booked.awb_no} booked — total ${ratingToSummary(breakdown).totalAmount}`,
+            );
+          } catch {
+            toast.success(`AWB ${booked.awb_no} booked`);
+          }
+
+          const lockDisplay = await lockDisplayFor(booked);
+          setEditing((prev) => ({
+            ...(prev ?? ({ ...payload, id: booked.id } as AwbRow)),
+            id: booked.id,
+            rowVersion: booked.row_version,
+            status: booked.current_status ?? "BOOKED",
+            awbNo: booked.awb_no || payload.awbNo,
+            lockedByName: lockDisplay.lockedByName,
+            lockedAt: lockDisplay.lockedAt,
+            serverLocked: Boolean(booked.is_locked),
+          }));
+          setForm((f) => ({ ...f, awbNo: booked.awb_no || f.awbNo }));
+          setLastSavedForm({ ...payload, awbNo: booked.awb_no || payload.awbNo });
+          allowLeaveRef.current = true;
+          await clearDraftState();
+
+          const bookedForm = {
+            ...payload,
+            awbNo: booked.awb_no || payload.awbNo,
+          };
+          try {
+            await ensureBookedShipmentDocuments({
+              shipmentId: booked.id,
+              form: bookedForm,
+              vendor: bookedForm.vendor.code || bookedForm.vendor.name || null,
+            });
+            setVendorPanelKey((k) => k + 1);
+          } catch {
+            /* internal AWB label optional on book */
+          }
+
+          // Vendor Shipping pipeline (provider-agnostic) — keep form open for OTP/docs
+          let shippingEnabled = false;
+          let shippingSkipReason: string | null = null;
+          try {
+            const ctx = await getVendorShippingContext(booked.id);
+            shippingEnabled = ctx.shippingApiEnabled;
+            if (!shippingEnabled) {
+              shippingSkipReason =
+                "Vendor shipping is not configured for this vendor. AWB booked locally only — no OTP.";
+            }
+          } catch (ctxErr) {
+            shippingEnabled = false;
+            shippingSkipReason = toErrorMessage(
+              ctxErr,
+              "Could not load vendor shipping config. AWB booked locally only — no OTP.",
+            );
+          }
+
+          if (shippingEnabled) {
+            setVendorBookingBusy(true);
+            setVendorMeta({ status: "BOOKING_IN_PROGRESS", provider: undefined });
+            try {
+              const outcome = await startVendorBooking({
+                shipmentId: booked.id,
+                rowVersion: booked.row_version,
+              });
+              setEditing((prev) =>
+                prev ? { ...prev, rowVersion: outcome.rowVersion, status: "BOOKED" } : prev,
+              );
+              setVendorMeta({
+                status: outcome.vendorApiStatus as VendorApiStatus,
+                vendorAwb: outcome.result.vendorAwb,
+                trackingNumber: outcome.result.vendorTrackingNumber,
+                bookingId: outcome.result.vendorBookingId,
+                provider: outcome.result.vendorProvider,
+                serviceCode: outcome.result.vendorServiceCode,
+                otpVerified: outcome.result.otpVerified,
+                syncStatus: outcome.result.syncStatus,
+                lastError: outcome.result.error,
+              });
+              setVendorLastResult(outcome.result);
+              setVendorPanelKey((k) => k + 1);
+              if (outcome.result.status === "OTP_REQUIRED") {
+                const mobile =
+                  outcome.result.shipperMobileMasked ||
+                  (form.shipper.mobileNo.trim() || form.shipper.telephone.trim()
+                    ? maskMobile(form.shipper.mobileNo.trim() || form.shipper.telephone.trim())
+                    : null);
+                setVendorOtpMobile(mobile);
+                setVendorSandboxOtp(null);
+                setVendorOtpError(null);
+                setVendorOtpOpen(true);
+                toast.message("OTP sent to the shipper mobile. Enter the code they received.");
+              } else if (outcome.result.status === "SUCCESS") {
+                toast.success("Vendor booking completed");
+                if (outcome.result.vendorAwb) {
+                  setForm((f) => ({
+                    ...f,
+                    forwardingNo: outcome.result.vendorAwb || f.forwardingNo,
+                    forwarding: {
+                      ...f.forwarding,
+                      forwardingAwb: outcome.result.vendorAwb || f.forwarding.forwardingAwb,
+                    },
+                  }));
+                }
+              } else {
+                toast.warning(
+                  outcome.result.message ||
+                  "Vendor booking failed. Shipment has been saved locally. Retry later.",
+                );
+              }
+            } catch (ve) {
+              toast.warning(toErrorMessage(ve, "Vendor booking failed. Shipment saved locally."));
+              setVendorMeta({ status: "VENDOR_PENDING", lastError: toErrorMessage(ve) });
+            } finally {
+              setVendorBookingBusy(false);
+            }
+            await refreshLive();
+            return;
+          }
+
+          if (shippingSkipReason) {
+            toast.message(shippingSkipReason);
+          }
+          await refreshLive();
+          // Keep form open so internal AWB Label / Documents Center are available
+        } catch (e) {
+          const msg = toErrorMessage(e);
+          setBookingErrors(msg.split("; ").filter(Boolean));
+          toast.error(msg);
+        } finally {
+          setSaving(false);
+        }
+        return;
+      }
+
+      if (!payload.awbNo.trim()) return toast.error("AWB No is required");
+      if (editing) {
+        setDemoRows((prev) =>
+          prev.map((r) =>
+            r.id === editing.id
+              ? { ...payload, id: editing.id, rowVersion: r.rowVersion, status: "BOOKED" }
+              : r,
+          ),
+        );
+      } else {
+        if (demoRows.some((r) => r.awbNo === payload.awbNo))
+          return toast.error("AWB No already exists");
+        setDemoRows((prev) => [{ id: crypto.randomUUID(), status: "BOOKED", ...payload }, ...prev]);
+      }
+      toast.success(`AWB ${payload.awbNo} booked`);
+      setLastSavedForm(payload);
+      allowLeaveRef.current = true;
+      await clearDraftState();
+      closeForm();
+    };
+
+    const confirmCancelShipment = async () => {
+      const target = cancelShipmentTarget ?? editing;
+      if (!target?.id) return;
+      if (authed) {
+        try {
+          await cancelShipment({
+            id: target.id,
+            rowVersion: target.rowVersion ?? 1,
+            reason: "Cancelled from AWB Entry",
+          });
+          await refreshLive();
+          toast.success(`Cancelled AWB ${target.awbNo}`);
+          setCancelShipmentTarget(null);
+          if (editing?.id === target.id) closeForm();
+        } catch (e) {
+          toast.error(toErrorMessage(e));
+        }
+        return;
+      }
+      setDemoRows((prev) =>
+        prev.map((r) => (r.id === target.id ? { ...r, status: "CANCELLED" } : r)),
+      );
+      toast.success(`Cancelled AWB ${target.awbNo}`);
+      setCancelShipmentTarget(null);
+      if (editing?.id === target.id) closeForm();
+    };
+
+    const resolveCarrierCode = () =>
+      editing?.carrierProviderCode ||
+      normalizeVendorToCarrierCode(form.vendor.code) ||
+      normalizeVendorToCarrierCode(editing?.vendor?.code) ||
+      "FEDEX";
+
+    const patchEditingCarrier = (data: Record<string, unknown> | undefined) => {
+      if (!editing || !data) return;
+      setEditing((prev) =>
+        prev
+          ? {
+            ...prev,
+            rowVersion: Number(data.row_version ?? prev.rowVersion ?? 1),
+            carrierProviderCode: data.provider_code
+              ? String(data.provider_code)
+              : prev.carrierProviderCode,
+            carrierBookingRef: data.booking_ref ? String(data.booking_ref) : prev.carrierBookingRef,
+            carrierTrackingNo: data.tracking_no ? String(data.tracking_no) : prev.carrierTrackingNo,
+            carrierBookingStatus: data.carrier_booking_status
+              ? String(data.carrier_booking_status)
+              : prev.carrierBookingStatus,
+            carrierLabelFileId: data.file_id ? String(data.file_id) : prev.carrierLabelFileId,
+          }
+          : prev,
+      );
+    };
+
+    const handleCarrierBook = async () => {
+      if (!editing?.id) return;
+      if (!authed) {
+        setEditing((prev) =>
+          prev
+            ? {
+              ...prev,
+              carrierProviderCode: resolveCarrierCode(),
+              carrierBookingRef: `DEMO-${Date.now()}`,
+              carrierTrackingNo: `TRK-${editing.awbNo || "DEMO"}`,
+              carrierBookingStatus: "BOOKED",
+            }
+            : prev,
+        );
+        toast.success("Booked with carrier (demo)");
+        return;
+      }
+      setSaving(true);
+      try {
+        const code = resolveCarrierCode();
+        const result = await getCarrierAdapter(code).book({
+          shipmentId: editing.id,
+          rowVersion: editing.rowVersion ?? 1,
+        });
+        if (result.status !== "SUCCESS") throw new Error(result.message);
+        patchEditingCarrier(result.data);
+        await refreshLive();
+        toast.success(
+          `Carrier booked (${result.data?.provider_code ?? code}) — ${result.data?.tracking_no ?? ""}`,
+        );
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const handleCarrierCancel = async () => {
+      if (!editing?.id) return;
+      if (!authed) {
+        setEditing((prev) => (prev ? { ...prev, carrierBookingStatus: "CANCELLED" } : prev));
+        toast.success("Carrier booking cancelled (demo)");
+        return;
+      }
+      setSaving(true);
+      try {
+        const code = resolveCarrierCode();
+        const result = await getCarrierAdapter(code).cancel({
+          shipmentId: editing.id,
+          rowVersion: editing.rowVersion ?? 1,
+        });
+        if (result.status !== "SUCCESS") throw new Error(result.message);
+        patchEditingCarrier(result.data);
+        await refreshLive();
+        toast.success("Carrier booking cancelled");
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const handleCarrierTrack = async () => {
+      if (!editing?.id) return;
+      if (!authed) {
+        toast.success("Tracking refreshed (demo)");
+        return;
+      }
+      setSaving(true);
+      try {
+        const code = resolveCarrierCode();
+        const result = await getCarrierAdapter(code).track({
+          shipmentId: editing.id,
+          rowVersion: editing.rowVersion ?? 1,
+        });
+        if (result.status !== "SUCCESS") throw new Error(result.message);
+        patchEditingCarrier(result.data);
+        await refreshLive();
+        toast.success("Carrier tracking refreshed");
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const handleCarrierLabel = async () => {
+      if (!editing?.id) return;
+      if (!authed) {
+        toast.success("Label metadata ready (demo)");
+        return;
+      }
+      setSaving(true);
+      try {
+        const code = resolveCarrierCode();
+        const result = await getCarrierAdapter(code).label({
+          shipmentId: editing.id,
+          rowVersion: editing.rowVersion ?? 1,
+        });
+        if (result.status !== "SUCCESS") throw new Error(result.message);
+        patchEditingCarrier(result.data);
+        await refreshLive();
+        toast.success(
+          `Label metadata: ${result.data?.original_name ?? result.data?.file_id ?? "saved"}`,
+        );
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const handleCarrierServiceability = async () => {
+      const origin = form.shipper.pincode.trim();
+      const dest = form.consignee.pincode.trim();
+      if (!origin || !dest) {
+        toast.error("Shipper and consignee pincode are required for serviceability");
+        return;
+      }
+      if (!authed) {
+        toast.success(`Serviceable (demo): ${origin} → ${dest}`);
+        return;
+      }
+      setSaving(true);
+      try {
+        const code = resolveCarrierCode();
+        const result = await getCarrierAdapter(code).serviceability({
+          originPincode: origin,
+          destinationPincode: dest,
+        });
+        if (result.status !== "SUCCESS") throw new Error(result.message);
+        toast.success(
+          `${code}: ${result.message}${result.data?.reason ? ` — ${result.data.reason}` : ""}`,
+        );
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const canCarrierActions = Boolean(
+      editing?.id &&
+      formStatus &&
+      formStatus !== "DRAFT" &&
+      formStatus !== "CANCELLED" &&
+      formStatus !== "VOID",
+    );
+    const vendorShippingActive = Boolean(
+      vendorMeta.status && vendorMeta.status !== "NONE",
+    );
+    /** Documents Center for booked / in-progress shipments (AWB Label, Invoice, vendor docs). */
+    const showShipmentDocumentsCenter = Boolean(
+      editing?.id && shipmentNeedsSystemDocuments(formStatus),
+    );
+    const canRetryVendorBooking = Boolean(
+      editing?.id &&
+      (vendorMeta.status === "VENDOR_PENDING" || vendorMeta.status === "FAILED"),
+    );
+
+    const ensureInternalDocument = async (
+      type: string,
+    ): Promise<ShipmentDocumentItem | null> => {
+      if (!editing?.id) return null;
+
+      // System docs: build HTML sync-fast and return immediately (open in tab/sheet).
+      // PDF save continues in background inside ensure* helpers.
+      // Authority Letter is vendor-only (API) — not generated here.
+      if (type === "AWB_LABEL") {
+        const html = buildAwbLabelHtml(formToAwbLabelInput(form));
+        void ensureAwbLabelDocument({
+          shipmentId: editing.id,
+          form,
+          force: true,
+        }).then(() => setVendorPanelKey((k) => k + 1));
+        return {
+          type: "AWB_LABEL",
+          title: "AWB Label",
+          status: "AVAILABLE",
+          available: true,
+          fileName: `AWB-${form.awbNo || "label"}.pdf`,
+          mimeType: "text/html",
+          htmlPreview: html,
+          source: "SYSTEM",
+        };
+      }
+
+      if (type === "INVOICE") {
+        const html = buildInvoiceHtml(formToInvoiceInput(form));
+        void ensureInvoiceDocument({
+          shipmentId: editing.id,
+          form,
+          force: true,
+        }).then(() => setVendorPanelKey((k) => k + 1));
+        return {
+          type: "INVOICE",
+          title: "Invoice",
+          status: "AVAILABLE",
+          available: true,
+          fileName: `Invoice-${form.awbNo || "invoice"}.pdf`,
+          mimeType: "text/html",
+          htmlPreview: html,
+          source: "SYSTEM",
+        };
+      }
+
+      // Vendor / other docs: load stored bytes for preview
+      const stored = await getShipmentDocument(editing.id, type);
+      if (!stored?.available) return null;
+      return stored;
+    };
+
+    const runVendorOtpVerify = async (otp: string) => {
+      if (!editing?.id) return;
+      setVendorBookingBusy(true);
+      setVendorOtpError(null);
+      try {
+        const outcome = await verifyVendorOtp({
+          shipmentId: editing.id,
+          rowVersion: editing.rowVersion ?? 1,
+          otp,
+        });
+        setEditing((prev) => (prev ? { ...prev, rowVersion: outcome.rowVersion } : prev));
+        setVendorMeta({
+          status: outcome.vendorApiStatus as VendorApiStatus,
+          vendorAwb: outcome.result.vendorAwb,
+          trackingNumber: outcome.result.vendorTrackingNumber,
+          bookingId: outcome.result.vendorBookingId,
+          provider: outcome.result.vendorProvider,
+          serviceCode: outcome.result.vendorServiceCode,
+          otpVerified: outcome.result.otpVerified,
+          syncStatus: outcome.result.syncStatus,
+          lastError: outcome.result.error,
+        });
+        setVendorLastResult(outcome.result);
+        setVendorPanelKey((k) => k + 1);
+        if (outcome.result.status === "SUCCESS") {
+          setVendorOtpOpen(false);
+          toast.success("OTP verified — vendor booking completed");
+          if (outcome.result.vendorAwb) {
+            setForm((f) => ({
+              ...f,
+              forwardingNo: outcome.result.vendorAwb || f.forwardingNo,
+              forwarding: {
+                ...f.forwarding,
+                forwardingAwb: outcome.result.vendorAwb || f.forwarding.forwardingAwb,
+              },
+            }));
+          }
+        } else if (outcome.result.status === "OTP_REQUIRED") {
+          setVendorOtpError(outcome.result.message || "Invalid OTP");
+        } else {
+          setVendorOtpError(outcome.result.message || "Verification failed");
+        }
+      } catch (e) {
+        setVendorOtpError(toErrorMessage(e));
+      } finally {
+        setVendorBookingBusy(false);
+      }
+    };
+
+    const runVendorRetry = async () => {
+      if (!editing?.id) return;
+      setVendorBookingBusy(true);
+      try {
+        const outcome = await retryVendorBooking({
+          shipmentId: editing.id,
+          rowVersion: editing.rowVersion ?? 1,
+        });
+        setEditing((prev) => (prev ? { ...prev, rowVersion: outcome.rowVersion } : prev));
+        setVendorMeta({
+          status: outcome.vendorApiStatus as VendorApiStatus,
+          vendorAwb: outcome.result.vendorAwb,
+          trackingNumber: outcome.result.vendorTrackingNumber,
+          bookingId: outcome.result.vendorBookingId,
+          provider: outcome.result.vendorProvider,
+          serviceCode: outcome.result.vendorServiceCode,
+          otpVerified: outcome.result.otpVerified,
+          syncStatus: outcome.result.syncStatus,
+          lastError: outcome.result.error,
+        });
+        setVendorLastResult(outcome.result);
+        setVendorPanelKey((k) => k + 1);
+        if (outcome.result.status === "OTP_REQUIRED") {
+          const mobile =
+            outcome.result.shipperMobileMasked ||
+            (form.shipper.mobileNo.trim() || form.shipper.telephone.trim()
+              ? maskMobile(form.shipper.mobileNo.trim() || form.shipper.telephone.trim())
+              : null);
+          setVendorOtpMobile(mobile);
+          setVendorSandboxOtp(null);
+          setVendorOtpError(null);
+          setVendorOtpOpen(true);
+          toast.message("OTP sent to the shipper mobile. Enter the code they received.");
+        } else if (outcome.result.status === "SUCCESS") {
+          toast.success("Vendor booking completed");
+        } else {
+          toast.warning(outcome.result.message || "Vendor booking failed");
+        }
+      } catch (e) {
+        toast.error(toErrorMessage(e));
+      } finally {
+        setVendorBookingBusy(false);
+      }
+    };
+    const carrierBooked = editing?.carrierBookingStatus === "BOOKED";
+
+    const confirmDelete = async () => {
+      if (!deleteTarget) return;
+      if (authed) {
+        try {
+          await cancelShipment({
+            id: deleteTarget.id,
+            rowVersion: deleteTarget.rowVersion ?? 1,
+            reason: "Cancelled from AWB Entry",
+          });
+          await refreshLive();
+          toast.success(`Cancelled AWB ${deleteTarget.awbNo}`);
+        } catch (e) {
+          toast.error(toErrorMessage(e));
+          return;
+        } finally {
+          setDeleteTarget(null);
+        }
+        return;
+      }
+      setDemoRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+      toast.success(`Deleted AWB ${deleteTarget.awbNo}`);
+      setDeleteTarget(null);
+    };
+
+    const clearColFilters = (silent = false) => {
+      setColFilters(emptyColFilters());
+      setPage(1);
+      if (!silent) toast.success("Column filters cleared");
+    };
+
+    const handleRefresh = async () => {
+      setSearchInput("");
+      setAppliedSearch(null);
+      clearColFilters(true);
+      setPage(1);
+      if (authed) {
+        try {
+          await refreshLive();
+          toast.success("Refreshed");
+        } catch (e) {
+          toast.error(toErrorMessage(e));
+        }
+        return;
+      }
+      toast.success("Refreshed");
+    };
+
+    const handleSearch = async () => {
+      const query = searchInput.trim();
+      setAppliedSearch(query ? { field: searchField, query } : null);
+      setPage(1);
+      if (!query) return;
+
+      // CourierWala-style: searching an AWB opens the full entry form.
+      if (authed) {
+        try {
+          setSaving(true);
+          const field =
+            searchField === "forwardingNo"
+              ? "forwarding_awb"
+              : searchField === "deliveryNo"
+                ? "delivery_awb"
+                : searchField === "referenceNo"
+                  ? "reference_no"
+                  : "awb_no";
+          const found = await findShipmentBySearch({ query, field });
+          if (!found) {
+            toast.error("No AWB entry found");
+            return;
+          }
+          await openEdit({
+            ...emptyForm(),
+            id: found.id,
+            rowVersion: found.row_version,
+            status: found.current_status ?? "DRAFT",
+            awbNo: found.awb_no ?? query,
+          } as AwbRow);
+          toast.success(`Opened AWB ${found.awb_no ?? query}`);
+        } catch (e) {
+          toast.error(toErrorMessage(e, "Search failed"));
+        } finally {
+          setSaving(false);
+        }
+        return;
+      }
+
+      const match = rows.find((r) => {
+        const val = String(r[searchField] ?? "");
+        return val.toLowerCase().includes(query.toLowerCase());
+      });
+      if (match) {
+        await openEdit(match);
+        toast.success(`Opened AWB ${match.awbNo}`);
+      } else {
+        toast.error("No AWB entry found");
+      }
+    };
+
+    const patchPiecesDraft = (patch: Partial<PiecesDraft>) => {
+      setPiecesDraft((d) => {
+        const next = { ...d, ...patch };
+        next.volWeight = calcVolWeight(next);
+        next.chargeWeight = calcChargeWeight(next);
+        return next;
+      });
+    };
+
+    const downloadMtsTemplate = () => {
+      void downloadAwbMtsTemplate()
+        .then(() => toast.success("AWBMtsFormat.xlsx downloaded"))
+        .catch((error) => toast.error(toErrorMessage(error, "Could not download the MTS template")));
+    };
+
+    const uploadMtsFile = async () => {
+      const file = mtsFileRef.current?.files?.[0];
+      if (!file) {
+        toast.error("Select an Excel or CSV file");
+        return;
+      }
+      if (!mtsFileAccepted(file.name)) {
+        toast.error("Use an Excel (.xlsx, .xls) or CSV file");
+        return;
+      }
+      try {
+        const parsed = await parseTabularFile(file);
+        const inchDivisor = Number.parseFloat(
+          resolveDivision({
+            measurementUnit: "Inch",
+            productCode: form.product.code,
+            productName: form.product.name,
+            vendorCode: form.vendor.code,
+            vendorName: form.vendor.name,
+            serviceCode: form.service.code,
+            serviceName: form.service.name,
+            rows: volumetricRows,
+          }),
+        );
+        const { lines, errors } = mtsPiecesFromRows(parsed.rows, {
+          inchDivisor: inchDivisor > 0 && inchDivisor !== 5000 ? inchDivisor : undefined,
+        });
+        if (lines.length === 0) {
+          toast.error(errors[0] ?? "No piece rows found in the file");
+          return;
+        }
+        setForm((current) => ({ ...current, piecesLines: [...current.piecesLines, ...lines] }));
+        if (mtsFileRef.current) mtsFileRef.current.value = "";
+        if (errors.length > 0) {
+          toast.warning(`Added ${lines.length} piece row${lines.length === 1 ? "" : "s"}. ${errors[0]}`);
+          return;
+        }
+        toast.success(`Added ${lines.length} piece row${lines.length === 1 ? "" : "s"}`);
+      } catch (error) {
+        toast.error(toErrorMessage(error, "Could not read the MTS file"));
+      }
+    };
+
+    const addPiecesLine = () => {
+      if (!piecesDraft.noOfPieces.trim()) return toast.error("No. Of Pieces is required");
       const isInch = (piecesDraft.measurementUnit || "").toUpperCase().startsWith("INCH");
       const hasDims = Number(piecesDraft.length) > 0 || Number(piecesDraft.width) > 0 || Number(piecesDraft.height) > 0;
       if (isInch && hasDims) {
         const div = Number(piecesDraft.division);
         if (!div || div === 5000) {
-          errors.push("No inch volumetric divisor (e.g. 305 or 166) is configured for this customer or vendor. Configure an inch divisor or enter dimensions in cm.");
+          return toast.error("No inch volumetric divisor (e.g. 305 or 166) is configured for this customer or vendor. Configure an inch divisor or enter dimensions in cm.");
         }
       }
-    }
-
-    const shipperDocErrors = validatePartyIdNumbers(form.shipper, "Shipper");
-    const consigneeDocErrors = validatePartyIdNumbers(form.consignee, "Consignee");
-    errors.push(...shipperDocErrors);
-    errors.push(...consigneeDocErrors);
-
-    return errors;
-  };
-
-  const handleBook = async () => {
-    if (isReadOnly) return;
-    const clientErrors = collectClientBookingErrors();
-    if (clientErrors.length > 0) {
-      setBookingErrors(clientErrors);
-      toast.error(clientErrors.join("; "));
-      return;
-    }
-    setBookingErrors([]);
-
-    const payload = normalizeForm({
-      ...form,
-      awbNo: form.awbNo.trim(),
-      deliveryNo: form.forwarding.deliveryAwb.trim(),
-      forwardingNo: form.forwarding.forwardingAwb.trim(),
-    });
-
-    if (authed) {
-      setSaving(true);
-      try {
-        if (awbMode === "MANUAL" && payload.awbNo.trim()) {
-          const manualCheck = await validateManualAwb({
-            branchId: activeBranchId || profile?.home_branch_id || undefined,
-            awbNo: payload.awbNo,
-          });
-          if (!manualCheck.valid) {
-            setBookingErrors([manualCheck.message || "Manual AWB number is invalid"]);
-            toast.error(manualCheck.message || "Manual AWB number is invalid");
-            return;
-          }
-        }
-
-        const vendorServiceError = await validateVendorServicePair(payload);
-        if (vendorServiceError) {
-          setBookingErrors([vendorServiceError]);
-          toast.error(vendorServiceError);
-          return;
-        }
-
-        let carrierDocsToPersist: Array<{ docType: string; label: string; contentB64: string; mimeType: string }> = [];
-
-        // Trigger World-First AWB Booking API if vendor is World Freight Transportation
-        if (isWorldFirstVendor(payload.vendor)) {
-          const wfPayload = buildWfBookingPayload(payload as unknown as Record<string, unknown>);
-          const validation = validateWfBookingRequest(wfPayload);
-          if (!validation.valid) {
-            const msg = `World-First Validation Error: ${validation.errors.join("; ")}`;
-            toast.error(msg);
-            setBookingErrors(validation.errors);
-            return;
-          }
-
-          const wfResult = await callWorldFirstBookingApi(wfPayload);
-          if (wfResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
-            toast.warning(
-              wfResult.message ||
-              "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
-            );
-          } else if (!wfResult.success) {
-            const err = wfResult.message || wfResult.apiError || "World-First AWB Booking Failed";
-            toast.error(`World-First API Error: ${err}`);
-            console.error("World-First AWB Booking Failed:", wfResult);
-            setBookingErrors([err]);
-            return; // Abort booking if World-First booking fails
-          }
-
-          if (wfResult.awbNo) {
-            payload.forwarding.forwardingAwb = wfResult.awbNo;
-            payload.forwardingNo = wfResult.awbNo;
-          }
-          if (wfResult.documents?.length) {
-            carrierDocsToPersist = wfResult.documents;
-          }
-          toast.success(`World-First AWB Booking Successful! (Ref: ${wfResult.awbNo || wfResult.refNo})`);
-        } else if (isUpsVendor(payload.vendor)) {
-          // Trigger UPS AWB Booking API if vendor is UPS
-          const upsPayload = buildUpsBookingPayload(payload as unknown as Record<string, unknown>, {
-            serviceName: payload.service.name || payload.service.code || "WORLDWIDE EXPRESS SAVER",
-          });
-          const validation = validateWfBookingRequest(upsPayload);
-          if (!validation.valid) {
-            const msg = `UPS Validation Error: ${validation.errors.join("; ")}`;
-            toast.error(msg);
-            setBookingErrors(validation.errors);
-            return;
-          }
-
-          const upsResult = await callWorldFirstBookingApi(upsPayload, getUpsClientConfig());
-          if (upsResult.apiStatus === "CARRIER_BOOKING_DISABLED") {
-            toast.warning(
-              upsResult.message ||
-              "Carrier booking is temporarily disabled. The shipment will be saved without a carrier AWB.",
-            );
-          } else if (!upsResult.success) {
-            const err = upsResult.message || upsResult.apiError || "UPS AWB Booking Failed";
-            toast.error(`UPS API Error: ${err}`);
-            console.error("UPS AWB Booking Failed:", upsResult);
-            setBookingErrors([err]);
-            return; // Abort booking if UPS booking fails
-          }
-
-          if (upsResult.awbNo) {
-            payload.forwarding.forwardingAwb = upsResult.awbNo;
-            payload.forwardingNo = upsResult.awbNo;
-          }
-          if (upsResult.documents?.length) {
-            carrierDocsToPersist = upsResult.documents;
-          }
-          toast.success(`UPS AWB Booking Successful! (AWB: ${upsResult.awbNo || upsResult.refNo})`);
-        }
-        const { fields, pieces, charges } = uiFormToShipmentPayload(
-          {
-            ...payload,
-            pickupId: editing?.pickupId ?? payload.pickupId,
-          },
-          {
-            manualAwbNo: awbMode === "MANUAL" ? payload.awbNo : null,
-            branchId: activeBranchId || profile?.home_branch_id,
-          },
-        );
-        const booked = await bookAwbShipment({
-          id: editing?.id ?? null,
-          rowVersion: editing?.rowVersion ?? null,
-          fields,
-          pieces,
-          charges,
-        });
-        if (carrierDocsToPersist.length > 0) {
-          for (const doc of carrierDocsToPersist) {
-            try {
-              const vType = doc.docType === "INVOICE" ? "VENDOR_INVOICE" : "VENDOR_AWB";
-              const cType = doc.docType === "INVOICE" ? "INVOICE" : "AWB_LABEL";
-              await saveShipmentDocument({
-                shipmentId: booked.id,
-                documentType: vType as any,
-                source: "VENDOR",
-                vendor: payload.vendor.code || payload.vendor.name || "UPS",
-                fileName: `${payload.vendor.code || "UPS"}_${doc.docType}_${booked.awb_no}.pdf`,
-                contentB64: doc.contentB64,
-                mimeType: doc.mimeType || "application/pdf",
-                status: "AVAILABLE",
-                rawMeta: { awbNo: booked.awb_no, forwardingAwb: payload.forwardingNo },
-              });
-              await saveShipmentDocument({
-                shipmentId: booked.id,
-                documentType: cType as any,
-                source: "VENDOR",
-                vendor: payload.vendor.code || payload.vendor.name || "UPS",
-                fileName: `${payload.vendor.code || "UPS"}_${cType}_${booked.awb_no}.pdf`,
-                contentB64: doc.contentB64,
-                mimeType: doc.mimeType || "application/pdf",
-                status: "AVAILABLE",
-                rawMeta: { awbNo: booked.awb_no, forwardingAwb: payload.forwardingNo },
-              });
-            } catch (e) {
-              console.warn("Could not save carrier document:", e);
-            }
-          }
-        }
-        await rememberPartiesAfterAwbSave({
-          shipper: payload.shipper,
-          consignee: payload.consignee,
-        });
-        try {
-          const breakdown = await getRatingBreakdown(booked.id);
-          applyServerRating(breakdown);
-          toast.success(
-            `AWB ${booked.awb_no} booked — total ${ratingToSummary(breakdown).totalAmount}`,
-          );
-        } catch {
-          toast.success(`AWB ${booked.awb_no} booked`);
-        }
-
-        const lockDisplay = await lockDisplayFor(booked);
-        setEditing((prev) => ({
-          ...(prev ?? ({ ...payload, id: booked.id } as AwbRow)),
-          id: booked.id,
-          rowVersion: booked.row_version,
-          status: booked.current_status ?? "BOOKED",
-          awbNo: booked.awb_no || payload.awbNo,
-          lockedByName: lockDisplay.lockedByName,
-          lockedAt: lockDisplay.lockedAt,
-          serverLocked: Boolean(booked.is_locked),
-        }));
-        setForm((f) => ({ ...f, awbNo: booked.awb_no || f.awbNo }));
-        setLastSavedForm({ ...payload, awbNo: booked.awb_no || payload.awbNo });
-        allowLeaveRef.current = true;
-        await clearDraftState();
-
-        const bookedForm = {
-          ...payload,
-          awbNo: booked.awb_no || payload.awbNo,
-        };
-        try {
-          await ensureBookedShipmentDocuments({
-            shipmentId: booked.id,
-            form: bookedForm,
-            vendor: bookedForm.vendor.code || bookedForm.vendor.name || null,
-          });
-          setVendorPanelKey((k) => k + 1);
-        } catch {
-          /* internal AWB label optional on book */
-        }
-
-        // Vendor Shipping pipeline (provider-agnostic) — keep form open for OTP/docs
-        let shippingEnabled = false;
-        let shippingSkipReason: string | null = null;
-        try {
-          const ctx = await getVendorShippingContext(booked.id);
-          shippingEnabled = ctx.shippingApiEnabled;
-          if (!shippingEnabled) {
-            shippingSkipReason =
-              "Vendor shipping is not configured for this vendor. AWB booked locally only — no OTP.";
-          }
-        } catch (ctxErr) {
-          shippingEnabled = false;
-          shippingSkipReason = toErrorMessage(
-            ctxErr,
-            "Could not load vendor shipping config. AWB booked locally only — no OTP.",
-          );
-        }
-
-        if (shippingEnabled) {
-          setVendorBookingBusy(true);
-          setVendorMeta({ status: "BOOKING_IN_PROGRESS", provider: undefined });
-          try {
-            const outcome = await startVendorBooking({
-              shipmentId: booked.id,
-              rowVersion: booked.row_version,
-            });
-            setEditing((prev) =>
-              prev ? { ...prev, rowVersion: outcome.rowVersion, status: "BOOKED" } : prev,
-            );
-            setVendorMeta({
-              status: outcome.vendorApiStatus as VendorApiStatus,
-              vendorAwb: outcome.result.vendorAwb,
-              trackingNumber: outcome.result.vendorTrackingNumber,
-              bookingId: outcome.result.vendorBookingId,
-              provider: outcome.result.vendorProvider,
-              serviceCode: outcome.result.vendorServiceCode,
-              otpVerified: outcome.result.otpVerified,
-              syncStatus: outcome.result.syncStatus,
-              lastError: outcome.result.error,
-            });
-            setVendorLastResult(outcome.result);
-            setVendorPanelKey((k) => k + 1);
-            if (outcome.result.status === "OTP_REQUIRED") {
-              const mobile =
-                outcome.result.shipperMobileMasked ||
-                (form.shipper.mobileNo.trim() || form.shipper.telephone.trim()
-                  ? maskMobile(form.shipper.mobileNo.trim() || form.shipper.telephone.trim())
-                  : null);
-              setVendorOtpMobile(mobile);
-              setVendorSandboxOtp(null);
-              setVendorOtpError(null);
-              setVendorOtpOpen(true);
-              toast.message("OTP sent to the shipper mobile. Enter the code they received.");
-            } else if (outcome.result.status === "SUCCESS") {
-              toast.success("Vendor booking completed");
-              if (outcome.result.vendorAwb) {
-                setForm((f) => ({
-                  ...f,
-                  forwardingNo: outcome.result.vendorAwb || f.forwardingNo,
-                  forwarding: {
-                    ...f.forwarding,
-                    forwardingAwb: outcome.result.vendorAwb || f.forwarding.forwardingAwb,
-                  },
-                }));
-              }
-            } else {
-              toast.warning(
-                outcome.result.message ||
-                "Vendor booking failed. Shipment has been saved locally. Retry later.",
-              );
-            }
-          } catch (ve) {
-            toast.warning(toErrorMessage(ve, "Vendor booking failed. Shipment saved locally."));
-            setVendorMeta({ status: "VENDOR_PENDING", lastError: toErrorMessage(ve) });
-          } finally {
-            setVendorBookingBusy(false);
-          }
-          await refreshLive();
-          return;
-        }
-
-        if (shippingSkipReason) {
-          toast.message(shippingSkipReason);
-        }
-        await refreshLive();
-        // Keep form open so internal AWB Label / Documents Center are available
-      } catch (e) {
-        const msg = toErrorMessage(e);
-        setBookingErrors(msg.split("; ").filter(Boolean));
-        toast.error(msg);
-      } finally {
-        setSaving(false);
-      }
-      return;
-    }
-
-    if (!payload.awbNo.trim()) return toast.error("AWB No is required");
-    if (editing) {
-      setDemoRows((prev) =>
-        prev.map((r) =>
-          r.id === editing.id
-            ? { ...payload, id: editing.id, rowVersion: r.rowVersion, status: "BOOKED" }
-            : r,
-        ),
-      );
-    } else {
-      if (demoRows.some((r) => r.awbNo === payload.awbNo))
-        return toast.error("AWB No already exists");
-      setDemoRows((prev) => [{ id: crypto.randomUUID(), status: "BOOKED", ...payload }, ...prev]);
-    }
-    toast.success(`AWB ${payload.awbNo} booked`);
-    setLastSavedForm(payload);
-    allowLeaveRef.current = true;
-    await clearDraftState();
-    closeForm();
-  };
-
-  const confirmCancelShipment = async () => {
-    const target = cancelShipmentTarget ?? editing;
-    if (!target?.id) return;
-    if (authed) {
-      try {
-        await cancelShipment({
-          id: target.id,
-          rowVersion: target.rowVersion ?? 1,
-          reason: "Cancelled from AWB Entry",
-        });
-        await refreshLive();
-        toast.success(`Cancelled AWB ${target.awbNo}`);
-        setCancelShipmentTarget(null);
-        if (editing?.id === target.id) closeForm();
-      } catch (e) {
-        toast.error(toErrorMessage(e));
-      }
-      return;
-    }
-    setDemoRows((prev) =>
-      prev.map((r) => (r.id === target.id ? { ...r, status: "CANCELLED" } : r)),
-    );
-    toast.success(`Cancelled AWB ${target.awbNo}`);
-    setCancelShipmentTarget(null);
-    if (editing?.id === target.id) closeForm();
-  };
-
-  const resolveCarrierCode = () =>
-    editing?.carrierProviderCode ||
-    normalizeVendorToCarrierCode(form.vendor.code) ||
-    normalizeVendorToCarrierCode(editing?.vendor?.code) ||
-    "FEDEX";
-
-  const patchEditingCarrier = (data: Record<string, unknown> | undefined) => {
-    if (!editing || !data) return;
-    setEditing((prev) =>
-      prev
-        ? {
-          ...prev,
-          rowVersion: Number(data.row_version ?? prev.rowVersion ?? 1),
-          carrierProviderCode: data.provider_code
-            ? String(data.provider_code)
-            : prev.carrierProviderCode,
-          carrierBookingRef: data.booking_ref ? String(data.booking_ref) : prev.carrierBookingRef,
-          carrierTrackingNo: data.tracking_no ? String(data.tracking_no) : prev.carrierTrackingNo,
-          carrierBookingStatus: data.carrier_booking_status
-            ? String(data.carrier_booking_status)
-            : prev.carrierBookingStatus,
-          carrierLabelFileId: data.file_id ? String(data.file_id) : prev.carrierLabelFileId,
-        }
-        : prev,
-    );
-  };
-
-  const handleCarrierBook = async () => {
-    if (!editing?.id) return;
-    if (!authed) {
-      setEditing((prev) =>
-        prev
-          ? {
-            ...prev,
-            carrierProviderCode: resolveCarrierCode(),
-            carrierBookingRef: `DEMO-${Date.now()}`,
-            carrierTrackingNo: `TRK-${editing.awbNo || "DEMO"}`,
-            carrierBookingStatus: "BOOKED",
-          }
-          : prev,
-      );
-      toast.success("Booked with carrier (demo)");
-      return;
-    }
-    setSaving(true);
-    try {
-      const code = resolveCarrierCode();
-      const result = await getCarrierAdapter(code).book({
-        shipmentId: editing.id,
-        rowVersion: editing.rowVersion ?? 1,
-      });
-      if (result.status !== "SUCCESS") throw new Error(result.message);
-      patchEditingCarrier(result.data);
-      await refreshLive();
-      toast.success(
-        `Carrier booked (${result.data?.provider_code ?? code}) — ${result.data?.tracking_no ?? ""}`,
-      );
-    } catch (e) {
-      toast.error(toErrorMessage(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCarrierCancel = async () => {
-    if (!editing?.id) return;
-    if (!authed) {
-      setEditing((prev) => (prev ? { ...prev, carrierBookingStatus: "CANCELLED" } : prev));
-      toast.success("Carrier booking cancelled (demo)");
-      return;
-    }
-    setSaving(true);
-    try {
-      const code = resolveCarrierCode();
-      const result = await getCarrierAdapter(code).cancel({
-        shipmentId: editing.id,
-        rowVersion: editing.rowVersion ?? 1,
-      });
-      if (result.status !== "SUCCESS") throw new Error(result.message);
-      patchEditingCarrier(result.data);
-      await refreshLive();
-      toast.success("Carrier booking cancelled");
-    } catch (e) {
-      toast.error(toErrorMessage(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCarrierTrack = async () => {
-    if (!editing?.id) return;
-    if (!authed) {
-      toast.success("Tracking refreshed (demo)");
-      return;
-    }
-    setSaving(true);
-    try {
-      const code = resolveCarrierCode();
-      const result = await getCarrierAdapter(code).track({
-        shipmentId: editing.id,
-        rowVersion: editing.rowVersion ?? 1,
-      });
-      if (result.status !== "SUCCESS") throw new Error(result.message);
-      patchEditingCarrier(result.data);
-      await refreshLive();
-      toast.success("Carrier tracking refreshed");
-    } catch (e) {
-      toast.error(toErrorMessage(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCarrierLabel = async () => {
-    if (!editing?.id) return;
-    if (!authed) {
-      toast.success("Label metadata ready (demo)");
-      return;
-    }
-    setSaving(true);
-    try {
-      const code = resolveCarrierCode();
-      const result = await getCarrierAdapter(code).label({
-        shipmentId: editing.id,
-        rowVersion: editing.rowVersion ?? 1,
-      });
-      if (result.status !== "SUCCESS") throw new Error(result.message);
-      patchEditingCarrier(result.data);
-      await refreshLive();
-      toast.success(
-        `Label metadata: ${result.data?.original_name ?? result.data?.file_id ?? "saved"}`,
-      );
-    } catch (e) {
-      toast.error(toErrorMessage(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCarrierServiceability = async () => {
-    const origin = form.shipper.pincode.trim();
-    const dest = form.consignee.pincode.trim();
-    if (!origin || !dest) {
-      toast.error("Shipper and consignee pincode are required for serviceability");
-      return;
-    }
-    if (!authed) {
-      toast.success(`Serviceable (demo): ${origin} → ${dest}`);
-      return;
-    }
-    setSaving(true);
-    try {
-      const code = resolveCarrierCode();
-      const result = await getCarrierAdapter(code).serviceability({
-        originPincode: origin,
-        destinationPincode: dest,
-      });
-      if (result.status !== "SUCCESS") throw new Error(result.message);
-      toast.success(
-        `${code}: ${result.message}${result.data?.reason ? ` — ${result.data.reason}` : ""}`,
-      );
-    } catch (e) {
-      toast.error(toErrorMessage(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const canCarrierActions = Boolean(
-    editing?.id &&
-    formStatus &&
-    formStatus !== "DRAFT" &&
-    formStatus !== "CANCELLED" &&
-    formStatus !== "VOID",
-  );
-  const vendorShippingActive = Boolean(
-    vendorMeta.status && vendorMeta.status !== "NONE",
-  );
-  /** Documents Center for booked / in-progress shipments (AWB Label, Invoice, vendor docs). */
-  const showShipmentDocumentsCenter = Boolean(
-    editing?.id && shipmentNeedsSystemDocuments(formStatus),
-  );
-  const canRetryVendorBooking = Boolean(
-    editing?.id &&
-    (vendorMeta.status === "VENDOR_PENDING" || vendorMeta.status === "FAILED"),
-  );
-
-  const ensureInternalDocument = async (
-    type: string,
-  ): Promise<ShipmentDocumentItem | null> => {
-    if (!editing?.id) return null;
-
-    // System docs: build HTML sync-fast and return immediately (open in tab/sheet).
-    // PDF save continues in background inside ensure* helpers.
-    // Authority Letter is vendor-only (API) — not generated here.
-    if (type === "AWB_LABEL") {
-      const html = buildAwbLabelHtml(formToAwbLabelInput(form));
-      void ensureAwbLabelDocument({
-        shipmentId: editing.id,
-        form,
-        force: true,
-      }).then(() => setVendorPanelKey((k) => k + 1));
-      return {
-        type: "AWB_LABEL",
-        title: "AWB Label",
-        status: "AVAILABLE",
-        available: true,
-        fileName: `AWB-${form.awbNo || "label"}.pdf`,
-        mimeType: "text/html",
-        htmlPreview: html,
-        source: "SYSTEM",
-      };
-    }
-
-    if (type === "INVOICE") {
-      const html = buildInvoiceHtml(formToInvoiceInput(form));
-      void ensureInvoiceDocument({
-        shipmentId: editing.id,
-        form,
-        force: true,
-      }).then(() => setVendorPanelKey((k) => k + 1));
-      return {
-        type: "INVOICE",
-        title: "Invoice",
-        status: "AVAILABLE",
-        available: true,
-        fileName: `Invoice-${form.awbNo || "invoice"}.pdf`,
-        mimeType: "text/html",
-        htmlPreview: html,
-        source: "SYSTEM",
-      };
-    }
-
-    // Vendor / other docs: load stored bytes for preview
-    const stored = await getShipmentDocument(editing.id, type);
-    if (!stored?.available) return null;
-    return stored;
-  };
-
-  const runVendorOtpVerify = async (otp: string) => {
-    if (!editing?.id) return;
-    setVendorBookingBusy(true);
-    setVendorOtpError(null);
-    try {
-      const outcome = await verifyVendorOtp({
-        shipmentId: editing.id,
-        rowVersion: editing.rowVersion ?? 1,
-        otp,
-      });
-      setEditing((prev) => (prev ? { ...prev, rowVersion: outcome.rowVersion } : prev));
-      setVendorMeta({
-        status: outcome.vendorApiStatus as VendorApiStatus,
-        vendorAwb: outcome.result.vendorAwb,
-        trackingNumber: outcome.result.vendorTrackingNumber,
-        bookingId: outcome.result.vendorBookingId,
-        provider: outcome.result.vendorProvider,
-        serviceCode: outcome.result.vendorServiceCode,
-        otpVerified: outcome.result.otpVerified,
-        syncStatus: outcome.result.syncStatus,
-        lastError: outcome.result.error,
-      });
-      setVendorLastResult(outcome.result);
-      setVendorPanelKey((k) => k + 1);
-      if (outcome.result.status === "SUCCESS") {
-        setVendorOtpOpen(false);
-        toast.success("OTP verified — vendor booking completed");
-        if (outcome.result.vendorAwb) {
-          setForm((f) => ({
+      const editedId = editingPiecesId;
+      const updating = editedId != null && form.piecesLines.some((line) => line.id === editedId);
+      setForm((f) => {
+        if (updating && editedId) {
+          return {
             ...f,
-            forwardingNo: outcome.result.vendorAwb || f.forwardingNo,
-            forwarding: {
-              ...f.forwarding,
-              forwardingAwb: outcome.result.vendorAwb || f.forwarding.forwardingAwb,
-            },
-          }));
+            piecesLines: f.piecesLines.map((line) =>
+              line.id === editedId
+                ? {
+                  ...line,
+                  actualWeightPerPc: piecesDraft.actualWeightPerPc,
+                  pieces: piecesDraft.noOfPieces,
+                  length: piecesDraft.length,
+                  breadth: piecesDraft.width,
+                  height: piecesDraft.height,
+                  volWeight: piecesDraft.volWeight,
+                  chargeWeight: piecesDraft.chargeWeight,
+                  division: piecesDraft.division,
+                  measurementUnit: piecesDraft.measurementUnit,
+                }
+                : line,
+            ),
+          };
         }
-      } else if (outcome.result.status === "OTP_REQUIRED") {
-        setVendorOtpError(outcome.result.message || "Invalid OTP");
-      } else {
-        setVendorOtpError(outcome.result.message || "Verification failed");
-      }
-    } catch (e) {
-      setVendorOtpError(toErrorMessage(e));
-    } finally {
-      setVendorBookingBusy(false);
-    }
-  };
-
-  const runVendorRetry = async () => {
-    if (!editing?.id) return;
-    setVendorBookingBusy(true);
-    try {
-      const outcome = await retryVendorBooking({
-        shipmentId: editing.id,
-        rowVersion: editing.rowVersion ?? 1,
-      });
-      setEditing((prev) => (prev ? { ...prev, rowVersion: outcome.rowVersion } : prev));
-      setVendorMeta({
-        status: outcome.vendorApiStatus as VendorApiStatus,
-        vendorAwb: outcome.result.vendorAwb,
-        trackingNumber: outcome.result.vendorTrackingNumber,
-        bookingId: outcome.result.vendorBookingId,
-        provider: outcome.result.vendorProvider,
-        serviceCode: outcome.result.vendorServiceCode,
-        otpVerified: outcome.result.otpVerified,
-        syncStatus: outcome.result.syncStatus,
-        lastError: outcome.result.error,
-      });
-      setVendorLastResult(outcome.result);
-      setVendorPanelKey((k) => k + 1);
-      if (outcome.result.status === "OTP_REQUIRED") {
-        const mobile =
-          outcome.result.shipperMobileMasked ||
-          (form.shipper.mobileNo.trim() || form.shipper.telephone.trim()
-            ? maskMobile(form.shipper.mobileNo.trim() || form.shipper.telephone.trim())
-            : null);
-        setVendorOtpMobile(mobile);
-        setVendorSandboxOtp(null);
-        setVendorOtpError(null);
-        setVendorOtpOpen(true);
-        toast.message("OTP sent to the shipper mobile. Enter the code they received.");
-      } else if (outcome.result.status === "SUCCESS") {
-        toast.success("Vendor booking completed");
-      } else {
-        toast.warning(outcome.result.message || "Vendor booking failed");
-      }
-    } catch (e) {
-      toast.error(toErrorMessage(e));
-    } finally {
-      setVendorBookingBusy(false);
-    }
-  };
-  const carrierBooked = editing?.carrierBookingStatus === "BOOKED";
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    if (authed) {
-      try {
-        await cancelShipment({
-          id: deleteTarget.id,
-          rowVersion: deleteTarget.rowVersion ?? 1,
-          reason: "Cancelled from AWB Entry",
-        });
-        await refreshLive();
-        toast.success(`Cancelled AWB ${deleteTarget.awbNo}`);
-      } catch (e) {
-        toast.error(toErrorMessage(e));
-        return;
-      } finally {
-        setDeleteTarget(null);
-      }
-      return;
-    }
-    setDemoRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    toast.success(`Deleted AWB ${deleteTarget.awbNo}`);
-    setDeleteTarget(null);
-  };
-
-  const clearColFilters = (silent = false) => {
-    setColFilters(emptyColFilters());
-    setPage(1);
-    if (!silent) toast.success("Column filters cleared");
-  };
-
-  const handleRefresh = async () => {
-    setSearchInput("");
-    setAppliedSearch(null);
-    clearColFilters(true);
-    setPage(1);
-    if (authed) {
-      try {
-        await refreshLive();
-        toast.success("Refreshed");
-      } catch (e) {
-        toast.error(toErrorMessage(e));
-      }
-      return;
-    }
-    toast.success("Refreshed");
-  };
-
-  const handleSearch = async () => {
-    const query = searchInput.trim();
-    setAppliedSearch(query ? { field: searchField, query } : null);
-    setPage(1);
-    if (!query) return;
-
-    // CourierWala-style: searching an AWB opens the full entry form.
-    if (authed) {
-      try {
-        setSaving(true);
-        const field =
-          searchField === "forwardingNo"
-            ? "forwarding_awb"
-            : searchField === "deliveryNo"
-              ? "delivery_awb"
-              : searchField === "referenceNo"
-                ? "reference_no"
-                : "awb_no";
-        const found = await findShipmentBySearch({ query, field });
-        if (!found) {
-          toast.error("No AWB entry found");
-          return;
-        }
-        await openEdit({
-          ...emptyForm(),
-          id: found.id,
-          rowVersion: found.row_version,
-          status: found.current_status ?? "DRAFT",
-          awbNo: found.awb_no ?? query,
-        } as AwbRow);
-        toast.success(`Opened AWB ${found.awb_no ?? query}`);
-      } catch (e) {
-        toast.error(toErrorMessage(e, "Search failed"));
-      } finally {
-        setSaving(false);
-      }
-      return;
-    }
-
-    const match = rows.find((r) => {
-      const val = String(r[searchField] ?? "");
-      return val.toLowerCase().includes(query.toLowerCase());
-    });
-    if (match) {
-      await openEdit(match);
-      toast.success(`Opened AWB ${match.awbNo}`);
-    } else {
-      toast.error("No AWB entry found");
-    }
-  };
-
-  const patchPiecesDraft = (patch: Partial<PiecesDraft>) => {
-    setPiecesDraft((d) => {
-      const next = { ...d, ...patch };
-      next.volWeight = calcVolWeight(next);
-      next.chargeWeight = calcChargeWeight(next);
-      return next;
-    });
-  };
-
-  const downloadMtsTemplate = () => {
-    void downloadAwbMtsTemplate()
-      .then(() => toast.success("AWBMtsFormat.xlsx downloaded"))
-      .catch((error) => toast.error(toErrorMessage(error, "Could not download the MTS template")));
-  };
-
-  const uploadMtsFile = async () => {
-    const file = mtsFileRef.current?.files?.[0];
-    if (!file) {
-      toast.error("Select an Excel or CSV file");
-      return;
-    }
-    if (!mtsFileAccepted(file.name)) {
-      toast.error("Use an Excel (.xlsx, .xls) or CSV file");
-      return;
-    }
-    try {
-      const parsed = await parseTabularFile(file);
-      const inchDivisor = Number.parseFloat(
-        resolveDivision({
-          measurementUnit: "Inch",
-          productCode: form.product.code,
-          productName: form.product.name,
-          vendorCode: form.vendor.code,
-          vendorName: form.vendor.name,
-          serviceCode: form.service.code,
-          serviceName: form.service.name,
-          rows: volumetricRows,
-        }),
-      );
-      const { lines, errors } = mtsPiecesFromRows(parsed.rows, {
-        inchDivisor: inchDivisor > 0 && inchDivisor !== 5000 ? inchDivisor : undefined,
-      });
-      if (lines.length === 0) {
-        toast.error(errors[0] ?? "No piece rows found in the file");
-        return;
-      }
-      setForm((current) => ({ ...current, piecesLines: [...current.piecesLines, ...lines] }));
-      if (mtsFileRef.current) mtsFileRef.current.value = "";
-      if (errors.length > 0) {
-        toast.warning(`Added ${lines.length} piece row${lines.length === 1 ? "" : "s"}. ${errors[0]}`);
-        return;
-      }
-      toast.success(`Added ${lines.length} piece row${lines.length === 1 ? "" : "s"}`);
-    } catch (error) {
-      toast.error(toErrorMessage(error, "Could not read the MTS file"));
-    }
-  };
-
-  const addPiecesLine = () => {
-    if (!piecesDraft.noOfPieces.trim()) return toast.error("No. Of Pieces is required");
-    const isInch = (piecesDraft.measurementUnit || "").toUpperCase().startsWith("INCH");
-    const hasDims = Number(piecesDraft.length) > 0 || Number(piecesDraft.width) > 0 || Number(piecesDraft.height) > 0;
-    if (isInch && hasDims) {
-      const div = Number(piecesDraft.division);
-      if (!div || div === 5000) {
-        return toast.error("No inch volumetric divisor (e.g. 305 or 166) is configured for this customer or vendor. Configure an inch divisor or enter dimensions in cm.");
-      }
-    }
-    const editedId = editingPiecesId;
-    const updating = editedId != null && form.piecesLines.some((line) => line.id === editedId);
-    setForm((f) => {
-      if (updating && editedId) {
-        return {
-          ...f,
-          piecesLines: f.piecesLines.map((line) =>
-            line.id === editedId
-              ? {
-                ...line,
-                actualWeightPerPc: piecesDraft.actualWeightPerPc,
-                pieces: piecesDraft.noOfPieces,
-                length: piecesDraft.length,
-                breadth: piecesDraft.width,
-                height: piecesDraft.height,
-                volWeight: piecesDraft.volWeight,
-                chargeWeight: piecesDraft.chargeWeight,
-                division: piecesDraft.division,
-                measurementUnit: piecesDraft.measurementUnit,
-              }
-              : line,
-          ),
+        const line: PiecesLine = {
+          id: crypto.randomUUID(),
+          childAwb: "",
+          actualWeightPerPc: piecesDraft.actualWeightPerPc,
+          pieces: piecesDraft.noOfPieces,
+          length: piecesDraft.length,
+          breadth: piecesDraft.width,
+          height: piecesDraft.height,
+          volWeight: piecesDraft.volWeight,
+          chargeWeight: piecesDraft.chargeWeight,
+          division: piecesDraft.division,
+          measurementUnit: piecesDraft.measurementUnit,
         };
-      }
-      const line: PiecesLine = {
-        id: crypto.randomUUID(),
-        childAwb: "",
-        actualWeightPerPc: piecesDraft.actualWeightPerPc,
-        pieces: piecesDraft.noOfPieces,
-        length: piecesDraft.length,
-        breadth: piecesDraft.width,
-        height: piecesDraft.height,
-        volWeight: piecesDraft.volWeight,
-        chargeWeight: piecesDraft.chargeWeight,
-        division: piecesDraft.division,
-        measurementUnit: piecesDraft.measurementUnit,
-      };
-      return { ...f, piecesLines: [...f.piecesLines, line] };
-    });
-    setEditingPiecesId(null);
-    setPiecesDraft(emptyPiecesDraft());
-    toast.success(updating ? "Piece line updated" : "Piece line added");
-  };
-
-  const editPiecesLine = (line: PiecesLine) => {
-    const next: PiecesDraft = {
-      measurementUnit: line.measurementUnit || piecesDraft.measurementUnit,
-      actualWeightPerPc: line.actualWeightPerPc,
-      noOfPieces: line.pieces,
-      length: line.length,
-      width: line.breadth,
-      height: line.height,
-      division: line.division || piecesDraft.division,
-      volWeight: line.volWeight,
-      chargeWeight: line.chargeWeight,
-    };
-    setPiecesDraft(next);
-    setEditingPiecesId(line.id);
-  };
-
-  const commitPiecesLine = () => {
-    if (!piecesDraft.noOfPieces.trim()) {
-      toast.error("No. Of Pieces is required");
-      return;
-    }
-    addPiecesLine();
-    scheduleErpFocusAdvance(() => {
-      const container = awbFormNavRef.current;
-      if (container) focusErpFieldByOrder(container, AWB_NAV.PIECES_ACTUAL_WEIGHT_PCS);
-    });
-  };
-
-  const removePiecesLine = (id: string) => {
-    setForm((f) => ({ ...f, piecesLines: f.piecesLines.filter((l) => l.id !== id) }));
-    if (editingPiecesId === id) {
+        return { ...f, piecesLines: [...f.piecesLines, line] };
+      });
       setEditingPiecesId(null);
       setPiecesDraft(emptyPiecesDraft());
-    }
-  };
-
-  const priceChargeDraft = (draft: ChargeDraft) => {
-    const applyFuel = draft.itemFuel === "Yes";
-    const applyTaxOnFuel = draft.taxOnFuel === "Yes";
-    const applyTax = draft.tax === "Yes";
-    return manualChargeAmounts({
-      itemAmount: Number.parseFloat(draft.itemAmount) || 0,
-      applyFuel,
-      applyTaxOnFuel,
-      applyTax,
-      fuelPct: fuelPercentFor({
-        rows: fuelRows,
-        vendorCode: form.vendor.code,
-        vendorName: form.vendor.name,
-        productCode: form.product.code,
-        productName: form.product.name,
-        destinationCode: form.consignee.origin.code,
-        destinationName: form.consignee.origin.name,
-        bookDate: form.bookDate,
-      }),
-      gstPct: awbGstPercent({ gstPercent: Number(taxRateQuery.data?.igst_pct ?? 18) }),
-      intraState: awbIntraState(
-        loadedClientProfile?.billingStateCode || "",
-        branchStateQuery.data || "",
-      ),
-    });
-  };
-
-  const addChargeLine = () => {
-    if (!chargeDraft.description) return toast.error("Description is required");
-    if (!chargeDraft.itemAmount.trim()) return toast.error("Item Amount is required");
-    const amount = chargeDraft.itemAmount;
-    const priced = priceChargeDraft(chargeDraft);
-    const line: ChargeLine = {
-      id: crypto.randomUUID(),
-      description: chargeDraft.description,
-      rate: amount,
-      amount,
-      fuelApply: chargeDraft.itemFuel,
-      fuelAmt: priced.fuelAmt,
-      taxApply: chargeDraft.tax,
-      taxOnFuel: chargeDraft.taxOnFuel,
-      igst: priced.igst,
-      sgst: priced.sgst,
-      cgst: priced.cgst,
-      total: priced.total,
-      chargesType: "Other",
+      toast.success(updating ? "Piece line updated" : "Piece line added");
     };
-    setForm((f) => ({ ...f, chargeLines: [...f.chargeLines, line] }));
-    setChargeDraft(emptyChargeDraft());
-    toast.success("Charge line added");
-  };
 
-  const removeChargeLine = (id: string) => {
-    setForm((f) => ({ ...f, chargeLines: f.chargeLines.filter((l) => l.id !== id) }));
-  };
+    const editPiecesLine = (line: PiecesLine) => {
+      const next: PiecesDraft = {
+        measurementUnit: line.measurementUnit || piecesDraft.measurementUnit,
+        actualWeightPerPc: line.actualWeightPerPc,
+        noOfPieces: line.pieces,
+        length: line.length,
+        width: line.breadth,
+        height: line.height,
+        division: line.division || piecesDraft.division,
+        volWeight: line.volWeight,
+        chargeWeight: line.chargeWeight,
+      };
+      setPiecesDraft(next);
+      setEditingPiecesId(line.id);
+    };
 
-  const updateProformaDraftAmount = (draft: ProformaDraft) => {
-    const qty = Number.parseFloat(draft.quantity) || 0;
-    const rate = Number.parseFloat(draft.rate) || 0;
-    return (qty * rate).toFixed(2);
-  };
-
-  const patchProformaDraft = (patch: Partial<ProformaDraft>) => {
-    setProformaDraft((d) => {
-      const next = { ...d, ...patch };
-      if ("quantity" in patch || "rate" in patch) {
-        next.amount = updateProformaDraftAmount(next);
+    const commitPiecesLine = () => {
+      if (!piecesDraft.noOfPieces.trim()) {
+        toast.error("No. Of Pieces is required");
+        return;
       }
-      return next;
-    });
-  };
+      addPiecesLine();
+      scheduleErpFocusAdvance(() => {
+        const container = awbFormNavRef.current;
+        if (container) focusErpFieldByOrder(container, AWB_NAV.PIECES_ACTUAL_WEIGHT_PCS);
+      });
+    };
 
-  const addProformaUnit = () => {
-    const unit = newUnitInput.trim().toUpperCase();
-    if (!unit) return toast.error("Unit is required");
-    if (proformaUnits.some((u) => u.toUpperCase() === unit)) {
+    const removePiecesLine = (id: string) => {
+      setForm((f) => ({ ...f, piecesLines: f.piecesLines.filter((l) => l.id !== id) }));
+      if (editingPiecesId === id) {
+        setEditingPiecesId(null);
+        setPiecesDraft(emptyPiecesDraft());
+      }
+    };
+
+    const priceChargeDraft = (draft: ChargeDraft) => {
+      const applyFuel = draft.itemFuel === "Yes";
+      const applyTaxOnFuel = draft.taxOnFuel === "Yes";
+      const applyTax = draft.tax === "Yes";
+      return manualChargeAmounts({
+        itemAmount: Number.parseFloat(draft.itemAmount) || 0,
+        applyFuel,
+        applyTaxOnFuel,
+        applyTax,
+        fuelPct: fuelPercentFor({
+          rows: fuelRows,
+          vendorCode: form.vendor.code,
+          vendorName: form.vendor.name,
+          productCode: form.product.code,
+          productName: form.product.name,
+          destinationCode: form.consignee.origin.code,
+          destinationName: form.consignee.origin.name,
+          bookDate: form.bookDate,
+        }),
+        gstPct: awbGstPercent({ gstPercent: Number(taxRateQuery.data?.igst_pct ?? 18) }),
+        intraState: awbIntraState(
+          loadedClientProfile?.billingStateCode || "",
+          branchStateQuery.data || "",
+        ),
+      });
+    };
+
+    const addChargeLine = () => {
+      if (!chargeDraft.description) return toast.error("Description is required");
+      if (!chargeDraft.itemAmount.trim()) return toast.error("Item Amount is required");
+      const amount = chargeDraft.itemAmount;
+      const priced = priceChargeDraft(chargeDraft);
+      const line: ChargeLine = {
+        id: crypto.randomUUID(),
+        description: chargeDraft.description,
+        rate: amount,
+        amount,
+        fuelApply: chargeDraft.itemFuel,
+        fuelAmt: priced.fuelAmt,
+        taxApply: chargeDraft.tax,
+        taxOnFuel: chargeDraft.taxOnFuel,
+        igst: priced.igst,
+        sgst: priced.sgst,
+        cgst: priced.cgst,
+        total: priced.total,
+        chargesType: "Other",
+      };
+      setForm((f) => ({ ...f, chargeLines: [...f.chargeLines, line] }));
+      setChargeDraft(emptyChargeDraft());
+      toast.success("Charge line added");
+    };
+
+    const removeChargeLine = (id: string) => {
+      setForm((f) => ({ ...f, chargeLines: f.chargeLines.filter((l) => l.id !== id) }));
+    };
+
+    const updateProformaDraftAmount = (draft: ProformaDraft) => {
+      const qty = Number.parseFloat(draft.quantity) || 0;
+      const rate = Number.parseFloat(draft.rate) || 0;
+      return (qty * rate).toFixed(2);
+    };
+
+    const patchProformaDraft = (patch: Partial<ProformaDraft>) => {
+      setProformaDraft((d) => {
+        const next = { ...d, ...patch };
+        if ("quantity" in patch || "rate" in patch) {
+          next.amount = updateProformaDraftAmount(next);
+        }
+        return next;
+      });
+    };
+
+    const addProformaUnit = () => {
+      const unit = newUnitInput.trim().toUpperCase();
+      if (!unit) return toast.error("Unit is required");
+      if (proformaUnits.some((u) => u.toUpperCase() === unit)) {
+        patchProformaDraft({ unit });
+        setAddUnitOpen(false);
+        setNewUnitInput("");
+        toast.message(`Unit ${unit} already exists`);
+        return;
+      }
+      setProformaUnits((prev) => [...prev, unit]);
       patchProformaDraft({ unit });
       setAddUnitOpen(false);
       setNewUnitInput("");
-      toast.message(`Unit ${unit} already exists`);
-      return;
-    }
-    setProformaUnits((prev) => [...prev, unit]);
-    patchProformaDraft({ unit });
-    setAddUnitOpen(false);
-    setNewUnitInput("");
-    toast.success(`Unit ${unit} added`);
-  };
+      toast.success(`Unit ${unit} added`);
+    };
 
-  const addProformaLine = (): boolean => {
-    const checked = validateProformaEntry({
-      boxNo: proformaDraft.boxNo,
-      packages: proformaDraft.packages,
-      description: proformaDraft.description,
-      hsnCode: proformaDraft.hsnCode,
-      quantity: proformaDraft.quantity,
-      weight: proformaDraft.weight,
-      unit: proformaDraft.unit,
-      rate: proformaDraft.rate,
-      igstPercent: proformaDraft.igstPercent,
-      units: proformaUnits,
-      maxPiecesCount: Number.parseInt(form.pieces, 10) || form.piecesLines.length || 1,
-    });
-    if (!checked.line) {
-      toast.error(checked.errors[0]?.message ?? "Proforma line is not valid");
-      return false;
-    }
-    if (editingProformaId) {
-      const lineId = editingProformaId;
-      const updatedLine: ProformaLine = { ...checked.line, id: lineId, source: "Manual" };
+    const addProformaLine = (): boolean => {
+      const checked = validateProformaEntry({
+        boxNo: proformaDraft.boxNo,
+        packages: proformaDraft.packages,
+        description: proformaDraft.description,
+        hsnCode: proformaDraft.hsnCode,
+        quantity: proformaDraft.quantity,
+        weight: proformaDraft.weight,
+        unit: proformaDraft.unit,
+        rate: proformaDraft.rate,
+        igstPercent: proformaDraft.igstPercent,
+        units: proformaUnits,
+        maxPiecesCount: Number.parseInt(form.pieces, 10) || form.piecesLines.length || 1,
+      });
+      if (!checked.line) {
+        toast.error(checked.errors[0]?.message ?? "Proforma line is not valid");
+        return false;
+      }
+      if (editingProformaId) {
+        const lineId = editingProformaId;
+        const updatedLine: ProformaLine = { ...checked.line, id: lineId, source: "Manual" };
+        setForm((f) => {
+          const lines = f.proforma.lines.map((l) => (l.id === lineId ? updatedLine : l));
+          warnProformaInvoice(lines, f.shipmentValue, f.shipmentCurrency, f.proforma.currency);
+          return { ...f, proforma: { ...f.proforma, lines } };
+        });
+        setEditingProformaId(null);
+        setProformaDraft(emptyProformaDraft());
+        toast.success("Proforma line updated");
+        return true;
+      }
+      const line: ProformaLine = { ...checked.line, id: crypto.randomUUID(), source: "Manual" };
       setForm((f) => {
-        const lines = f.proforma.lines.map((l) => (l.id === lineId ? updatedLine : l));
+        const lines = [...f.proforma.lines, line];
         warnProformaInvoice(lines, f.shipmentValue, f.shipmentCurrency, f.proforma.currency);
         return { ...f, proforma: { ...f.proforma, lines } };
       });
-      setEditingProformaId(null);
       setProformaDraft(emptyProformaDraft());
-      toast.success("Proforma line updated");
+      toast.success("Proforma line added");
       return true;
-    }
-    const line: ProformaLine = { ...checked.line, id: crypto.randomUUID(), source: "Manual" };
-    setForm((f) => {
-      const lines = [...f.proforma.lines, line];
-      warnProformaInvoice(lines, f.shipmentValue, f.shipmentCurrency, f.proforma.currency);
-      return { ...f, proforma: { ...f.proforma, lines } };
-    });
-    setProformaDraft(emptyProformaDraft());
-    toast.success("Proforma line added");
-    return true;
-  };
+    };
 
-  const commitProformaLine = () => {
-    if (!addProformaLine()) return;
-    scheduleErpFocusAdvance(() => {
-      const container = awbFormNavRef.current;
-      if (container) focusErpFieldByOrder(container, AWB_NAV.PROFORMA_BOX_NO);
-    });
-  };
+    const commitProformaLine = () => {
+      if (!addProformaLine()) return;
+      scheduleErpFocusAdvance(() => {
+        const container = awbFormNavRef.current;
+        if (container) focusErpFieldByOrder(container, AWB_NAV.PROFORMA_BOX_NO);
+      });
+    };
 
-  const removeProformaLine = (id: string) => {
-    setForm((f) => ({
-      ...f,
-      proforma: { ...f.proforma, lines: f.proforma.lines.filter((l) => l.id !== id) },
-    }));
-    if (editingProformaId === id) {
-      setEditingProformaId(null);
-      setProformaDraft(emptyProformaDraft());
-    }
-  };
+    const removeProformaLine = (id: string) => {
+      setForm((f) => ({
+        ...f,
+        proforma: { ...f.proforma, lines: f.proforma.lines.filter((l) => l.id !== id) },
+      }));
+      if (editingProformaId === id) {
+        setEditingProformaId(null);
+        setProformaDraft(emptyProformaDraft());
+      }
+    };
 
-  const warnProformaInvoice = (
-    lines: ProformaLine[],
-    shipmentValue: string,
-    shipmentCurrency: string,
-    proformaCurrency: string,
-  ) => {
-    if (shipmentCurrency.trim().toUpperCase() !== proformaCurrency.trim().toUpperCase()) return;
-    const invoice = Number.parseFloat(shipmentValue);
-    if (!Number.isFinite(invoice) || invoice <= 0) return;
-    const amount = lines.reduce((sum, line) => sum + (Number.parseFloat(line.amount) || 0), 0);
-    if (Math.abs(amount - invoice) > 0.009) {
-      toast.warning(
-        `Proforma amount ${amount.toFixed(2)} does not match Shipment Value ${invoice.toFixed(2)}`,
-      );
-    }
-  };
+    const warnProformaInvoice = (
+      lines: ProformaLine[],
+      shipmentValue: string,
+      shipmentCurrency: string,
+      proformaCurrency: string,
+    ) => {
+      if (shipmentCurrency.trim().toUpperCase() !== proformaCurrency.trim().toUpperCase()) return;
+      const invoice = Number.parseFloat(shipmentValue);
+      if (!Number.isFinite(invoice) || invoice <= 0) return;
+      const amount = lines.reduce((sum, line) => sum + (Number.parseFloat(line.amount) || 0), 0);
+      if (Math.abs(amount - invoice) > 0.009) {
+        toast.warning(
+          `Proforma amount ${amount.toFixed(2)} does not match Shipment Value ${invoice.toFixed(2)}`,
+        );
+      }
+    };
 
-  const placeImportedProforma = (incoming: ProformaLine[]) => {
-    if (form.proforma.lines.length > 0) {
-      setProformaImportPending(incoming);
-      return;
-    }
-    setForm((current) => {
-      warnProformaInvoice(
-        incoming,
-        current.shipmentValue,
-        current.shipmentCurrency,
-        current.proforma.currency,
-      );
-      return { ...current, proforma: { ...current.proforma, lines: incoming } };
-    });
-    toast.success(`${incoming.length} proforma line${incoming.length === 1 ? "" : "s"} imported`);
-  };
+    const placeImportedProforma = (incoming: ProformaLine[]) => {
+      if (form.proforma.lines.length > 0) {
+        setProformaImportPending(incoming);
+        return;
+      }
+      setForm((current) => {
+        warnProformaInvoice(
+          incoming,
+          current.shipmentValue,
+          current.shipmentCurrency,
+          current.proforma.currency,
+        );
+        return { ...current, proforma: { ...current.proforma, lines: incoming } };
+      });
+      toast.success(`${incoming.length} proforma line${incoming.length === 1 ? "" : "s"} imported`);
+    };
 
-  const applyImportedProforma = (mode: "append" | "replace", incoming: ProformaLine[]) => {
-    const lines = mode === "replace" ? incoming : [...form.proforma.lines, ...incoming];
-    setForm((current) => ({
-      ...current,
-      proforma: {
-        ...current.proforma,
-        lines: mode === "replace" ? incoming : [...current.proforma.lines, ...incoming],
-      },
-    }));
-    warnProformaInvoice(lines, form.shipmentValue, form.shipmentCurrency, form.proforma.currency);
-    toast.success(`${incoming.length} proforma line${incoming.length === 1 ? "" : "s"} imported`);
-    setProformaImportPending(null);
-  };
+    const applyImportedProforma = (mode: "append" | "replace", incoming: ProformaLine[]) => {
+      const lines = mode === "replace" ? incoming : [...form.proforma.lines, ...incoming];
+      setForm((current) => ({
+        ...current,
+        proforma: {
+          ...current.proforma,
+          lines: mode === "replace" ? incoming : [...current.proforma.lines, ...incoming],
+        },
+      }));
+      warnProformaInvoice(lines, form.shipmentValue, form.shipmentCurrency, form.proforma.currency);
+      toast.success(`${incoming.length} proforma line${incoming.length === 1 ? "" : "s"} imported`);
+      setProformaImportPending(null);
+    };
 
-  const uploadProformaFile = async () => {
-    if (entryLocked) {
-      toast.error("This AWB is locked and cannot be changed");
-      return;
-    }
-    if (proformaUploading) return;
-    const file = proformaFileRef.current?.files?.[0];
-    if (!file) {
-      toast.error("Please select a file");
-      return;
-    }
-    const name = file.name.toLowerCase();
-    const mime = file.type.toLowerCase();
-    const mimeOk =
-      mime === "" ||
-      mime === "application/octet-stream" ||
-      mime.includes("excel") ||
-      mime.includes("spreadsheet");
-    if ((!name.endsWith(".xls") && !name.endsWith(".xlsx")) || !mimeOk) {
-      toast.error("Only .xls and .xlsx files can be imported");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("File must be 5 MB or smaller");
-      return;
-    }
-    setProformaUploading(true);
-    try {
-      const body = new FormData();
-      body.set("file", file);
-      body.set("currency", form.proforma.currency);
-      body.set("awbNo", form.awbNo);
-      body.set("units", proformaUnits.join(","));
-      const { authorizedFetch } = await import("@/lib/security/authorized-fetch");
-      const res = await authorizedFetch("/api/awb-entry/proforma-import", { method: "POST", body });
-      const data = (await res.json()) as {
-        rows?: ProformaLine[];
-        lines?: ProformaLine[];
-        warnings?: string[];
-        errors?: ProformaImportError[];
+    const uploadProformaFile = async () => {
+      if (entryLocked) {
+        toast.error("This AWB is locked and cannot be changed");
+        return;
+      }
+      if (proformaUploading) return;
+      const file = proformaFileRef.current?.files?.[0];
+      if (!file) {
+        toast.error("Please select a file");
+        return;
+      }
+      const name = file.name.toLowerCase();
+      const mime = file.type.toLowerCase();
+      const mimeOk =
+        mime === "" ||
+        mime === "application/octet-stream" ||
+        mime.includes("excel") ||
+        mime.includes("spreadsheet");
+      if ((!name.endsWith(".xls") && !name.endsWith(".xlsx")) || !mimeOk) {
+        toast.error("Only .xls and .xlsx files can be imported");
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("File must be 5 MB or smaller");
+        return;
+      }
+      setProformaUploading(true);
+      try {
+        const body = new FormData();
+        body.set("file", file);
+        body.set("currency", form.proforma.currency);
+        body.set("awbNo", form.awbNo);
+        body.set("units", proformaUnits.join(","));
+        const { authorizedFetch } = await import("@/lib/security/authorized-fetch");
+        const res = await authorizedFetch("/api/awb-entry/proforma-import", { method: "POST", body });
+        const data = (await res.json()) as {
+          rows?: ProformaLine[];
+          lines?: ProformaLine[];
+          warnings?: string[];
+          errors?: ProformaImportError[];
+        };
+        if (!res.ok || data.errors?.length) {
+          setProformaImportErrors(
+            data.errors?.length
+              ? data.errors
+              : [{ row: 0, column: "File", value: "", message: "Proforma import failed" }],
+          );
+          return;
+        }
+        const lines = (data.rows ?? data.lines ?? []).map((line) => ({ ...line, source: "Import" as const }));
+        if (lines.length === 0) {
+          toast.error("The file has no proforma rows");
+          return;
+        }
+        if (proformaFileRef.current) proformaFileRef.current.value = "";
+        if (data.warnings?.length) {
+          setProformaPreview({ lines, warnings: data.warnings });
+          return;
+        }
+        placeImportedProforma(lines);
+      } catch (error) {
+        toast.error(toErrorMessage(error));
+      } finally {
+        setProformaUploading(false);
+      }
+    };
+
+    const ensureVendorChargePrerequisites = useCallback((): boolean => {
+      const errors = getVendorChargePrerequisiteErrors(form, {
+        consigneeNotRequired: formSetupSettings.consigneeNotRequired,
+      });
+      if (errors.length === 0) return true;
+      setVendorChargePrereqErrors(errors);
+      return false;
+    }, [form, formSetupSettings.consigneeNotRequired]);
+
+    const addVendorChargeLine = () => {
+      if (!ensureVendorChargePrerequisites()) return;
+      if (!vendorChargeDraft.description) return toast.error("Description is required");
+      if (!vendorChargeDraft.amount.trim()) return toast.error("Amount is required");
+      const amount = vendorChargeDraft.amount;
+      const line: VendorChargeLine = {
+        id: crypto.randomUUID(),
+        description: vendorChargeDraft.description,
+        rate: amount,
+        amount,
+        fuelApply: vendorChargeDraft.fuel,
+        fuelAmt: vendorChargeDraft.fuelAmt,
+        taxApply: vendorChargeDraft.tax,
+        taxOnFuel: vendorChargeDraft.taxOnFuel,
+        igst: vendorChargeDraft.igst || "0.00",
+        sgst: vendorChargeDraft.sgst || "0.00",
+        cgst: vendorChargeDraft.cgst || "0.00",
+        total: vendorChargeDraft.total || amount,
+        chargesType: "Vendor",
       };
-      if (!res.ok || data.errors?.length) {
-        setProformaImportErrors(
-          data.errors?.length
-            ? data.errors
-            : [{ row: 0, column: "File", value: "", message: "Proforma import failed" }],
-        );
-        return;
-      }
-      const lines = (data.rows ?? data.lines ?? []).map((line) => ({ ...line, source: "Import" as const }));
-      if (lines.length === 0) {
-        toast.error("The file has no proforma rows");
-        return;
-      }
-      if (proformaFileRef.current) proformaFileRef.current.value = "";
-      if (data.warnings?.length) {
-        setProformaPreview({ lines, warnings: data.warnings });
-        return;
-      }
-      placeImportedProforma(lines);
-    } catch (error) {
-      toast.error(toErrorMessage(error));
-    } finally {
-      setProformaUploading(false);
-    }
-  };
-
-  const ensureVendorChargePrerequisites = useCallback((): boolean => {
-    const errors = getVendorChargePrerequisiteErrors(form, {
-      consigneeNotRequired: formSetupSettings.consigneeNotRequired,
-    });
-    if (errors.length === 0) return true;
-    setVendorChargePrereqErrors(errors);
-    return false;
-  }, [form, formSetupSettings.consigneeNotRequired]);
-
-  const addVendorChargeLine = () => {
-    if (!ensureVendorChargePrerequisites()) return;
-    if (!vendorChargeDraft.description) return toast.error("Description is required");
-    if (!vendorChargeDraft.amount.trim()) return toast.error("Amount is required");
-    const amount = vendorChargeDraft.amount;
-    const line: VendorChargeLine = {
-      id: crypto.randomUUID(),
-      description: vendorChargeDraft.description,
-      rate: amount,
-      amount,
-      fuelApply: vendorChargeDraft.fuel,
-      fuelAmt: vendorChargeDraft.fuelAmt,
-      taxApply: vendorChargeDraft.tax,
-      taxOnFuel: vendorChargeDraft.taxOnFuel,
-      igst: vendorChargeDraft.igst || "0.00",
-      sgst: vendorChargeDraft.sgst || "0.00",
-      cgst: vendorChargeDraft.cgst || "0.00",
-      total: vendorChargeDraft.total || amount,
-      chargesType: "Vendor",
+      setForm((f) => ({
+        ...f,
+        forwarding: { ...f.forwarding, vendorChargeLines: [...f.forwarding.vendorChargeLines, line] },
+      }));
+      setVendorChargeDraft(emptyVendorChargeDraft());
+      toast.success("Vendor charge added");
     };
-    setForm((f) => ({
-      ...f,
-      forwarding: { ...f.forwarding, vendorChargeLines: [...f.forwarding.vendorChargeLines, line] },
-    }));
-    setVendorChargeDraft(emptyVendorChargeDraft());
-    toast.success("Vendor charge added");
-  };
 
-  const removeVendorChargeLine = (id: string) => {
-    setForm((f) => ({
-      ...f,
-      forwarding: {
-        ...f.forwarding,
-        vendorChargeLines: f.forwarding.vendorChargeLines.filter((l) => l.id !== id),
-      },
-    }));
-  };
-
-  const patchVendorChargeDraft = (patch: Partial<VendorChargeDraft>) => {
-    setVendorChargeDraft((d) => {
-      const next = { ...d, ...patch };
-      const calc = priceVendorChargeDraft(next);
-      const fuelVal = Number.parseFloat(calc.fuelAmt) || 0;
-      next.fuelAmt = calc.fuelAmt;
-      next.taxOnFuelAmt =
-        next.taxOnFuel === "Yes" && fuelVal > 0 && vendorGstPct > 0
-          ? ((fuelVal * vendorGstPct) / 100).toFixed(2)
-          : "0.00";
-      const taxTotal =
-        (Number.parseFloat(calc.igst) || 0) +
-        (Number.parseFloat(calc.cgst) || 0) +
-        (Number.parseFloat(calc.sgst) || 0);
-      next.taxAmt = taxTotal.toFixed(2);
-      next.igst = calc.igst;
-      next.cgst = calc.cgst;
-      next.sgst = calc.sgst;
-      next.total = calc.total;
-      return next;
-    });
-  };
-
-  const withStoredKyc = async (shipmentId: string, source: AwbFullForm): Promise<AwbFullForm> => {
-    const stored = await getShipmentDocument(shipmentId, "KYC").catch(() => null);
-    if (!stored?.contentB64) return source;
-    const docs = source.kyc.documents;
-    const match = docs.find((doc) => doc.fileName === stored.fileName) ?? docs[0];
-    const hydrated: KycDocument = {
-      id: match?.id || stored.id || crypto.randomUUID(),
-      fileName: stored.fileName || match?.fileName || "kyc",
-      entryType: match?.entryType || "KYC",
-      entryDate: match?.entryDate || "",
-      contentB64: stored.contentB64,
-      mimeType: stored.mimeType || match?.mimeType || "application/octet-stream",
-      uploaded: true,
+    const removeVendorChargeLine = (id: string) => {
+      setForm((f) => ({
+        ...f,
+        forwarding: {
+          ...f.forwarding,
+          vendorChargeLines: f.forwarding.vendorChargeLines.filter((l) => l.id !== id),
+        },
+      }));
     };
-    const documents =
-      docs.length === 0
-        ? [hydrated]
-        : docs.map((doc) =>
-          doc.id === hydrated.id || doc.fileName === hydrated.fileName
-            ? {
+
+    const patchVendorChargeDraft = (patch: Partial<VendorChargeDraft>) => {
+      setVendorChargeDraft((d) => {
+        const next = { ...d, ...patch };
+        const calc = priceVendorChargeDraft(next);
+        const fuelVal = Number.parseFloat(calc.fuelAmt) || 0;
+        next.fuelAmt = calc.fuelAmt;
+        next.taxOnFuelAmt =
+          next.taxOnFuel === "Yes" && fuelVal > 0 && vendorGstPct > 0
+            ? ((fuelVal * vendorGstPct) / 100).toFixed(2)
+            : "0.00";
+        const taxTotal =
+          (Number.parseFloat(calc.igst) || 0) +
+          (Number.parseFloat(calc.cgst) || 0) +
+          (Number.parseFloat(calc.sgst) || 0);
+        next.taxAmt = taxTotal.toFixed(2);
+        next.igst = calc.igst;
+        next.cgst = calc.cgst;
+        next.sgst = calc.sgst;
+        next.total = calc.total;
+        return next;
+      });
+    };
+
+    const withStoredKyc = async (shipmentId: string, source: AwbFullForm): Promise<AwbFullForm> => {
+      try {
+        const storedList = await listShipmentDocumentBytes(shipmentId, "KYC").catch(() => []);
+        if (!storedList || storedList.length === 0) return source;
+        const docs = source.kyc.documents;
+
+        if (docs.length === 0) {
+          const documents: KycDocument[] = storedList.map((s) => ({
+            id: s.id || crypto.randomUUID(),
+            fileName: s.fileName || "kyc",
+            entryType: (s.rawMeta?.kycDocType as string) || "KYC",
+            entryDate: s.createdAt ? s.createdAt.slice(0, 10) : "",
+            contentB64: s.contentB64 ?? undefined,
+            fileUrl: s.url ?? undefined,
+            documentNo: (s.rawMeta?.documentNo as string) || undefined,
+            expiryDate: (s.rawMeta?.expiryDate as string) || undefined,
+            side: (s.rawMeta?.side as "FRONT" | "BACK" | "BOTH") || undefined,
+            mimeType: s.mimeType || "application/octet-stream",
+            uploaded: true,
+          }));
+          return { ...source, kyc: { documents } };
+        }
+
+        const usedIds = new Set<string>();
+        const documents: KycDocument[] = docs.map((doc) => {
+          const match =
+            storedList.find(
+              (s) => !!s.id && !usedIds.has(s.id) && (s.id === doc.id || s.fileName === doc.fileName),
+            ) ??
+            storedList.find(
+              (s) =>
+                !!s.id &&
+                !usedIds.has(s.id) &&
+                Boolean(s.rawMeta?.kycDocType) &&
+                s.rawMeta?.kycDocType === doc.entryType,
+            ) ??
+            storedList.find((s) => !!s.id && !usedIds.has(s.id));
+
+          if (match) {
+            if (match.id) usedIds.add(match.id);
+            return {
               ...doc,
-              contentB64: stored.contentB64 || undefined,
-              mimeType: stored.mimeType || doc.mimeType,
+              id: match.id || doc.id || crypto.randomUUID(),
+              fileName: doc.fileName || match.fileName || "kyc",
+              contentB64: match.contentB64 ?? doc.contentB64,
+              fileUrl: match.url ?? doc.fileUrl,
+              documentNo: doc.documentNo || (match.rawMeta?.documentNo as string) || undefined,
+              expiryDate: doc.expiryDate || (match.rawMeta?.expiryDate as string) || undefined,
+              side: doc.side || (match.rawMeta?.side as "FRONT" | "BACK" | "BOTH") || undefined,
+              mimeType: match.mimeType || doc.mimeType || "application/octet-stream",
               uploaded: true,
-            }
-            : doc,
-        );
-    return { ...source, kyc: { documents } };
-  };
+            };
+          }
+          return doc;
+        });
+        return { ...source, kyc: { documents } };
+      } catch {
+        return source;
+      }
+    };
 
-  const downloadKycDocument = (doc: KycDocument) => {
-    if (!doc.contentB64) {
+  const downloadKycDocument = async (doc: KycDocument) => {
+    if (!doc.contentB64 && !doc.fileUrl) {
       toast.error("This KYC file is not stored on the shipment");
       return;
     }
-    const href = documentObjectUrl({
-      id: doc.id,
-      type: "KYC",
-      title: "KYC",
-      status: "AVAILABLE",
-      available: true,
+    const href = await getShipmentDocumentDownloadUrl({
+      url: doc.fileUrl,
       contentB64: doc.contentB64,
       mimeType: doc.mimeType,
       fileName: doc.fileName,
@@ -5598,8 +5756,11 @@ function AwbEntryPage() {
     const link = document.createElement("a");
     link.href = href;
     link.download = doc.fileName || "kyc";
+    link.target = "_blank";
     link.click();
-    window.setTimeout(() => revokeDocumentObjectUrl(href), 1500);
+    if (href.startsWith("blob:")) {
+      window.setTimeout(() => revokeDocumentObjectUrl(href), 1500);
+    }
   };
 
   const addKycDocument = async (file: File) => {
@@ -5615,7 +5776,11 @@ function AwbEntryPage() {
       entryType: kycDocType,
       entryDate: formatDisplayDate(todayIso()),
       contentB64: btoa(binary),
+      fileBytes: bytes,
       mimeType: file.type || "application/octet-stream",
+      documentNo: kycDocNo.trim() || undefined,
+      expiryDate: kycExpiryDate.trim() || undefined,
+      side: kycDocSide,
       uploaded: false,
     };
     setForm((f) => ({ ...f, kyc: { documents: [...f.kyc.documents, doc] } }));
@@ -5625,4076 +5790,4232 @@ function AwbEntryPage() {
   const handleKycFile = (fileList: FileList | null) => {
     const file = fileList?.[0];
     if (!file) return;
+
+    // KYC-04: Format validation (Allowed: PDF, JPG, PNG)
+    const allowedMimes = ["image/jpeg", "image/png", "image/jpg", "application/pdf"];
+    const fileExt = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+    const allowedExts = [".pdf", ".jpg", ".jpeg", ".png"];
+    if (!allowedMimes.includes(file.type.toLowerCase()) && !allowedExts.includes(fileExt)) {
+      toast.error("Invalid file format. Allowed formats: PDF, JPG, PNG");
+      return;
+    }
+
+    // KYC-04: Size limit (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("File size exceeds 5MB limit. Please upload a compressed document.");
+      return;
+    }
+
+    // D12: Expiry warning
+    if (kycExpiryDate && isDocExpired(kycExpiryDate)) {
+      toast.warning("Warning: Document expiry date is in the past.");
+    }
+
     addKycDocument(file);
   };
 
-  const removeKycDocument = (id: string) => {
-    setForm((f) => ({ ...f, kyc: { documents: f.kyc.documents.filter((d) => d.id !== id) } }));
-  };
-
-  const patchParty = (side: "shipper" | "consignee", patch: Partial<PartyDetails>) => {
-    setForm((f) => ({ ...f, [side]: { ...f[side], ...patch } }));
-  };
-
-  const handleClientNameDraft = (v: LookupPair) => {
-    const cleared = !v.id && !v.code.trim() && !v.name.trim();
-    if (cleared) {
-      clientLoadSeqRef.current += 1;
-      setLoadedClientProfile(null);
-      setClientLoading(false);
-      setForm((f) => ({ ...f, clientName: emptyPair(), paymentType: "" }));
+  const removeKycDocument = async (id: string) => {
+    if (entryLocked) {
+      toast.error("Shipment is locked");
       return;
     }
-    setForm((f) => ({ ...f, clientName: v }));
-  };
-
-  const handleClientSelect = async (v: LookupPair) => {
-    setForm((f) => ({
-      ...f,
-      clientName: v,
-      shipper: {
-        ...f.shipper,
-        companyName: {
-          id: v.id,
-          code: v.code,
-          name: v.name,
-        },
-      },
-    }));
-
-    if (!authed) return;
-
-    const seq = ++clientLoadSeqRef.current;
-    setClientLoading(true);
-    try {
-      const profile = await loadClientProfile({ id: v.id, code: v.code, name: v.name });
-      if (seq !== clientLoadSeqRef.current) return;
-      if (!profile) {
-        setLoadedClientProfile(null);
-        toast.error("Client profile not found");
-        return;
+    const docToRemove = form.kyc.documents.find((d) => d.id === id);
+    setForm((f) => ({ ...f, kyc: { documents: f.kyc.documents.filter((d) => d.id !== id) } }));
+    if (editing?.id && docToRemove && (docToRemove.uploaded || docToRemove.id)) {
+      try {
+        await deleteShipmentDocument(editing.id, docToRemove.id);
+      } catch (err) {
+        console.warn("Could not soft-delete document in backend:", err);
       }
-
-      const hydrate = clientProfileToAwbHydrate(profile);
-      setLoadedClientProfile(profile);
-      setForm((f) => ({
-        ...f,
-        clientName: hydrate.clientName,
-        paymentType: hydrate.paymentType,
-        instruction: hydrate.instruction || f.instruction,
-        shipmentCurrency: profile.defaults.currency || f.shipmentCurrency,
-        fieldExecutive: hydrate.fieldExecutive.code
-          ? hydrate.fieldExecutive
-          : f.fieldExecutive,
-        product:
-          !f.product.code.trim() && !f.product.name.trim() && profile.defaults.preferredProduct.code
-            ? profile.defaults.preferredProduct
-            : f.product,
-        vendor:
-          !f.vendor.code.trim() && !f.vendor.name.trim() && profile.defaultVendor.code
-            ? profile.defaultVendor
-            : f.vendor,
-        shipper: fillEmptyPartyFields(f.shipper, {
-          ...hydrate.shipper,
-          origin:
-            hydrate.shipper.origin.code || hydrate.shipper.origin.name
-              ? hydrate.shipper.origin
-              : f.shipper.origin.code.trim()
-                ? f.shipper.origin
-                : DEFAULT_SHIPPER_ORIGIN,
-        }),
-        proforma: {
-          ...(f.proforma ?? emptyProforma()),
-          currency: profile.defaults.currency || f.proforma?.currency || "INR",
-          adCode: f.proforma?.adCode || profile.bankAdCode || "",
-          lutNo: f.proforma?.lutNo || profile.lutNumber || "",
-          lutExpiry: f.proforma?.lutExpiry || profile.lutExpiryDate || "",
-        },
-      }));
-    } catch (e) {
-      if (seq !== clientLoadSeqRef.current) return;
-      toast.error(toErrorMessage(e, "Failed to load client profile"));
-    } finally {
-      if (seq === clientLoadSeqRef.current) setClientLoading(false);
     }
   };
 
-  const clientSelected = Boolean(form.clientName.id || form.clientName.code.trim());
+      const patchParty = (side: "shipper" | "consignee", patch: Partial<PartyDetails>) => {
+        setForm((f) => ({ ...f, [side]: { ...f[side], ...patch } }));
+      };
 
-  const paymentTypeReadOnly =
-    !formSetupSettings.allowPaymentTypeOverride &&
-    clientSelected &&
-    Boolean(loadedClientProfile?.paymentType?.trim());
-
-  const consigneeFieldsRequired = !formSetupSettings.consigneeNotRequired;
-
-  const validateAwbNavAdvance = useCallback(
-    (anchor: HTMLElement) => {
-      const container = awbFormNavRef.current;
-      if (!container) return true;
-      const order = getErpNavOrderFromElement(anchor, container);
-      if (order == null || !AWB_REQUIRED_NAV_ORDERS.has(order)) return true;
-      return validateAwbNavField(order, form, {
-        consigneeNotRequired: formSetupSettings.consigneeNotRequired,
-      });
-    },
-    [form, formSetupSettings.consigneeNotRequired],
-  );
-
-  const handleAwbNavAdvanceBlocked = useCallback((anchor: HTMLElement) => {
-    const container = awbFormNavRef.current;
-    if (!container) return;
-    const order = getErpNavOrderFromElement(anchor, container);
-    if (order == null) return;
-    setNavInvalidOrders((prev) => {
-      if (prev.has(order)) return prev;
-      const next = new Set(prev);
-      next.add(order);
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    setNavInvalidOrders((prev) => {
-      if (prev.size === 0) return prev;
-      const next = new Set(prev);
-      let changed = false;
-      for (const order of prev) {
-        if (
-          validateAwbNavField(order, form, {
-            consigneeNotRequired: formSetupSettings.consigneeNotRequired,
-          })
-        ) {
-          next.delete(order);
-          changed = true;
+      const handleClientNameDraft = (v: LookupPair) => {
+        const cleared = !v.id && !v.code.trim() && !v.name.trim();
+        if (cleared) {
+          clientLoadSeqRef.current += 1;
+          setLoadedClientProfile(null);
+          setClientLoading(false);
+          setForm((f) => ({ ...f, clientName: emptyPair(), paymentType: "" }));
+          return;
         }
-      }
-      return changed ? next : prev;
-    });
-  }, [form, formSetupSettings.consigneeNotRequired]);
+        setForm((f) => ({ ...f, clientName: v }));
+      };
 
-  useEffect(() => {
-    setForm((f) => {
-      const patch = syncForwardingDeliveryFromShipment(
-        f.forwarding,
-        f.product,
-        f.vendor,
-        f.service,
+      const handleClientSelect = async (v: LookupPair) => {
+        setForm((f) => ({
+          ...f,
+          clientName: v,
+          shipper: {
+            ...f.shipper,
+            companyName: {
+              id: v.id,
+              code: v.code,
+              name: v.name,
+            },
+          },
+        }));
+
+        if (!authed) return;
+
+        const seq = ++clientLoadSeqRef.current;
+        setClientLoading(true);
+        try {
+          const profile = await loadClientProfile({ id: v.id, code: v.code, name: v.name });
+          if (seq !== clientLoadSeqRef.current) return;
+          if (!profile) {
+            setLoadedClientProfile(null);
+            toast.error("Client profile not found");
+            return;
+          }
+
+          const hydrate = clientProfileToAwbHydrate(profile);
+          setLoadedClientProfile(profile);
+          setForm((f) => ({
+            ...f,
+            clientName: hydrate.clientName,
+            paymentType: hydrate.paymentType,
+            instruction: hydrate.instruction || f.instruction,
+            shipmentCurrency: profile.defaults.currency || f.shipmentCurrency,
+            fieldExecutive: hydrate.fieldExecutive.code
+              ? hydrate.fieldExecutive
+              : f.fieldExecutive,
+            product:
+              !f.product.code.trim() && !f.product.name.trim() && profile.defaults.preferredProduct.code
+                ? profile.defaults.preferredProduct
+                : f.product,
+            vendor:
+              !f.vendor.code.trim() && !f.vendor.name.trim() && profile.defaultVendor.code
+                ? profile.defaultVendor
+                : f.vendor,
+            shipper: fillEmptyPartyFields(f.shipper, {
+              ...hydrate.shipper,
+              origin:
+                hydrate.shipper.origin.code || hydrate.shipper.origin.name
+                  ? hydrate.shipper.origin
+                  : f.shipper.origin.code.trim()
+                    ? f.shipper.origin
+                    : DEFAULT_SHIPPER_ORIGIN,
+            }),
+            proforma: {
+              ...(f.proforma ?? emptyProforma()),
+              currency: profile.defaults.currency || f.proforma?.currency || "INR",
+              adCode: f.proforma?.adCode || profile.bankAdCode || "",
+              lutNo: f.proforma?.lutNo || profile.lutNumber || "",
+              lutExpiry: f.proforma?.lutExpiry || profile.lutExpiryDate || "",
+            },
+          }));
+        } catch (e) {
+          if (seq !== clientLoadSeqRef.current) return;
+          toast.error(toErrorMessage(e, "Failed to load client profile"));
+        } finally {
+          if (seq === clientLoadSeqRef.current) setClientLoading(false);
+        }
+      };
+
+      const clientSelected = Boolean(form.clientName.id || form.clientName.code.trim());
+
+      const paymentTypeReadOnly =
+        !formSetupSettings.allowPaymentTypeOverride &&
+        clientSelected &&
+        Boolean(loadedClientProfile?.paymentType?.trim());
+
+      const consigneeFieldsRequired = !formSetupSettings.consigneeNotRequired;
+
+      const validateAwbNavAdvance = useCallback(
+        (anchor: HTMLElement) => {
+          const container = awbFormNavRef.current;
+          if (!container) return true;
+          const order = getErpNavOrderFromElement(anchor, container);
+          if (order == null || !AWB_REQUIRED_NAV_ORDERS.has(order)) return true;
+          return validateAwbNavField(order, form, {
+            consigneeNotRequired: formSetupSettings.consigneeNotRequired,
+          });
+        },
+        [form, formSetupSettings.consigneeNotRequired],
       );
-      if (!patch) return f;
-      return { ...f, forwarding: { ...f.forwarding, ...patch } };
-    });
-  }, [form.product, form.vendor, form.service]);
 
-  const chargePreview = priceChargeDraft(chargeDraft);
-  const chargeFuelPct = fuelPercentFor({
-    rows: fuelRows,
-    vendorCode: form.vendor.code,
-    vendorName: form.vendor.name,
-    productCode: form.product.code,
-    productName: form.product.name,
-    destinationCode: form.consignee.origin.code,
-    destinationName: form.consignee.origin.name,
-    bookDate: form.bookDate,
-  });
-  const chargeGstPct = awbGstPercent({ gstPercent: Number(taxRateQuery.data?.igst_pct ?? 18) });
-  const chargeFuelAmount = Number.parseFloat(chargePreview.fuelAmt) || 0;
-  const chargeTaxOnFuelOn = chargeDraft.taxOnFuel === "Yes";
-  const chargeTaxOn = chargeDraft.tax === "Yes";
-  const chargeTaxOnFuelAmount = chargeTaxOnFuelOn ? (chargeFuelAmount * chargeGstPct) / 100 : 0;
-  const chargeTaxAmount = chargeTaxOn
-    ? ((Number.parseFloat(chargeDraft.itemAmount) || 0) * chargeGstPct) / 100
-    : 0;
-  const chargeDescriptionItems =
-    chargeHeads.length > 0 ? chargeHeads.map((row) => row.name || row.code) : CHARGE_DESCRIPTIONS;
-  const proformaTotalIgst = form.proforma.lines
-    .reduce((sum, line) => sum + (Number.parseFloat(line.igstAmount) || 0), 0)
-    .toFixed(2);
-  const displayAwbUserId =
-    awbStatusQuery.data?.awbUserId ||
-    (profile?.username ? profile.username.toUpperCase() : profile?.full_name?.toUpperCase()) ||
-    "—";
-  const displayPodUserId =
-    awbStatusQuery.data?.podUserId ||
-    (profile as unknown as { pod_user_id?: string })?.pod_user_id ||
-    "";
-  const displayManifestNo = awbStatusQuery.data?.manifestNo ?? form.manifestNo ?? "0";
-  const displayManifestDate = awbStatusQuery.data?.manifestDate || form.manifestDate || "";
-  const displayInvoiceNo = awbStatusQuery.data?.invoiceNo || form.invoiceNo || "";
-  const displayDebitNoteNo = awbStatusQuery.data?.debitNoteNo ?? form.debitNoteNo ?? "0";
-  const displayCreditNoteNo = awbStatusQuery.data?.creditNoteNo ?? form.creditNoteNo ?? "0";
-  const displayFlightNo = awbStatusQuery.data?.flightNo || form.flightNo || "";
-  const awbStatusItems: { label: string; value: string }[] = [
-    { label: "AWB No:", value: form.awbNo },
-    { label: "Status:", value: editing?.status ?? "" },
-    { label: "AWB UserID:", value: displayAwbUserId },
-    { label: "POD UserID:", value: displayPodUserId },
-    { label: "Manifest No:", value: displayManifestNo },
-    {
-      label: "Manifest Date",
-      value: displayManifestDate ? formatDisplayDate(displayManifestDate) : "",
-    },
-    { label: "Invoice No:", value: displayInvoiceNo },
-    { label: "Debit Note No:", value: displayDebitNoteNo },
-    { label: "Credit Note No:", value: displayCreditNoteNo },
-    { label: "Flight No.", value: displayFlightNo },
-  ];
+      const handleAwbNavAdvanceBlocked = useCallback((anchor: HTMLElement) => {
+        const container = awbFormNavRef.current;
+        if (!container) return;
+        const order = getErpNavOrderFromElement(anchor, container);
+        if (order == null) return;
+        setNavInvalidOrders((prev) => {
+          if (prev.has(order)) return prev;
+          const next = new Set(prev);
+          next.add(order);
+          return next;
+        });
+      }, []);
 
-  return (
-    <div className="flex w-full min-w-0 flex-col gap-1.5 px-3 py-2 md:gap-2 md:px-4 md:py-3">
-      {showForm ? null : (
-        <MasterBreadcrumb trail={["Transaction", "AWB Entry List"]} />
-      )}
+      useEffect(() => {
+        setNavInvalidOrders((prev) => {
+          if (prev.size === 0) return prev;
+          const next = new Set(prev);
+          let changed = false;
+          for (const order of prev) {
+            if (
+              validateAwbNavField(order, form, {
+                consigneeNotRequired: formSetupSettings.consigneeNotRequired,
+              })
+            ) {
+              next.delete(order);
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      }, [form, formSetupSettings.consigneeNotRequired]);
 
-      {showForm ? (
-        <Card className="min-w-0 border shadow-none p-0">
-          <Tabs
-            value={AWB_TABS.includes(activeTab as AwbTab) ? activeTab : "awb"}
-            onValueChange={setActiveTab}
-          >
-            <div className="flex flex-col gap-1.5 border-b bg-muted/30 px-2.5 py-1.5 lg:flex-row lg:items-center lg:justify-between">
-              <TabsList className="h-auto gap-1 rounded-full bg-muted p-1.5">
-                {AWB_TABS.map((tab) => (
-                  <TabsTrigger
-                    key={tab}
-                    value={tab}
-                    className="rounded-full border-0 bg-transparent px-4 py-1.5 text-base font-normal text-muted-foreground shadow-none hover:text-foreground data-[state=active]:bg-sidebar data-[state=active]:font-bold data-[state=active]:text-sidebar-foreground data-[state=active]:shadow-none"
-                  >
-                    {tab === "awb"
-                      ? "AWB"
-                      : tab === "kyc"
-                        ? "KYC"
-                        : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              <TooltipProvider delayDuration={200}>
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <IconButton label="Form Setup" onClick={openFormSetup}>
-                    <Settings className="h-4 w-4" />
-                  </IconButton>
-                  <IconButton label="Clone Entry" onClick={openEntry}>
-                    <Copy className="h-4 w-4" />
-                  </IconButton>
-                  <Select
-                    value={toolbarSearchField}
-                    onValueChange={(value) => setToolbarSearchField(value as AwbLookupField)}
-                  >
-                    <SelectTrigger className="h-8 w-[9.75rem] text-xs" aria-label="Search by">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {AWB_LOOKUP_FIELDS.map((item) => (
-                        <SelectItem key={item.value} value={item.value} className="text-xs">
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    value={formToolbarSearch}
-                    onChange={(e) => setFormToolbarSearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void handleFormToolbarSearch();
-                    }}
-                    aria-label={
-                      AWB_LOOKUP_FIELDS.find((item) => item.value === toolbarSearchField)?.label ??
-                      "AWB No"
-                    }
-                    className="h-8 w-36 text-xs"
-                  />
-                  <Button
-                    size="icon"
-                    className="h-8 w-8 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-                    onClick={() => void handleFormToolbarSearch()}
-                    aria-label="Search AWB"
-                  >
-                    <Search className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </TooltipProvider>
-            </div>
+      useEffect(() => {
+        setForm((f) => {
+          const patch = syncForwardingDeliveryFromShipment(
+            f.forwarding,
+            f.product,
+            f.vendor,
+            f.service,
+          );
+          if (!patch) return f;
+          return { ...f, forwarding: { ...f.forwarding, ...patch } };
+        });
+      }, [form.product, form.vendor, form.service]);
 
-            <div
-              ref={awbFormNavRef}
-              className="erp-form-nav text-[13px] [&_.erp-field-shell]:h-9 [&_.erp-field-shell_input]:h-9 [&_.erp-field-shell_input]:min-h-9 [&_.erp-field-shell_input]:px-2 [&_.erp-field-shell_input]:text-[13px] [&_.erp-field-shell_button[role=combobox]]:h-9 [&_.erp-field-shell_button[role=combobox]]:px-2 [&_.erp-field-shell_button[role=combobox]]:text-[13px] [&_.erp-field-shell_button[aria-label=Search]]:h-9 [&_.erp-field-shell_button[aria-label=Search]]:w-9 [&_.erp-field-shell_label]:text-[12px] [&_.lookup-name]:min-h-9 [&_.lookup-name_input]:h-9 [&_.lookup-name_input]:min-h-9 [&_.lookup-name_input]:text-[13px] [&_input]:h-9 [&_input]:min-h-9 [&_input]:text-[13px] [&_button[role=combobox]]:h-9 [&_button[role=combobox]]:text-[13px] [&_button[aria-label=Search]]:h-9 [&_button[aria-label=Search]]:w-9"
-              data-erp-form-nav
-            >
-              <ErpFormNavProvider
-                containerRef={awbFormNavRef}
-                enabled={!entryLocked}
-                validateBeforeAdvance={validateAwbNavAdvance}
-                onAdvanceBlocked={handleAwbNavAdvanceBlocked}
+      const chargePreview = priceChargeDraft(chargeDraft);
+      const chargeFuelPct = fuelPercentFor({
+        rows: fuelRows,
+        vendorCode: form.vendor.code,
+        vendorName: form.vendor.name,
+        productCode: form.product.code,
+        productName: form.product.name,
+        destinationCode: form.consignee.origin.code,
+        destinationName: form.consignee.origin.name,
+        bookDate: form.bookDate,
+      });
+      const chargeGstPct = awbGstPercent({ gstPercent: Number(taxRateQuery.data?.igst_pct ?? 18) });
+      const chargeFuelAmount = Number.parseFloat(chargePreview.fuelAmt) || 0;
+      const chargeTaxOnFuelOn = chargeDraft.taxOnFuel === "Yes";
+      const chargeTaxOn = chargeDraft.tax === "Yes";
+      const chargeTaxOnFuelAmount = chargeTaxOnFuelOn ? (chargeFuelAmount * chargeGstPct) / 100 : 0;
+      const chargeTaxAmount = chargeTaxOn
+        ? ((Number.parseFloat(chargeDraft.itemAmount) || 0) * chargeGstPct) / 100
+        : 0;
+      const chargeDescriptionItems =
+        chargeHeads.length > 0 ? chargeHeads.map((row) => row.name || row.code) : CHARGE_DESCRIPTIONS;
+      const proformaTotalIgst = form.proforma.lines
+        .reduce((sum, line) => sum + (Number.parseFloat(line.igstAmount) || 0), 0)
+        .toFixed(2);
+      const displayAwbUserId =
+        awbStatusQuery.data?.awbUserId ||
+        (profile?.username ? profile.username.toUpperCase() : profile?.full_name?.toUpperCase()) ||
+        "—";
+      const displayPodUserId =
+        awbStatusQuery.data?.podUserId ||
+        (profile as unknown as { pod_user_id?: string })?.pod_user_id ||
+        "";
+      const displayManifestNo = awbStatusQuery.data?.manifestNo ?? form.manifestNo ?? "0";
+      const displayManifestDate = awbStatusQuery.data?.manifestDate || form.manifestDate || "";
+      const displayInvoiceNo = awbStatusQuery.data?.invoiceNo || form.invoiceNo || "";
+      const displayDebitNoteNo = awbStatusQuery.data?.debitNoteNo ?? form.debitNoteNo ?? "0";
+      const displayCreditNoteNo = awbStatusQuery.data?.creditNoteNo ?? form.creditNoteNo ?? "0";
+      const displayFlightNo = awbStatusQuery.data?.flightNo || form.flightNo || "";
+      const awbStatusItems: { label: string; value: string }[] = [
+        { label: "AWB No:", value: form.awbNo },
+        { label: "Status:", value: editing?.status ?? "" },
+        { label: "AWB UserID:", value: displayAwbUserId },
+        { label: "POD UserID:", value: displayPodUserId },
+        { label: "Manifest No:", value: displayManifestNo },
+        {
+          label: "Manifest Date",
+          value: displayManifestDate ? formatDisplayDate(displayManifestDate) : "",
+        },
+        { label: "Invoice No:", value: displayInvoiceNo },
+        { label: "Debit Note No:", value: displayDebitNoteNo },
+        { label: "Credit Note No:", value: displayCreditNoteNo },
+        { label: "Flight No.", value: displayFlightNo },
+      ];
+
+      return (
+        <div className="flex w-full min-w-0 flex-col gap-1.5 px-3 py-2 md:gap-2 md:px-4 md:py-3">
+          {showForm ? null : (
+            <MasterBreadcrumb trail={["Transaction", "AWB Entry List"]} />
+          )}
+
+          {showForm ? (
+            <Card className="min-w-0 border shadow-none p-0">
+              <Tabs
+                value={AWB_TABS.includes(activeTab as AwbTab) ? activeTab : "awb"}
+                onValueChange={setActiveTab}
               >
-                <TabsContent value="awb" className="mt-0">
-                  <section
-                    aria-label="AWB booking status"
-                    className={cn(
-                      "mt-3 grid w-full grid-cols-4 gap-x-3 gap-y-1 border-y bg-muted/30 px-3 py-2 text-[12px] leading-tight text-muted-foreground lg:grid-cols-8",
-                      awbStatusQuery.isFetching && "animate-pulse opacity-80",
-                    )}
-                  >
-                    {awbStatusItems.map((item) => (
-                      <span key={item.label} className="min-w-0 truncate whitespace-nowrap">
-                        {item.label}
-                        {item.value ? (
-                          <>
-                            {" "}
-                            <span className="font-medium text-foreground">{item.value}</span>
-                          </>
-                        ) : null}
-                      </span>
+                <div className="flex flex-col gap-1.5 border-b bg-muted/30 px-2.5 py-1.5 lg:flex-row lg:items-center lg:justify-between">
+                  <TabsList className="h-auto gap-1 rounded-full bg-muted p-1.5">
+                    {AWB_TABS.map((tab) => (
+                      <TabsTrigger
+                        key={tab}
+                        value={tab}
+                        className="rounded-full border-0 bg-transparent px-4 py-1.5 text-base font-normal text-muted-foreground shadow-none hover:text-foreground data-[state=active]:bg-sidebar data-[state=active]:font-bold data-[state=active]:text-sidebar-foreground data-[state=active]:shadow-none"
+                      >
+                        {tab === "awb"
+                          ? "AWB"
+                          : tab === "kyc"
+                            ? "KYC"
+                            : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                      </TabsTrigger>
                     ))}
-                  </section>
-                  <fieldset disabled={entryLocked} className="min-w-0 border-0 p-0 disabled:opacity-90">
-                    <div className="p-2 md:p-2.5">
-                      <div className="mb-2 rounded border border-border bg-card p-2 pt-2.5">
-                        <div className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-2 lg:grid-cols-12 lg:gap-x-2">
-                          <div className="flex flex-col lg:col-span-2">
-                            <FieldWrapper borderLabel label={`AWB No. [${awbMode}]`} error={fieldError(AWB_NAV.AWB_NO)}>
-                              <div className="relative flex items-center w-full">
-                                <ErpNavInput
-                                  order={AWB_NAV.AWB_NO}
-                                  value={form.awbNo}
-                                  disabled={awbMode === "AUTO" || !!editing || isReadOnly || clientSelected}
-                                  inputMode="numeric"
-                                  maxLength={6}
-                                  onValueChange={(v) =>
-                                    setForm((f) => ({ ...f, awbNo: v.replace(/\D/g, "").slice(0, 6) }))
-                                  }
-                                  onBlur={async () => {
-                                    if (awbMode === "MANUAL" && form.awbNo.trim() && authed) {
-                                      try {
-                                        const res = await validateManualAwb({
-                                          branchId: activeBranchId || profile?.home_branch_id || undefined,
-                                          awbNo: form.awbNo,
-                                        });
-                                        if (!res.valid) {
-                                          toast.error(res.message || "Invalid manual AWB number");
-                                        } else {
-                                          toast.success(res.message);
-                                        }
-                                      } catch (err) {
-                                        toast.error(`AWB validation error: ${toErrorMessage(err)}`);
-                                      }
-                                    }
-                                  }}
-                                  className="h-8 pr-12 px-1.5 text-[13px]"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (editing || isReadOnly) return;
-                                    const nextMode = awbMode === "AUTO" ? "MANUAL" : "AUTO";
-                                    setAwbMode(nextMode);
-                                    toast.info(
-                                      nextMode === "MANUAL"
-                                        ? "Switched to MANUAL AWB mode"
-                                        : "Switched to AUTO AWB mode",
-                                    );
-                                    if (nextMode === "AUTO") {
-                                      setForm((f) => ({ ...f, awbNo: "" }));
-                                    }
-                                  }}
-                                  disabled={!!editing || isReadOnly}
-                                  className={cn(
-                                    "absolute right-1 px-1 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-colors border",
-                                    awbMode === "AUTO"
-                                      ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300"
-                                      : "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300",
-                                  )}
-                                  title="Toggle Auto/Manual AWB mode (Alt+~)"
-                                >
-                                  {awbMode}
-                                </button>
-                              </div>
-                            </FieldWrapper>
-                          </div>
-                          <FieldWrapper borderLabel label="Book Date" className="lg:col-span-2">
-                            <ErpNavDateInput
-                              order={AWB_NAV.BOOK_DATE}
-                              readOnly={!canModifyAwb}
-                              max={todayIso()}
-                              value={form.bookDate}
-                              onValueChange={(v) => setForm((f) => ({ ...f, bookDate: v }))}
-                              className="h-8 px-1.5 text-[13px]"
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Time" className="lg:col-span-1">
-                            <ErpNavInput
-                              order={AWB_NAV.TIME}
-                              readOnly={!canModifyAwb}
-                              value={form.bookTime}
-                              onValueChange={(v) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  bookTime: v.replace(/\D/g, "").slice(0, 4),
-                                }))
-                              }
-                              className="h-8 px-1.5 text-[13px]"
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Reference No." className="lg:col-span-2" error={fieldError(AWB_NAV.REFERENCE)}>
-                            <ErpNavInput
-                              order={AWB_NAV.REFERENCE}
-                              value={form.referenceNo}
-                              maxLength={30}
-                              onValueChange={(v) => setForm((f) => ({ ...f, referenceNo: clipText(v, 30) }))}
-                              className="h-8 px-1.5 text-[13px]"
-                            />
-                          </FieldWrapper>
-                          <div className="min-w-0 lg:col-span-3">
-                            <FieldWrapper
-                              borderLabel
-                              lookupSplit
-                              label="Client Name"
-                              required
-                              invalid={navInvalidOrders.has(AWB_NAV.CLIENT)}
-                              error={fieldError(AWB_NAV.CLIENT)}
-                            >
-                              <ClientNameField
-                                value={form.clientName}
-                                onDraftChange={handleClientNameDraft}
-                                onSelect={(v) => void handleClientSelect(v)}
-                                disabled={clientLoading}
-                              />
-                            </FieldWrapper>
-                            {clientLoading ? (
-                              <p className="mt-0.5 text-[10px] text-muted-foreground">Loading client profile…</p>
-                            ) : loadedClientProfile?.paymentType ? (
-                              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                                Payment Type from Client Master: {loadedClientProfile.paymentType}
-                              </p>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
-                  </fieldset>
-
-                  {isSaved && editing?.id ? (
-                    <div className="px-2 md:px-2.5">
-                      <ShipmentDocumentQuickLinks
-                        shipmentId={editing.id}
-                        refreshKey={vendorPanelKey}
-                        onOpenCenter={() => {
-                          document
-                            .getElementById("shipment-documents-center")
-                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  </TabsList>
+                  <TooltipProvider delayDuration={200}>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <IconButton label="Form Setup" onClick={openFormSetup}>
+                        <Settings className="h-4 w-4" />
+                      </IconButton>
+                      <IconButton label="Clone Entry" onClick={openEntry}>
+                        <Copy className="h-4 w-4" />
+                      </IconButton>
+                      <Select
+                        value={toolbarSearchField}
+                        onValueChange={(value) => setToolbarSearchField(value as AwbLookupField)}
+                      >
+                        <SelectTrigger className="h-8 w-[9.75rem] text-xs" aria-label="Search by">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {AWB_LOOKUP_FIELDS.map((item) => (
+                            <SelectItem key={item.value} value={item.value} className="text-xs">
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        value={formToolbarSearch}
+                        onChange={(e) => setFormToolbarSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void handleFormToolbarSearch();
                         }}
-                        onEnsureDocument={ensureInternalDocument}
+                        aria-label={
+                          AWB_LOOKUP_FIELDS.find((item) => item.value === toolbarSearchField)?.label ??
+                          "AWB No"
+                        }
+                        className="h-8 w-36 text-xs"
                       />
+                      <Button
+                        size="icon"
+                        className="h-8 w-8 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+                        onClick={() => void handleFormToolbarSearch()}
+                        aria-label="Search AWB"
+                      >
+                        <Search className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
-                  ) : null}
+                  </TooltipProvider>
+                </div>
 
-                  <fieldset disabled={entryLocked} className="min-w-0 border-0 p-0 disabled:opacity-90">
-                    <div className="p-2 md:p-2.5">
-                      <div className="mt-0.5 grid grid-cols-1 items-start gap-2 pt-2 md:grid-cols-2 xl:grid-cols-3 xl:gap-2.5">
-                        <PartySection
-                          title="Shipper Details"
-                          party={form.shipper}
-                          onChange={(p) => patchParty("shipper", p)}
-                          originLookup="destination"
-                          originRequired
-                          addressRequired
-                          invalidNavOrders={navInvalidOrders}
-                          fieldError={fieldError}
-                          onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
-                        />
-                        <PartySection
-                          title="Consignee Details"
-                          party={form.consignee}
-                          onChange={(p) => patchParty("consignee", p)}
-                          originLookup="internationalDestination"
-                          originRequired={consigneeFieldsRequired}
-                          companyRequired={consigneeFieldsRequired}
-                          addressRequired
-                          phoneRequired
-                          pincodeCountryCode={
-                            !form.consignee.country.trim() ||
-                              form.consignee.country.trim().toLowerCase() === "india"
-                              ? "IN"
-                              : /^[A-Za-z]{2}$/.test(form.consignee.origin.code.trim())
-                                ? form.consignee.origin.code.trim().toUpperCase()
-                                : "XX"
-                          }
-                          invalidNavOrders={navInvalidOrders}
-                          fieldError={fieldError}
-                          onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
-                        />
-                        <ServicesSection
-                          form={form}
-                          setForm={setForm}
-                          airlineRequired={!formSetupSettings.airlineNotRequired}
-                          invalidNavOrders={navInvalidOrders}
-                          fieldError={fieldError}
-                        />
-                      </div>
-
-                      <div className="mt-2 space-y-1.5">
-                        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              className="h-8 shrink-0 rounded-full bg-emerald-600 px-4 text-xs text-white hover:bg-emerald-600/90"
-                              {...erpNavSkip()}
-                              disabled={ratingBusy !== null}
-                              onClick={() => {
-                                void handleCheckRateCombination();
-                              }}
-                            >
-                              Customer Charges
-                            </Button>
-                            <span className="text-sm text-foreground">Total Amount</span>
-                            <span className="min-w-16 text-sm font-medium tabular-nums text-foreground">
-                              {Number.parseFloat(payableFromLines(form)) > 0
-                                ? payableFromLines(form)
-                                : ""}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              className="h-8 shrink-0 rounded-full bg-emerald-600 px-4 text-xs text-white hover:bg-emerald-600/90"
-                              {...erpNavSkip()}
-                              disabled={ratingBusy !== null}
-                              onClick={() => {
-                                void handleVendorCharges();
-                              }}
-                            >
-                              Vendor Charges
-                            </Button>
-                            <span className="text-sm text-foreground">Total Amount</span>
-                            <span className="min-w-16 text-sm font-medium tabular-nums text-foreground">
-                              {Number.parseFloat(form.vendorChargesTotal) > 0
-                                ? Number.parseFloat(form.vendorChargesTotal).toFixed(2)
-                                : ""}
-                            </span>
-                          </div>
-                          <Button
-                            size="sm"
-                            className="h-8 rounded-full bg-emerald-600 px-4 text-xs text-white hover:bg-emerald-600/90"
-                            {...erpNavSkip()}
-                            disabled={ratingBusy !== null}
-                            onClick={() => {
-                              void handleRateCompare();
-                            }}
-                          >
-                            Rate Compare
-                          </Button>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm text-foreground">
-                          <span>
-                            Customer Contract:{" "}
-                            {chargeRefs.customerContract ? (
-                              <Link
-                                to="/master/customer/customer-rate"
-                                className="text-blue-600 underline"
-                              >
-                                {chargeRefs.customerContract}
-                              </Link>
-                            ) : null}
-                          </span>
-                          <span>
-                            Vendor Contract:{" "}
-                            {chargeRefs.vendorContract ? (
-                              <Link
-                                to="/master/vendor/vendor-contract"
-                                className="text-blue-600 underline"
-                              >
-                                {chargeRefs.vendorContract}
-                              </Link>
-                            ) : null}
-                          </span>
-                          <button
-                            type="button"
-                            className="text-blue-600 underline"
-                            onClick={() => {
-                              void handleCheckRateCombination();
-                              if (form.vendor.code.trim()) void handleVendorCharges();
-                            }}
-                          >
-                            Check Rate Combination
-                          </button>
-                          <span>
-                            Customer Zone:{" "}
-                            {chargeRefs.customerZone ? (
-                              <Link to="/master/sales/zone" className="text-blue-600 underline">
-                                {chargeRefs.customerZone}
-                              </Link>
-                            ) : null}
-                          </span>
-                          <span>
-                            Vendor Zone:{" "}
-                            {chargeRefs.vendorZone ? (
-                              <Link to="/master/sales/zone" className="text-blue-600 underline">
-                                {chargeRefs.vendorZone}
-                              </Link>
-                            ) : null}
-                          </span>
-                        </div>
-                      </div>
-
-                      <Collapsible open={piecesOpen} onOpenChange={setPiecesOpen} className="mt-4">
-                        <CollapsibleTrigger
-                          className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
-                          {...erpNavSkip()}
-                        >
-                          Click here to enter Pieces details Or Press [Alt + u]
-                          <ChevronDown
-                            className={cn("h-4 w-4 transition-transform", piecesOpen && "rotate-180")}
-                          />
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="border border-t-0 bg-card">
-                          <div className="relative mx-3 mt-3 rounded border border-border bg-card p-3 pt-5">
-                            <span className="absolute left-2.5 top-0 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[13px] font-semibold leading-none text-sidebar-foreground">
-                              Import MTS
-                            </span>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                              <Button
-                                type="button"
-                                variant="link"
-                                size="sm"
-                                className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
-                                {...erpNavSkip()}
-                                onClick={downloadMtsTemplate}
-                              >
-                                <FileSpreadsheet className="h-4 w-4 shrink-0" />
-                                Download Excel File Format
-                              </Button>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-sm text-foreground">Select File</span>
-                                <Input
-                                  ref={mtsFileRef}
-                                  type="file"
-                                  accept=".xls,.xlsx,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
-                                  className="h-8 max-w-[220px] text-[13px]"
-                                  {...erpNavSkip()}
-                                />
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
-                                  {...erpNavSkip()}
-                                  onClick={() => {
-                                    void uploadMtsFile();
-                                  }}
-                                >
-                                  Upload
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(7.5rem,1.2fr)_minmax(5.25rem,0.85fr)_minmax(4.75rem,0.8fr)_repeat(3,minmax(3.75rem,0.72fr))_minmax(4.5rem,0.78fr)_minmax(11.5rem,1.35fr)_minmax(5.25rem,0.85fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                            <FieldWrapper borderLabel label="Measurement Unit">
-                              <ErpNavSelect
-                                order={AWB_NAV.PIECES_MEASUREMENT_UNIT}
-                                value={piecesDraft.measurementUnit}
-                                onValueChange={(v) => patchPiecesDraft({ measurementUnit: v })}
-                                items={MEASUREMENT_UNITS}
-                                triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Actl Weight/PCS">
-                              <ErpNavInput
-                                order={AWB_NAV.PIECES_ACTUAL_WEIGHT_PCS}
-                                inputMode="decimal"
-                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                value={piecesDraft.actualWeightPerPc}
-                                onValueChange={(v) => patchPiecesDraft({ actualWeightPerPc: decimalNumber(v) })}
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="No. Of Pieces">
-                              <ErpNavInput
-                                order={AWB_NAV.PIECES_NO_OF_PIECES}
-                                inputMode="numeric"
-                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                value={piecesDraft.noOfPieces}
-                                onValueChange={(v) => patchPiecesDraft({ noOfPieces: digitsOnly(v) })}
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Length">
-                              <ErpNavInput
-                                order={AWB_NAV.PIECES_LENGTH}
-                                inputMode="decimal"
-                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                value={piecesDraft.length}
-                                onValueChange={(v) => patchPiecesDraft({ length: decimalNumber(v) })}
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Width">
-                              <ErpNavInput
-                                order={AWB_NAV.PIECES_WIDTH}
-                                inputMode="decimal"
-                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                value={piecesDraft.width}
-                                onValueChange={(v) => patchPiecesDraft({ width: decimalNumber(v) })}
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Height">
-                              <ErpNavInput
-                                order={AWB_NAV.PIECES_HEIGHT}
-                                inputMode="decimal"
-                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                value={piecesDraft.height}
-                                onValueChange={(v) => patchPiecesDraft({ height: decimalNumber(v) })}
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Division">
-                              <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
-                                <ErpNavInput
-                                  order={AWB_NAV.PIECES_DIVISION}
-                                  inputMode="decimal"
-                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                  value={piecesDraft.division}
-                                  onValueChange={(v) => patchPiecesDraft({ division: decimalNumber(v) })}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter" && e.shiftKey) {
-                                      e.preventDefault();
-                                      const container = awbFormNavRef.current;
-                                      if (container) {
-                                        focusPrevBeforeOrder(container, AWB_NAV.PIECES_DIVISION);
-                                      }
-                                      return;
-                                    }
-                                    if (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
-                                      e.preventDefault();
-                                      commitPiecesLine();
-                                    }
-                                  }}
-                                />
-                              </div>
-                            </FieldWrapper>
-                            <FieldWrapper
-                              borderLabel
-                              label="Vol Weight"
-                              className="sm:col-span-2 md:col-span-2 lg:col-span-2 xl:col-span-1"
-                            >
-                              <Input
-                                value={piecesDraft.volWeight}
-                                readOnly
-                                {...erpNavOrder(AWB_NAV.PIECES_VOL_WEIGHT)}
-                                className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Chrg Weight">
-                              <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
-                                <Input
-                                  value={piecesDraft.chargeWeight}
-                                  readOnly
-                                  {...erpNavOrder(AWB_NAV.PIECES_CHARGE_WEIGHT)}
-                                  className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter" && e.shiftKey) {
-                                      e.preventDefault();
-                                      const container = awbFormNavRef.current;
-                                      if (container) {
-                                        focusPrevBeforeOrder(container, AWB_NAV.PIECES_CHARGE_WEIGHT);
-                                      }
-                                      return;
-                                    }
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      commitPiecesLine();
-                                    }
-                                  }}
-                                />
-                              </div>
-                            </FieldWrapper>
-                            <div className="col-span-2 flex items-end justify-end sm:col-span-1 lg:col-span-1 xl:col-span-1">
-                              <Button
-                                type="button"
-                                className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
-                                {...erpNavSkip()}
-                                onClick={addPiecesLine}
-                              >
-                                <Plus className="mr-1 h-4 w-4" />
-                                {editingPiecesId ? "Update" : "Add"}
-                              </Button>
-                            </div>
-                          </div>
-
-                          <div className="max-h-80 overflow-auto border-t">
-                            <table className="w-full min-w-[720px] text-sm">
-                              <TableHeader>
-                                <TableRow className="bg-sidebar hover:bg-sidebar">
-                                  {[
-                                    "Child AWB",
-                                    "Actl Weight/PCS",
-                                    "Pieces",
-                                    "Length",
-                                    "Breadth",
-                                    "Height",
-                                    "Volumetric Weight",
-                                    "Charge Weight",
-                                    "Action",
-                                  ].map((h) => (
-                                    <TableHead key={h} className="text-sidebar-foreground">
-                                      {h}
-                                    </TableHead>
-                                  ))}
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {form.piecesLines.length === 0 ? (
-                                  <TableRow>
-                                    <TableCell
-                                      colSpan={9}
-                                      className="h-16 text-center text-muted-foreground"
-                                    >
-                                      No piece lines added
-                                    </TableCell>
-                                  </TableRow>
-                                ) : (
-                                  form.piecesLines.map((l) => (
-                                    <TableRow key={l.id}>
-                                      <TableCell>{l.childAwb || "—"}</TableCell>
-                                      <TableCell>{l.actualWeightPerPc}</TableCell>
-                                      <TableCell>{l.pieces}</TableCell>
-                                      <TableCell>{l.length}</TableCell>
-                                      <TableCell>{l.breadth}</TableCell>
-                                      <TableCell>{l.height}</TableCell>
-                                      <TableCell>{l.volWeight}</TableCell>
-                                      <TableCell>{l.chargeWeight}</TableCell>
-                                      <TableCell>
-                                        <div className="flex items-center">
-                                          <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className="h-8 w-8"
-                                            onClick={() => editPiecesLine(l)}
-                                            aria-label="Edit piece line"
-                                          >
-                                            <Pencil className="h-4 w-4" />
-                                          </Button>
-                                          <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className="h-8 w-8 text-destructive"
-                                            onClick={() => removePiecesLine(l.id)}
-                                            aria-label="Delete piece line"
-                                          >
-                                            <Trash2 className="h-4 w-4" />
-                                          </Button>
-                                        </div>
-                                      </TableCell>
-                                    </TableRow>
-                                  ))
-                                )}
-                              </TableBody>
-                            </table>
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-
-                      <Collapsible open={chargesOpen} onOpenChange={setChargesOpen} className="mt-4">
-                        <CollapsibleTrigger
-                          className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
-                          {...erpNavSkip()}
-                        >
-                          Click here to enter Charge details Or Press [Alt + c]
-                          <ChevronDown
-                            className={cn("h-4 w-4 transition-transform", chargesOpen && "rotate-180")}
-                          />
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="border border-t-0 bg-card">
-                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-4 xl:grid-cols-8 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                            {(
-                              [
-                                ["Contract Charges", chargeSummary.contractCharges],
-                                ["Other Charges", chargeSummary.otherCharges],
-                                ["Sub Total", chargeSummary.subTotal],
-                                ["Total Fuel", chargeSummary.totalFuel],
-                                ["IGST", chargeSummary.igst],
-                                ["CGST", chargeSummary.cgst],
-                                ["SGST", chargeSummary.sgst],
-                                ["Total Amount", chargeSummary.totalAmount],
-                              ] as const
-                            ).map(([label, val]) => (
-                              <FieldWrapper key={label} borderLabel label={label}>
-                                <Input
-                                  value={val}
-                                  readOnly
-                                  className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                />
-                              </FieldWrapper>
-                            ))}
-                          </div>
-                          {chargeSummary.rateSource ? (
-                            <p data-testid="rating-rate-source" className="border-b px-3 py-2 text-xs text-muted-foreground">
-                              {chargeSummary.rateSource}
-                            </p>
-                          ) : null}
-                          <div className="flex flex-wrap gap-2 border-b px-3 py-2.5">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8 border-emerald-600 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                              {...erpNavSkip()}
-                              disabled={saving || isReadOnly}
-                              onClick={() => {
-                                void handleCheckRateCombination();
-                              }}
-                            >
-                              Check Rate Combination
-                            </Button>
-                            {authed && editing?.id ? (
+                <div
+                  ref={awbFormNavRef}
+                  className="erp-form-nav text-[13px] [&_.erp-field-shell]:h-9 [&_.erp-field-shell_input]:h-9 [&_.erp-field-shell_input]:min-h-9 [&_.erp-field-shell_input]:px-2 [&_.erp-field-shell_input]:text-[13px] [&_.erp-field-shell_button[role=combobox]]:h-9 [&_.erp-field-shell_button[role=combobox]]:px-2 [&_.erp-field-shell_button[role=combobox]]:text-[13px] [&_.erp-field-shell_button[aria-label=Search]]:h-9 [&_.erp-field-shell_button[aria-label=Search]]:w-9 [&_.erp-field-shell_label]:text-[12px] [&_.lookup-name]:min-h-9 [&_.lookup-name_input]:h-9 [&_.lookup-name_input]:min-h-9 [&_.lookup-name_input]:text-[13px] [&_input]:h-9 [&_input]:min-h-9 [&_input]:text-[13px] [&_button[role=combobox]]:h-9 [&_button[role=combobox]]:text-[13px] [&_button[aria-label=Search]]:h-9 [&_button[aria-label=Search]]:w-9"
+                  data-erp-form-nav
+                >
+                  <ErpFormNavProvider
+                    containerRef={awbFormNavRef}
+                    enabled={!entryLocked}
+                    validateBeforeAdvance={validateAwbNavAdvance}
+                    onAdvanceBlocked={handleAwbNavAdvanceBlocked}
+                  >
+                    <TabsContent value="awb" className="mt-0">
+                      <section
+                        aria-label="AWB booking status"
+                        className={cn(
+                          "mt-3 grid w-full grid-cols-4 gap-x-3 gap-y-1 border-y bg-muted/30 px-3 py-2 text-[12px] leading-tight text-muted-foreground lg:grid-cols-8",
+                          awbStatusQuery.isFetching && "animate-pulse opacity-80",
+                        )}
+                      >
+                        {awbStatusItems.map((item) => (
+                          <span key={item.label} className="min-w-0 truncate whitespace-nowrap">
+                            {item.label}
+                            {item.value ? (
                               <>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-8"
-                                  {...erpNavSkip()}
-                                  disabled={saving || isReadOnly}
-                                  onClick={() => {
-                                    void (async () => {
-                                      try {
-                                        const breakdown = await calculateShipmentRating(editing.id!);
-                                        applyServerRating(breakdown);
-                                        await refreshLive();
-                                        toast.success(
-                                          `Rated — total ${ratingToSummary(breakdown).totalAmount}`,
-                                        );
-                                      } catch (e) {
-                                        toast.error(toErrorMessage(e));
-                                      }
-                                    })();
-                                  }}
-                                >
-                                  Calculate rating
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-8"
-                                  {...erpNavSkip()}
-                                  disabled={saving || isReadOnly}
-                                  onClick={() => {
-                                    void (async () => {
-                                      try {
-                                        const breakdown = await recalculateShipmentRating({
-                                          id: editing.id!,
-                                          row_version: editing.rowVersion ?? 1,
-                                        });
-                                        applyServerRating(breakdown);
-                                        await refreshLive();
-                                        toast.success(
-                                          `Recalculated — total ${ratingToSummary(breakdown).totalAmount}`,
-                                        );
-                                      } catch (e) {
-                                        toast.error(toErrorMessage(e));
-                                      }
-                                    })();
-                                  }}
-                                >
-                                  Recalculate
-                                </Button>
+                                {" "}
+                                <span className="font-medium text-foreground">{item.value}</span>
                               </>
                             ) : null}
-                            {ratingSummary ? (
-                              <span className="self-center text-xs text-muted-foreground">
-                                Server rating: freight {ratingSummary.freight} · fuel{" "}
-                                {ratingSummary.fuel} · tax {ratingSummary.tax} · total{" "}
-                                {ratingSummary.totalAmount}
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                            <FieldWrapper borderLabel label="Description" required>
-                              <ErpNavSelect
-                                order={AWB_NAV.CHARGE_DESCRIPTION}
-                                value={chargeDraft.description || undefined}
-                                onValueChange={(v) => {
-                                  const head = chargeHeads.find((row) => row.name === v || row.code === v);
-                                  setChargeDraft((d) => ({
-                                    ...d,
-                                    description: head?.name || v,
-                                    itemFuel: head ? (head.apply_fuel ? "Yes" : "No") : d.itemFuel,
-                                    taxOnFuel: "Yes",
-                                    tax: head ? (head.apply_tax ? "Yes" : "No") : d.tax,
-                                    itemAmount:
-                                      d.itemAmount ||
-                                      (head && head.charge_rate > 0 ? String(head.charge_rate) : d.itemAmount),
-                                  }));
-                                }}
-                                items={chargeDescriptionItems}
-                                triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Item Amount" required>
-                              <ErpNavInput
-                                order={AWB_NAV.CHARGE_ITEM_AMOUNT}
-                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                value={chargeDraft.itemAmount}
-                                onValueChange={(v) =>
-                                  setChargeDraft((d) => ({
-                                    ...d,
-                                    itemAmount: v,
-                                    itemTotal: v || "0",
-                                  }))
-                                }
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label={`Item Fuel (${chargeFuelPct}%)`}>
-                              <div className="flex w-full min-w-0 items-stretch">
-                                <ErpNavSelect
-                                  order={AWB_NAV.CHARGE_ITEM_FUEL}
-                                  value={chargeDraft.itemFuel}
-                                  onValueChange={(v) => setChargeDraft((d) => ({ ...d, itemFuel: v }))}
-                                  items={YES_NO}
-                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                                />
-                                <Input
-                                  value={chargePreview.fuelAmt}
-                                  readOnly
-                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                />
+                          </span>
+                        ))}
+                      </section>
+                      <fieldset disabled={entryLocked} className="min-w-0 border-0 p-0 disabled:opacity-90">
+                        <div className="p-2 md:p-2.5">
+                          <div className="mb-2 rounded border border-border bg-card p-2 pt-2.5">
+                            <div className="grid grid-cols-1 items-start gap-1.5 md:grid-cols-2 lg:grid-cols-12 lg:gap-x-2">
+                              <div className="flex flex-col lg:col-span-2">
+                                <FieldWrapper borderLabel label={`AWB No. [${awbMode}]`} error={fieldError(AWB_NAV.AWB_NO)}>
+                                  <div className="relative flex items-center w-full">
+                                    <ErpNavInput
+                                      order={AWB_NAV.AWB_NO}
+                                      value={form.awbNo}
+                                      disabled={awbMode === "AUTO" || !!editing || isReadOnly || clientSelected}
+                                      inputMode="numeric"
+                                      maxLength={6}
+                                      onValueChange={(v) =>
+                                        setForm((f) => ({ ...f, awbNo: v.replace(/\D/g, "").slice(0, 6) }))
+                                      }
+                                      onBlur={async () => {
+                                        if (awbMode === "MANUAL" && form.awbNo.trim() && authed) {
+                                          try {
+                                            const res = await validateManualAwb({
+                                              branchId: activeBranchId || profile?.home_branch_id || undefined,
+                                              awbNo: form.awbNo,
+                                            });
+                                            if (!res.valid) {
+                                              toast.error(res.message || "Invalid manual AWB number");
+                                            } else {
+                                              toast.success(res.message);
+                                            }
+                                          } catch (err) {
+                                            toast.error(`AWB validation error: ${toErrorMessage(err)}`);
+                                          }
+                                        }
+                                      }}
+                                      className="h-8 pr-12 px-1.5 text-[13px]"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (editing || isReadOnly) return;
+                                        const nextMode = awbMode === "AUTO" ? "MANUAL" : "AUTO";
+                                        setAwbMode(nextMode);
+                                        toast.info(
+                                          nextMode === "MANUAL"
+                                            ? "Switched to MANUAL AWB mode"
+                                            : "Switched to AUTO AWB mode",
+                                        );
+                                        if (nextMode === "AUTO") {
+                                          setForm((f) => ({ ...f, awbNo: "" }));
+                                        }
+                                      }}
+                                      disabled={!!editing || isReadOnly}
+                                      className={cn(
+                                        "absolute right-1 px-1 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-colors border",
+                                        awbMode === "AUTO"
+                                          ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300"
+                                          : "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300",
+                                      )}
+                                      title="Toggle Auto/Manual AWB mode (Alt+~)"
+                                    >
+                                      {awbMode}
+                                    </button>
+                                  </div>
+                                </FieldWrapper>
                               </div>
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Tax On Fuel">
-                              <div className="flex w-full min-w-0 items-stretch">
-                                <ErpNavSelect
-                                  order={AWB_NAV.CHARGE_TAX_ON_FUEL}
-                                  value={chargeDraft.taxOnFuel}
-                                  onValueChange={(v) => setChargeDraft((d) => ({ ...d, taxOnFuel: v }))}
-                                  items={YES_NO}
-                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                              <FieldWrapper borderLabel label="Book Date" className="lg:col-span-2">
+                                <ErpNavDateInput
+                                  order={AWB_NAV.BOOK_DATE}
+                                  readOnly={!canModifyAwb}
+                                  max={todayIso()}
+                                  value={form.bookDate}
+                                  onValueChange={(v) => setForm((f) => ({ ...f, bookDate: v }))}
+                                  className="h-8 px-1.5 text-[13px]"
                                 />
-                                <Input
-                                  value={chargeTaxOnFuelAmount.toFixed(2)}
-                                  readOnly
-                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Time" className="lg:col-span-1">
+                                <ErpNavInput
+                                  order={AWB_NAV.TIME}
+                                  readOnly={!canModifyAwb}
+                                  value={form.bookTime}
+                                  onValueChange={(v) =>
+                                    setForm((f) => ({
+                                      ...f,
+                                      bookTime: v.replace(/\D/g, "").slice(0, 4),
+                                    }))
+                                  }
+                                  className="h-8 px-1.5 text-[13px]"
                                 />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Reference No." className="lg:col-span-2" error={fieldError(AWB_NAV.REFERENCE)}>
+                                <ErpNavInput
+                                  order={AWB_NAV.REFERENCE}
+                                  value={form.referenceNo}
+                                  maxLength={30}
+                                  onValueChange={(v) => setForm((f) => ({ ...f, referenceNo: clipText(v, 30) }))}
+                                  className="h-8 px-1.5 text-[13px]"
+                                />
+                              </FieldWrapper>
+                              <div className="min-w-0 lg:col-span-3">
+                                <FieldWrapper
+                                  borderLabel
+                                  lookupSplit
+                                  label="Client Name"
+                                  required
+                                  invalid={navInvalidOrders.has(AWB_NAV.CLIENT)}
+                                  error={fieldError(AWB_NAV.CLIENT)}
+                                >
+                                  <ClientNameField
+                                    value={form.clientName}
+                                    onDraftChange={handleClientNameDraft}
+                                    onSelect={(v) => void handleClientSelect(v)}
+                                    disabled={clientLoading}
+                                  />
+                                </FieldWrapper>
+                                {clientLoading ? (
+                                  <p className="mt-0.5 text-[10px] text-muted-foreground">Loading client profile…</p>
+                                ) : loadedClientProfile?.paymentType ? (
+                                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                    Payment Type from Client Master: {loadedClientProfile.paymentType}
+                                  </p>
+                                ) : null}
                               </div>
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Tax">
-                              <div className="flex w-full min-w-0 items-stretch">
-                                <ErpNavSelect
-                                  order={AWB_NAV.CHARGE_TAX}
-                                  value={chargeDraft.tax}
-                                  onValueChange={(v) => setChargeDraft((d) => ({ ...d, tax: v }))}
-                                  items={YES_NO}
-                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                                />
-                                <Input
-                                  value={chargeTaxAmount.toFixed(2)}
-                                  readOnly
-                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                />
-                              </div>
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Item Total">
-                              <Input
-                                value={chargePreview.total}
-                                readOnly
-                                className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              />
-                            </FieldWrapper>
-                            <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
-                              <Button
-                                type="button"
-                                className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
-                                {...erpNavOrder(AWB_NAV.CHARGE_ADD)}
-                                onClick={addChargeLine}
-                              >
-                                <Plus className="mr-1 h-4 w-4" />
-                                Add
-                              </Button>
                             </div>
                           </div>
-                          <div className="overflow-x-auto border-t">
-                            <table className="w-full min-w-[960px] text-sm">
-                              <TableHeader>
-                                <TableRow className="bg-sidebar hover:bg-sidebar">
-                                  {[
-                                    "Description",
-                                    "Rate",
-                                    "Amount",
-                                    "Fuel Apply",
-                                    "Fuel Amt",
-                                    "TaxApply",
-                                    "Tax On Fuel",
-                                    "IGST",
-                                    "SGST",
-                                    "CGST",
-                                    "Total",
-                                    "Charges Type",
-                                    "Action",
-                                  ].map((h) => (
-                                    <TableHead
-                                      key={h}
-                                      className="whitespace-nowrap text-sidebar-foreground"
-                                    >
-                                      {h}
-                                    </TableHead>
-                                  ))}
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {form.chargeLines.length === 0 ? (
-                                  <TableRow>
-                                    <TableCell
-                                      colSpan={13}
-                                      className="h-16 text-center text-muted-foreground"
-                                    >
-                                      No charge lines added
-                                    </TableCell>
-                                  </TableRow>
-                                ) : (
-                                  form.chargeLines.map((l) => (
-                                    <TableRow key={l.id}>
-                                      <TableCell>{l.description}</TableCell>
-                                      <TableCell>{l.rate}</TableCell>
-                                      <TableCell>{l.amount}</TableCell>
-                                      <TableCell>{l.fuelApply}</TableCell>
-                                      <TableCell>{l.fuelAmt}</TableCell>
-                                      <TableCell>{l.taxApply}</TableCell>
-                                      <TableCell>{l.taxOnFuel}</TableCell>
-                                      <TableCell>{l.igst}</TableCell>
-                                      <TableCell>{l.sgst}</TableCell>
-                                      <TableCell>{l.cgst}</TableCell>
-                                      <TableCell>{l.total}</TableCell>
-                                      <TableCell>{l.chargesType}</TableCell>
-                                      <TableCell>
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-8 w-8 text-destructive"
-                                          onClick={() => removeChargeLine(l.id)}
-                                          aria-label="Delete charge line"
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                      </TableCell>
-                                    </TableRow>
-                                  ))
-                                )}
-                              </TableBody>
-                            </table>
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
 
-                      <FormSection title="Shipment Details" className="mt-4">
-                        <ShipmentDetailsFields
-                          form={form}
-                          setForm={setForm}
-                          paymentTypeReadOnly={paymentTypeReadOnly}
-                          clientLoading={clientLoading}
-                          isReadOnly={isReadOnly}
-                          executiveBranchId={activeBranchId}
-                          executiveLocation={form.shipper.origin.code}
-                          fieldError={fieldError}
-                        />
-                      </FormSection>
-                    </div>
-                  </fieldset>
-                  <div className="flex flex-wrap items-center gap-2 px-4 pb-2">
-                    <Checkbox
-                      id="lock"
-                      checked={form.lock}
-                      disabled={isTerminalStatus || persistedLocked || !canModifyAwb}
-                      onCheckedChange={(checked) => setForm((current) => ({ ...current, lock: checked === true }))}
-                      {...erpNavOrder(AWB_NAV.LOCK)}
-                    />
-                    <label htmlFor="lock" className="text-sm text-muted-foreground">
-                      Lock
-                    </label>
-                    {persistedLocked ? (
-                      <span className="text-sm text-muted-foreground">
-                        {lockedByCaption(editing?.lockedByName, editing?.lockedAt) ?? "Locked"}
-                      </span>
-                    ) : null}
-                    {persistedLocked && canUnlockAwb ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8"
-                        disabled={saving}
-                        onClick={() => {
-                          if (!editing?.id) return;
-                          setSaving(true);
-                          void unlockShipment(editing.id)
-                            .then((row) => {
-                              setForm((current) => ({ ...current, lock: false }));
-                              setEditing((current) =>
-                                current
-                                  ? {
-                                    ...current,
-                                    rowVersion: row.row_version,
-                                    status: row.current_status,
-                                    lockedByName: null,
-                                    lockedAt: null,
-                                    serverLocked: false,
-                                  }
-                                  : current,
-                              );
-                              toast.success(`AWB ${row.awb_no} unlocked`);
-                            })
-                            .catch((error) => toast.error(toErrorMessage(error)))
-                            .finally(() => setSaving(false));
-                        }}
-                      >
-                        Unlock
-                      </Button>
-                    ) : null}
-                  </div>
-                  {editing?.id &&
-                    (showShipmentDocumentsCenter || vendorShippingActive || vendorBookingBusy) ? (
-                    <div className="space-y-4 border-t px-4 py-4 md:px-6">
-                      {vendorShippingActive || vendorBookingBusy ? (
-                        vendorMeta.status === "VENDOR_BOOKED" || vendorMeta.otpVerified ? (
-                          <ShipmentBookedBanner
-                            vendorAwb={vendorMeta.vendorAwb}
-                            trackingNumber={vendorMeta.trackingNumber}
-                            provider={vendorMeta.provider}
-                          />
-                        ) : (
-                          <VendorBookingStatusStrip
-                            meta={vendorMeta}
-                            bookingInProgress={vendorBookingBusy}
-                            canRetry={canRetryVendorBooking && !vendorBookingBusy}
-                            onRetry={() => void runVendorRetry()}
-                            lastResult={vendorLastResult}
-                          />
-                        )
-                      ) : null}
-                      {showShipmentDocumentsCenter ? (
-                        <div id="shipment-documents-center">
-                          <ShipmentDocumentsCard
+                        </div>
+                      </fieldset>
+
+                      {isSaved && editing?.id ? (
+                        <div className="px-2 md:px-2.5">
+                          <ShipmentDocumentQuickLinks
                             shipmentId={editing.id}
                             refreshKey={vendorPanelKey}
-                            poll={vendorShippingActive}
+                            onOpenCenter={() => {
+                              document
+                                .getElementById("shipment-documents-center")
+                                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }}
                             onEnsureDocument={ensureInternalDocument}
                           />
                         </div>
                       ) : null}
-                      {vendorShippingActive || vendorBookingBusy ? (
-                        <VendorActivityTimeline shipmentId={editing.id} refreshKey={vendorPanelKey} />
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {canCarrierActions && !vendorShippingActive ? (
-                    <div className="border-t px-4 py-4 md:px-6">
-                      <FormSection title="Carrier booking & tracking">
-                        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                          <FieldWrapper label="Provider">
-                            <Input
-                              readOnly
-                              className="bg-muted/30"
-                              value={editing?.carrierProviderCode || resolveCarrierCode()}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper label="Booking status">
-                            <Input
-                              readOnly
-                              className="bg-muted/30"
-                              value={editing?.carrierBookingStatus || "NONE"}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper label="Booking ref">
-                            <Input
-                              readOnly
-                              className="bg-muted/30"
-                              value={editing?.carrierBookingRef || ""}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper label="Tracking no">
-                            <Input
-                              readOnly
-                              className="bg-muted/30"
-                              value={editing?.carrierTrackingNo || ""}
-                            />
-                          </FieldWrapper>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {!carrierBooked ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              disabled={saving}
-                              onClick={() => void handleCarrierBook()}
-                            >
-                              Book with carrier
-                            </Button>
-                          ) : (
-                            <>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={saving}
-                                onClick={() => void handleCarrierCancel()}
-                              >
-                                Cancel booking
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={saving}
-                                onClick={() => void handleCarrierTrack()}
-                              >
-                                Refresh tracking
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={saving}
-                                onClick={() => void handleCarrierLabel()}
-                              >
-                                Download label
-                              </Button>
-                            </>
-                          )}
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={saving}
-                            onClick={() => void handleCarrierServiceability()}
-                          >
-                            Check serviceability
-                          </Button>
-                          <span className="self-center text-xs text-muted-foreground">
-                            Supported: {SUPPORTED_CARRIER_CODES.join(", ")}
-                          </span>
-                        </div>
-                      </FormSection>
-                    </div>
-                  ) : null}
-                  <div className="border-t px-4 py-4 md:px-6">
-                    {bookingErrors.length > 0 ? (
-                      <div role="alert" className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                        {bookingErrors.map((msg) => (
-                          <div key={msg}>{msg}</div>
-                        ))}
-                      </div>
-                    ) : null}
-                    <AwbFormFooter
-                      showPrevious={false}
-                      readOnly={isReadOnly}
-                      saving={saving}
-                      onSave={handleSave}
-                      saveLabel={isSaved ? "Update" : "Save"}
-                      onNext={goNextTab}
-                      onCancel={requestCloseForm}
-                    />
-                  </div>
-                </TabsContent>
 
-                <TabsContent value="proforma" className="mt-0">
-                  <div className="p-4 md:p-6">
-                    <div className={cn(entryLocked && "pointer-events-none opacity-90")}>
-                      <FormSection title="Manifest GST Detail">
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                          <FieldWrapper borderLabel label="CSB_Type">
-                            <ErpNavSelect
-                              order={AWB_NAV.PROFORMA_CSB_TYPE}
-                              value={form.proforma.csbType}
-                              onValueChange={(v) => {
-                                const isComm = v === "CSB 5" || v === "COMMERCIAL" || v === "CBE XIII";
-                                const isGiftCSB = v === "CSB 4" || v === "CSB 3" || v === "ECM SPX";
-                                setForm((f) => {
-                                  let exportReason = f.proforma.exportReason;
-                                  if (isComm && (exportReason.toUpperCase().includes("GIFT") || !exportReason)) {
-                                    exportReason = "SALE";
-                                  } else if (isGiftCSB && exportReason === "SALE") {
-                                    exportReason = "";
-                                  }
-                                  return {
-                                    ...f,
-                                    commercial: isComm ? true : isGiftCSB ? false : f.commercial,
-                                    proforma: {
-                                      ...f.proforma,
-                                      csbType: v,
-                                      exportReason,
-                                    },
-                                  };
-                                });
-                              }}
-                              items={CSB_TYPES}
-                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                      <fieldset disabled={entryLocked} className="min-w-0 border-0 p-0 disabled:opacity-90">
+                        <div className="p-2 md:p-2.5">
+                          <div className="mt-0.5 grid grid-cols-1 items-start gap-2 pt-2 md:grid-cols-2 xl:grid-cols-3 xl:gap-2.5">
+                            <PartySection
+                              title="Shipper Details"
+                              party={form.shipper}
+                              onChange={(p) => patchParty("shipper", p)}
+                              originLookup="destination"
+                              originRequired
+                              addressRequired
+                              invalidNavOrders={navInvalidOrders}
+                              fieldError={fieldError}
+                              onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
                             />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Term Of Invoice">
-                            <ErpNavSelect
-                              order={AWB_NAV.PROFORMA_TERM_OF_INVOICE}
-                              value={form.proforma.termOfInvoice || undefined}
-                              onValueChange={(v) => patchProforma({ termOfInvoice: v })}
-                              items={TERM_OF_INVOICE}
-                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="GST Invoice">
-                            <ErpNavSelect
-                              order={AWB_NAV.PROFORMA_GST_INVOICE}
-                              value={form.proforma.gstInvoice ? "Yes" : "No"}
-                              onValueChange={(v) => patchProforma({ gstInvoice: v === "Yes" })}
-                              items={YES_NO}
-                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Invoice No">
-                            <ErpNavInput
-                              order={AWB_NAV.PROFORMA_INVOICE_NO}
-                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={form.proforma.invoiceNo}
-                              onValueChange={(v) => patchProforma({ invoiceNo: v })}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Invoice Date">
-                            <ErpNavDateInput
-                              order={AWB_NAV.PROFORMA_INVOICE_DATE}
-                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={form.proforma.invoiceDate}
-                              onValueChange={(v) => patchProforma({ invoiceDate: v })}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Department No">
-                            <Input
-                              readOnly
-                              className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={form.proforma.departmentNo}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Export Reason">
-                            <ErpNavSelect
-                              order={AWB_NAV.PROFORMA_EXPORT_REASON}
-                              value={form.proforma.exportReason}
-                              onValueChange={(v) => patchProforma({ exportReason: v })}
-                              items={
-                                form.commercial || form.proforma.csbType === "CSB 5" || form.proforma.csbType === "COMMERCIAL"
-                                  ? CSB5_EXPORT_REASONS
-                                  : CSB4_EXPORT_REASONS
+                            <PartySection
+                              title="Consignee Details"
+                              party={form.consignee}
+                              onChange={(p) => patchParty("consignee", p)}
+                              originLookup="internationalDestination"
+                              originRequired={consigneeFieldsRequired}
+                              companyRequired={consigneeFieldsRequired}
+                              addressRequired
+                              phoneRequired
+                              pincodeCountryCode={
+                                !form.consignee.country.trim() ||
+                                  form.consignee.country.trim().toLowerCase() === "india"
+                                  ? "IN"
+                                  : /^[A-Za-z]{2}$/.test(form.consignee.origin.code.trim())
+                                    ? form.consignee.origin.code.trim().toUpperCase()
+                                    : "XX"
                               }
-                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                              invalidNavOrders={navInvalidOrders}
+                              fieldError={fieldError}
+                              onValidationError={(msg) => setWeightErrorModal({ open: true, message: msg })}
                             />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Format">
-                            <ErpNavSelect
-                              order={AWB_NAV.PROFORMA_FORMAT}
-                              value={form.proforma.format || undefined}
-                              onValueChange={(v) => patchProforma({ format: v })}
-                              items={PROFORMA_FORMATS}
-                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                            <ServicesSection
+                              form={form}
+                              setForm={setForm}
+                              airlineRequired={!formSetupSettings.airlineNotRequired}
+                              invalidNavOrders={navInvalidOrders}
+                              fieldError={fieldError}
                             />
-                          </FieldWrapper>
-                          <FieldWrapper
-                            borderLabel
-                            label="Ad Code"
-                            required={form.proforma.csbType.trim().toUpperCase() === "CSB 5" || form.commercial}
-                          >
-                            <ErpNavInput
-                              order={AWB_NAV.PROFORMA_AD_CODE}
-                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={form.proforma.adCode}
-                              onValueChange={(v) => patchProforma({ adCode: v })}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Total IGST">
-                            <Input
-                              readOnly
-                              className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={proformaTotalIgst}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Bond / UT">
-                            <ErpNavSelect
-                              order={AWB_NAV.PROFORMA_BOND_UT}
-                              value={form.proforma.bondUt || "No"}
-                              onValueChange={(v) =>
-                                patchProforma({
-                                  bondUt: v,
-                                  payOfIgst: v === "Yes" ? "No" : form.proforma.payOfIgst,
-                                })
-                              }
-                              items={YES_NO}
-                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Pay of IGST">
-                            <ErpNavSelect
-                              order={AWB_NAV.PROFORMA_PAY_IGST}
-                              value={form.proforma.payOfIgst || "No"}
-                              onValueChange={(v) =>
-                                patchProforma({
-                                  payOfIgst: v,
-                                  bondUt: v === "Yes" ? "No" : form.proforma.bondUt,
-                                })
-                              }
-                              items={YES_NO}
-                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                            />
-                          </FieldWrapper>
-                          {form.proforma.bondUt === "Yes" ? (
-                            <>
-                              <FieldWrapper borderLabel label="LUT No" required>
-                                <ErpNavInput
-                                  order={AWB_NAV.PROFORMA_LUT_NO}
-                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                  value={form.proforma.lutNo}
-                                  onValueChange={(v) => patchProforma({ lutNo: v })}
-                                  placeholder={loadedClientProfile?.lutNumber || "Enter LUT No"}
-                                />
-                              </FieldWrapper>
-                              <FieldWrapper borderLabel label="LUT Expiry Date" required>
-                                <ErpNavDateInput
-                                  order={AWB_NAV.PROFORMA_LUT_EXPIRY}
-                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                  value={form.proforma.lutExpiry}
-                                  onValueChange={(v) => patchProforma({ lutExpiry: v })}
-                                  placeholder="YYYY-MM-DD"
-                                />
-                              </FieldWrapper>
-                            </>
-                          ) : null}
-                          <FieldWrapper borderLabel label="Ecommerce">
-                            <ErpNavSelect
-                              order={AWB_NAV.PROFORMA_ECOMMERCE}
-                              value={form.proforma.ecommerce || "No"}
-                              onValueChange={(v) => patchProforma({ ecommerce: v })}
-                              items={YES_NO}
-                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="MEIS">
-                            <ErpNavSelect
-                              order={AWB_NAV.PROFORMA_MEIS}
-                              value={form.proforma.meis || "No"}
-                              onValueChange={(v) => patchProforma({ meis: v })}
-                              items={YES_NO}
-                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Type of Invoice">
-                            <ErpNavInput
-                              order={AWB_NAV.PROFORMA_INVOICE_TYPE}
-                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={form.proforma.invoiceType}
-                              onValueChange={(v) => patchProforma({ invoiceType: v })}
-                            />
-                          </FieldWrapper>
-                        </div>
-                      </FormSection>
+                          </div>
 
-                      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]">
-                        <div className="relative rounded border border-border bg-card p-3 pt-5">
-                          <span className="absolute left-2.5 top-0 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[13px] font-semibold leading-none text-sidebar-foreground">
-                            Import Proforma
-                          </span>
-                          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                            <Button
-                              type="button"
-                              variant="link"
-                              size="sm"
-                              className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
-                              {...erpNavSkip()}
-                              onClick={() => {
-                                const link = document.createElement("a");
-                                link.href = "/ExcelFormat/AWBPerforma.xls?v=1.3";
-                                link.download = "AWBPerforma.xls";
-                                link.click();
-                              }}
-                            >
-                              <FileSpreadsheet className="h-4 w-4 shrink-0" />
-                              Download Excel File Format
-                            </Button>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm text-foreground">Select File</span>
-                              <Input
-                                ref={proformaFileRef}
-                                type="file"
-                                accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                className="h-8 max-w-[220px] text-[13px]"
-                                {...erpNavSkip()}
-                              />
+                          <div className="mt-2 space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  className="h-8 shrink-0 rounded-full bg-emerald-600 px-4 text-xs text-white hover:bg-emerald-600/90"
+                                  {...erpNavSkip()}
+                                  disabled={ratingBusy !== null}
+                                  onClick={() => {
+                                    void handleCheckRateCombination();
+                                  }}
+                                >
+                                  Customer Charges
+                                </Button>
+                                <span className="text-sm text-foreground">Total Amount</span>
+                                <span className="min-w-16 text-sm font-medium tabular-nums text-foreground">
+                                  {Number.parseFloat(payableFromLines(form)) > 0
+                                    ? payableFromLines(form)
+                                    : ""}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  className="h-8 shrink-0 rounded-full bg-emerald-600 px-4 text-xs text-white hover:bg-emerald-600/90"
+                                  {...erpNavSkip()}
+                                  disabled={ratingBusy !== null}
+                                  onClick={() => {
+                                    void handleVendorCharges();
+                                  }}
+                                >
+                                  Vendor Charges
+                                </Button>
+                                <span className="text-sm text-foreground">Total Amount</span>
+                                <span className="min-w-16 text-sm font-medium tabular-nums text-foreground">
+                                  {Number.parseFloat(form.vendorChargesTotal) > 0
+                                    ? Number.parseFloat(form.vendorChargesTotal).toFixed(2)
+                                    : ""}
+                                </span>
+                              </div>
                               <Button
-                                type="button"
                                 size="sm"
-                                className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
+                                className="h-8 rounded-full bg-emerald-600 px-4 text-xs text-white hover:bg-emerald-600/90"
                                 {...erpNavSkip()}
-                                disabled={proformaUploading || entryLocked}
-                                onClick={() => void uploadProformaFile()}
+                                disabled={ratingBusy !== null}
+                                onClick={() => {
+                                  void handleRateCompare();
+                                }}
                               >
-                                {proformaUploading ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Upload className="h-3.5 w-3.5" />
-                                )}
-                                Upload
+                                Rate Compare
                               </Button>
                             </div>
+                            <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm text-foreground">
+                              <span>
+                                Customer Contract:{" "}
+                                {chargeRefs.customerContract ? (
+                                  <Link
+                                    to="/master/customer/customer-rate"
+                                    className="text-blue-600 underline"
+                                  >
+                                    {chargeRefs.customerContract}
+                                  </Link>
+                                ) : null}
+                              </span>
+                              <span>
+                                Vendor Contract:{" "}
+                                {chargeRefs.vendorContract ? (
+                                  <Link
+                                    to="/master/vendor/vendor-contract"
+                                    className="text-blue-600 underline"
+                                  >
+                                    {chargeRefs.vendorContract}
+                                  </Link>
+                                ) : null}
+                              </span>
+                              <button
+                                type="button"
+                                className="text-blue-600 underline"
+                                onClick={() => {
+                                  void handleCheckRateCombination();
+                                  if (form.vendor.code.trim()) void handleVendorCharges();
+                                }}
+                              >
+                                Check Rate Combination
+                              </button>
+                              <span>
+                                Customer Zone:{" "}
+                                {chargeRefs.customerZone ? (
+                                  <Link to="/master/sales/zone" className="text-blue-600 underline">
+                                    {chargeRefs.customerZone}
+                                  </Link>
+                                ) : null}
+                              </span>
+                              <span>
+                                Vendor Zone:{" "}
+                                {chargeRefs.vendorZone ? (
+                                  <Link to="/master/sales/zone" className="text-blue-600 underline">
+                                    {chargeRefs.vendorZone}
+                                  </Link>
+                                ) : null}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                        <div className="min-w-[12rem]">
-                          <FormSection title="Currency">
-                            <ErpNavSelect
-                              order={AWB_NAV.PROFORMA_CURRENCY}
-                              value={form.proforma.currency}
-                              onValueChange={(v) => patchProforma({ currency: v })}
-                              items={PROFORMA_CURRENCIES}
-                              triggerClassName="h-8 text-[13px]"
-                              contentClassName="max-h-64"
+
+                          <Collapsible open={piecesOpen} onOpenChange={setPiecesOpen} className="mt-4">
+                            <CollapsibleTrigger
+                              className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
+                              {...erpNavSkip()}
+                            >
+                              Click here to enter Pieces details Or Press [Alt + u]
+                              <ChevronDown
+                                className={cn("h-4 w-4 transition-transform", piecesOpen && "rotate-180")}
+                              />
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="border border-t-0 bg-card">
+                              <div className="relative mx-3 mt-3 rounded border border-border bg-card p-3 pt-5">
+                                <span className="absolute left-2.5 top-0 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[13px] font-semibold leading-none text-sidebar-foreground">
+                                  Import MTS
+                                </span>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                                  <Button
+                                    type="button"
+                                    variant="link"
+                                    size="sm"
+                                    className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
+                                    {...erpNavSkip()}
+                                    onClick={downloadMtsTemplate}
+                                  >
+                                    <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                                    Download Excel File Format
+                                  </Button>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm text-foreground">Select File</span>
+                                    <Input
+                                      ref={mtsFileRef}
+                                      type="file"
+                                      accept=".xls,.xlsx,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                                      className="h-8 max-w-[220px] text-[13px]"
+                                      {...erpNavSkip()}
+                                    />
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
+                                      {...erpNavSkip()}
+                                      onClick={() => {
+                                        void uploadMtsFile();
+                                      }}
+                                    >
+                                      Upload
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(7.5rem,1.2fr)_minmax(5.25rem,0.85fr)_minmax(4.75rem,0.8fr)_repeat(3,minmax(3.75rem,0.72fr))_minmax(4.5rem,0.78fr)_minmax(11.5rem,1.35fr)_minmax(5.25rem,0.85fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                                <FieldWrapper borderLabel label="Measurement Unit">
+                                  <ErpNavSelect
+                                    order={AWB_NAV.PIECES_MEASUREMENT_UNIT}
+                                    value={piecesDraft.measurementUnit}
+                                    onValueChange={(v) => patchPiecesDraft({ measurementUnit: v })}
+                                    items={MEASUREMENT_UNITS}
+                                    triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Actl Weight/PCS">
+                                  <ErpNavInput
+                                    order={AWB_NAV.PIECES_ACTUAL_WEIGHT_PCS}
+                                    inputMode="decimal"
+                                    className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    value={piecesDraft.actualWeightPerPc}
+                                    onValueChange={(v) => patchPiecesDraft({ actualWeightPerPc: decimalNumber(v) })}
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="No. Of Pieces">
+                                  <ErpNavInput
+                                    order={AWB_NAV.PIECES_NO_OF_PIECES}
+                                    inputMode="numeric"
+                                    className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    value={piecesDraft.noOfPieces}
+                                    onValueChange={(v) => patchPiecesDraft({ noOfPieces: digitsOnly(v) })}
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Length">
+                                  <ErpNavInput
+                                    order={AWB_NAV.PIECES_LENGTH}
+                                    inputMode="decimal"
+                                    className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    value={piecesDraft.length}
+                                    onValueChange={(v) => patchPiecesDraft({ length: decimalNumber(v) })}
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Width">
+                                  <ErpNavInput
+                                    order={AWB_NAV.PIECES_WIDTH}
+                                    inputMode="decimal"
+                                    className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    value={piecesDraft.width}
+                                    onValueChange={(v) => patchPiecesDraft({ width: decimalNumber(v) })}
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Height">
+                                  <ErpNavInput
+                                    order={AWB_NAV.PIECES_HEIGHT}
+                                    inputMode="decimal"
+                                    className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    value={piecesDraft.height}
+                                    onValueChange={(v) => patchPiecesDraft({ height: decimalNumber(v) })}
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Division">
+                                  <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
+                                    <ErpNavInput
+                                      order={AWB_NAV.PIECES_DIVISION}
+                                      inputMode="decimal"
+                                      className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                      value={piecesDraft.division}
+                                      onValueChange={(v) => patchPiecesDraft({ division: decimalNumber(v) })}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" && e.shiftKey) {
+                                          e.preventDefault();
+                                          const container = awbFormNavRef.current;
+                                          if (container) {
+                                            focusPrevBeforeOrder(container, AWB_NAV.PIECES_DIVISION);
+                                          }
+                                          return;
+                                        }
+                                        if (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
+                                          e.preventDefault();
+                                          commitPiecesLine();
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                </FieldWrapper>
+                                <FieldWrapper
+                                  borderLabel
+                                  label="Vol Weight"
+                                  className="sm:col-span-2 md:col-span-2 lg:col-span-2 xl:col-span-1"
+                                >
+                                  <Input
+                                    value={piecesDraft.volWeight}
+                                    readOnly
+                                    {...erpNavOrder(AWB_NAV.PIECES_VOL_WEIGHT)}
+                                    className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Chrg Weight">
+                                  <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
+                                    <Input
+                                      value={piecesDraft.chargeWeight}
+                                      readOnly
+                                      {...erpNavOrder(AWB_NAV.PIECES_CHARGE_WEIGHT)}
+                                      className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" && e.shiftKey) {
+                                          e.preventDefault();
+                                          const container = awbFormNavRef.current;
+                                          if (container) {
+                                            focusPrevBeforeOrder(container, AWB_NAV.PIECES_CHARGE_WEIGHT);
+                                          }
+                                          return;
+                                        }
+                                        if (e.key === "Enter") {
+                                          e.preventDefault();
+                                          commitPiecesLine();
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                </FieldWrapper>
+                                <div className="col-span-2 flex items-end justify-end sm:col-span-1 lg:col-span-1 xl:col-span-1">
+                                  <Button
+                                    type="button"
+                                    className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                                    {...erpNavSkip()}
+                                    onClick={addPiecesLine}
+                                  >
+                                    <Plus className="mr-1 h-4 w-4" />
+                                    {editingPiecesId ? "Update" : "Add"}
+                                  </Button>
+                                </div>
+                              </div>
+
+                              <div className="max-h-80 overflow-auto border-t">
+                                <table className="w-full min-w-[720px] text-sm">
+                                  <TableHeader>
+                                    <TableRow className="bg-sidebar hover:bg-sidebar">
+                                      {[
+                                        "Child AWB",
+                                        "Actl Weight/PCS",
+                                        "Pieces",
+                                        "Length",
+                                        "Breadth",
+                                        "Height",
+                                        "Volumetric Weight",
+                                        "Charge Weight",
+                                        "Action",
+                                      ].map((h) => (
+                                        <TableHead key={h} className="text-sidebar-foreground">
+                                          {h}
+                                        </TableHead>
+                                      ))}
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {form.piecesLines.length === 0 ? (
+                                      <TableRow>
+                                        <TableCell
+                                          colSpan={9}
+                                          className="h-16 text-center text-muted-foreground"
+                                        >
+                                          No piece lines added
+                                        </TableCell>
+                                      </TableRow>
+                                    ) : (
+                                      form.piecesLines.map((l) => (
+                                        <TableRow key={l.id}>
+                                          <TableCell>{l.childAwb || "—"}</TableCell>
+                                          <TableCell>{l.actualWeightPerPc}</TableCell>
+                                          <TableCell>{l.pieces}</TableCell>
+                                          <TableCell>{l.length}</TableCell>
+                                          <TableCell>{l.breadth}</TableCell>
+                                          <TableCell>{l.height}</TableCell>
+                                          <TableCell>{l.volWeight}</TableCell>
+                                          <TableCell>{l.chargeWeight}</TableCell>
+                                          <TableCell>
+                                            <div className="flex items-center">
+                                              <Button
+                                                size="icon"
+                                                variant="ghost"
+                                                className="h-8 w-8"
+                                                onClick={() => editPiecesLine(l)}
+                                                aria-label="Edit piece line"
+                                              >
+                                                <Pencil className="h-4 w-4" />
+                                              </Button>
+                                              <Button
+                                                size="icon"
+                                                variant="ghost"
+                                                className="h-8 w-8 text-destructive"
+                                                onClick={() => removePiecesLine(l.id)}
+                                                aria-label="Delete piece line"
+                                              >
+                                                <Trash2 className="h-4 w-4" />
+                                              </Button>
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      ))
+                                    )}
+                                  </TableBody>
+                                </table>
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+
+                          <Collapsible open={chargesOpen} onOpenChange={setChargesOpen} className="mt-4">
+                            <CollapsibleTrigger
+                              className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
+                              {...erpNavSkip()}
+                            >
+                              Click here to enter Charge details Or Press [Alt + c]
+                              <ChevronDown
+                                className={cn("h-4 w-4 transition-transform", chargesOpen && "rotate-180")}
+                              />
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="border border-t-0 bg-card">
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-4 xl:grid-cols-8 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                                {(
+                                  [
+                                    ["Contract Charges", chargeSummary.contractCharges],
+                                    ["Other Charges", chargeSummary.otherCharges],
+                                    ["Sub Total", chargeSummary.subTotal],
+                                    ["Total Fuel", chargeSummary.totalFuel],
+                                    ["IGST", chargeSummary.igst],
+                                    ["CGST", chargeSummary.cgst],
+                                    ["SGST", chargeSummary.sgst],
+                                    ["Total Amount", chargeSummary.totalAmount],
+                                  ] as const
+                                ).map(([label, val]) => (
+                                  <FieldWrapper key={label} borderLabel label={label}>
+                                    <Input
+                                      value={val}
+                                      readOnly
+                                      className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    />
+                                  </FieldWrapper>
+                                ))}
+                              </div>
+                              {chargeSummary.rateSource ? (
+                                <p data-testid="rating-rate-source" className="border-b px-3 py-2 text-xs text-muted-foreground">
+                                  {chargeSummary.rateSource}
+                                </p>
+                              ) : null}
+                              <div className="flex flex-wrap gap-2 border-b px-3 py-2.5">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 border-emerald-600 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                  {...erpNavSkip()}
+                                  disabled={saving || isReadOnly}
+                                  onClick={() => {
+                                    void handleCheckRateCombination();
+                                  }}
+                                >
+                                  Check Rate Combination
+                                </Button>
+                                {authed && editing?.id ? (
+                                  <>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8"
+                                      {...erpNavSkip()}
+                                      disabled={saving || isReadOnly}
+                                      onClick={() => {
+                                        void (async () => {
+                                          try {
+                                            const breakdown = await calculateShipmentRating(editing.id!);
+                                            applyServerRating(breakdown);
+                                            await refreshLive();
+                                            toast.success(
+                                              `Rated — total ${ratingToSummary(breakdown).totalAmount}`,
+                                            );
+                                          } catch (e) {
+                                            toast.error(toErrorMessage(e));
+                                          }
+                                        })();
+                                      }}
+                                    >
+                                      Calculate rating
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8"
+                                      {...erpNavSkip()}
+                                      disabled={saving || isReadOnly}
+                                      onClick={() => {
+                                        void (async () => {
+                                          try {
+                                            const breakdown = await recalculateShipmentRating({
+                                              id: editing.id!,
+                                              row_version: editing.rowVersion ?? 1,
+                                            });
+                                            applyServerRating(breakdown);
+                                            await refreshLive();
+                                            toast.success(
+                                              `Recalculated — total ${ratingToSummary(breakdown).totalAmount}`,
+                                            );
+                                          } catch (e) {
+                                            toast.error(toErrorMessage(e));
+                                          }
+                                        })();
+                                      }}
+                                    >
+                                      Recalculate
+                                    </Button>
+                                  </>
+                                ) : null}
+                                {ratingSummary ? (
+                                  <span className="self-center text-xs text-muted-foreground">
+                                    Server rating: freight {ratingSummary.freight} · fuel{" "}
+                                    {ratingSummary.fuel} · tax {ratingSummary.tax} · total{" "}
+                                    {ratingSummary.totalAmount}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                                <FieldWrapper borderLabel label="Description" required>
+                                  <ErpNavSelect
+                                    order={AWB_NAV.CHARGE_DESCRIPTION}
+                                    value={chargeDraft.description || undefined}
+                                    onValueChange={(v) => {
+                                      const head = chargeHeads.find((row) => row.name === v || row.code === v);
+                                      setChargeDraft((d) => ({
+                                        ...d,
+                                        description: head?.name || v,
+                                        itemFuel: head ? (head.apply_fuel ? "Yes" : "No") : d.itemFuel,
+                                        taxOnFuel: "Yes",
+                                        tax: head ? (head.apply_tax ? "Yes" : "No") : d.tax,
+                                        itemAmount:
+                                          d.itemAmount ||
+                                          (head && head.charge_rate > 0 ? String(head.charge_rate) : d.itemAmount),
+                                      }));
+                                    }}
+                                    items={chargeDescriptionItems}
+                                    triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Item Amount" required>
+                                  <ErpNavInput
+                                    order={AWB_NAV.CHARGE_ITEM_AMOUNT}
+                                    className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    value={chargeDraft.itemAmount}
+                                    onValueChange={(v) =>
+                                      setChargeDraft((d) => ({
+                                        ...d,
+                                        itemAmount: v,
+                                        itemTotal: v || "0",
+                                      }))
+                                    }
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label={`Item Fuel (${chargeFuelPct}%)`}>
+                                  <div className="flex w-full min-w-0 items-stretch">
+                                    <ErpNavSelect
+                                      order={AWB_NAV.CHARGE_ITEM_FUEL}
+                                      value={chargeDraft.itemFuel}
+                                      onValueChange={(v) => setChargeDraft((d) => ({ ...d, itemFuel: v }))}
+                                      items={YES_NO}
+                                      triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                    />
+                                    <Input
+                                      value={chargePreview.fuelAmt}
+                                      readOnly
+                                      className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    />
+                                  </div>
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Tax On Fuel">
+                                  <div className="flex w-full min-w-0 items-stretch">
+                                    <ErpNavSelect
+                                      order={AWB_NAV.CHARGE_TAX_ON_FUEL}
+                                      value={chargeDraft.taxOnFuel}
+                                      onValueChange={(v) => setChargeDraft((d) => ({ ...d, taxOnFuel: v }))}
+                                      items={YES_NO}
+                                      triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                    />
+                                    <Input
+                                      value={chargeTaxOnFuelAmount.toFixed(2)}
+                                      readOnly
+                                      className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    />
+                                  </div>
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Tax">
+                                  <div className="flex w-full min-w-0 items-stretch">
+                                    <ErpNavSelect
+                                      order={AWB_NAV.CHARGE_TAX}
+                                      value={chargeDraft.tax}
+                                      onValueChange={(v) => setChargeDraft((d) => ({ ...d, tax: v }))}
+                                      items={YES_NO}
+                                      triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                    />
+                                    <Input
+                                      value={chargeTaxAmount.toFixed(2)}
+                                      readOnly
+                                      className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    />
+                                  </div>
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Item Total">
+                                  <Input
+                                    value={chargePreview.total}
+                                    readOnly
+                                    className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  />
+                                </FieldWrapper>
+                                <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
+                                  <Button
+                                    type="button"
+                                    className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                                    {...erpNavOrder(AWB_NAV.CHARGE_ADD)}
+                                    onClick={addChargeLine}
+                                  >
+                                    <Plus className="mr-1 h-4 w-4" />
+                                    Add
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="overflow-x-auto border-t">
+                                <table className="w-full min-w-[960px] text-sm">
+                                  <TableHeader>
+                                    <TableRow className="bg-sidebar hover:bg-sidebar">
+                                      {[
+                                        "Description",
+                                        "Rate",
+                                        "Amount",
+                                        "Fuel Apply",
+                                        "Fuel Amt",
+                                        "TaxApply",
+                                        "Tax On Fuel",
+                                        "IGST",
+                                        "SGST",
+                                        "CGST",
+                                        "Total",
+                                        "Charges Type",
+                                        "Action",
+                                      ].map((h) => (
+                                        <TableHead
+                                          key={h}
+                                          className="whitespace-nowrap text-sidebar-foreground"
+                                        >
+                                          {h}
+                                        </TableHead>
+                                      ))}
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {form.chargeLines.length === 0 ? (
+                                      <TableRow>
+                                        <TableCell
+                                          colSpan={13}
+                                          className="h-16 text-center text-muted-foreground"
+                                        >
+                                          No charge lines added
+                                        </TableCell>
+                                      </TableRow>
+                                    ) : (
+                                      form.chargeLines.map((l) => (
+                                        <TableRow key={l.id}>
+                                          <TableCell>{l.description}</TableCell>
+                                          <TableCell>{l.rate}</TableCell>
+                                          <TableCell>{l.amount}</TableCell>
+                                          <TableCell>{l.fuelApply}</TableCell>
+                                          <TableCell>{l.fuelAmt}</TableCell>
+                                          <TableCell>{l.taxApply}</TableCell>
+                                          <TableCell>{l.taxOnFuel}</TableCell>
+                                          <TableCell>{l.igst}</TableCell>
+                                          <TableCell>{l.sgst}</TableCell>
+                                          <TableCell>{l.cgst}</TableCell>
+                                          <TableCell>{l.total}</TableCell>
+                                          <TableCell>{l.chargesType}</TableCell>
+                                          <TableCell>
+                                            <Button
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-8 w-8 text-destructive"
+                                              onClick={() => removeChargeLine(l.id)}
+                                              aria-label="Delete charge line"
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          </TableCell>
+                                        </TableRow>
+                                      ))
+                                    )}
+                                  </TableBody>
+                                </table>
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+
+                          <FormSection title="Shipment Details" className="mt-4">
+                            <ShipmentDetailsFields
+                              form={form}
+                              setForm={setForm}
+                              paymentTypeReadOnly={paymentTypeReadOnly}
+                              clientLoading={clientLoading}
+                              isReadOnly={isReadOnly}
+                              executiveBranchId={activeBranchId}
+                              executiveLocation={form.shipper.origin.code}
+                              fieldError={fieldError}
                             />
                           </FormSection>
                         </div>
-                      </div>
-
-                      {form.proforma.currency !== "INR" ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-blue-200 bg-blue-50/50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-200">
-                          <Info className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                          <span>
-                            Customs Exchange Rate: 1 {form.proforma.currency} = ₹{getCustomsExchangeRate(form.proforma.currency).toFixed(2)} INR.
-                            {" "}Proforma Value: {form.proforma.currency} {proformaSummary.amount} (≈ ₹{(Number(proformaSummary.amount) * getCustomsExchangeRate(form.proforma.currency)).toFixed(2)} INR).
-                            {Number(proformaSummary.amount) * getCustomsExchangeRate(form.proforma.currency) > 100000 && !form.commercial && form.proforma.csbType !== "CSB 5" && (
-                              <Badge variant="destructive" className="ml-2 text-[10px]">
-                                Exceeds CSB-IV Limit (₹1,00,000) — CSB-V Commercial Required
-                              </Badge>
-                            )}
+                      </fieldset>
+                      <div className="flex flex-wrap items-center gap-2 px-4 pb-2">
+                        <Checkbox
+                          id="lock"
+                          checked={form.lock}
+                          disabled={isTerminalStatus || persistedLocked || !canModifyAwb}
+                          onCheckedChange={(checked) => setForm((current) => ({ ...current, lock: checked === true }))}
+                          {...erpNavOrder(AWB_NAV.LOCK)}
+                        />
+                        <label htmlFor="lock" className="text-sm text-muted-foreground">
+                          Lock
+                        </label>
+                        {persistedLocked ? (
+                          <span className="text-sm text-muted-foreground">
+                            {lockedByCaption(editing?.lockedByName, editing?.lockedAt) ?? "Locked"}
                           </span>
-                        </div>
-                      ) : null}
-
-                      <div className="mt-4 rounded-md border bg-card">
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(4rem,0.72fr)_minmax(4.5rem,0.78fr)_minmax(8rem,1.35fr)_minmax(5rem,0.9fr)_minmax(3.75rem,0.68fr)_minmax(3.75rem,0.68fr)_minmax(6.75rem,1fr)_minmax(3.75rem,0.68fr)_minmax(4.25rem,0.75fr)_minmax(3.5rem,0.65fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                          <FieldWrapper borderLabel label="Box No">
-                            <ErpNavSelect
-                              key={`proforma-box-${proformaBoxNumbers.join("-") || "none"}`}
-                              order={AWB_NAV.PROFORMA_BOX_NO}
-                              value={
-                                proformaBoxNumbers.includes(proformaDraft.boxNo)
-                                  ? proformaDraft.boxNo
-                                  : undefined
-                              }
-                              onValueChange={(v) => patchProformaDraft({ boxNo: v })}
-                              items={proformaBoxNumbers}
-                              disabled={proformaBoxNumbers.length === 0}
-                              triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Packages">
-                            <ErpNavInput
-                              order={AWB_NAV.PROFORMA_PACKAGES}
-                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={proformaDraft.packages}
-                              onValueChange={(v) => patchProformaDraft({ packages: v })}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Description">
-                            <ErpNavInput
-                              order={AWB_NAV.PROFORMA_DESCRIPTION}
-                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={proformaDraft.description}
-                              onValueChange={(v) => patchProformaDraft({ description: v })}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="HSN Code">
-                            <ErpNavInput
-                              order={AWB_NAV.PROFORMA_HSN_CODE}
-                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={proformaDraft.hsnCode}
-                              onValueChange={(v) => patchProformaDraft({ hsnCode: v })}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Quantity">
-                            <ErpNavInput
-                              order={AWB_NAV.PROFORMA_QUANTITY}
-                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={proformaDraft.quantity}
-                              onValueChange={(v) => patchProformaDraft({ quantity: v })}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Weight">
-                            <ErpNavInput
-                              order={AWB_NAV.PROFORMA_WEIGHT}
-                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={proformaDraft.weight}
-                              onValueChange={(v) => patchProformaDraft({ weight: v })}
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Unit">
-                            <div className="flex w-full min-w-0 items-stretch">
-                              <ErpNavSelect
-                                order={AWB_NAV.PROFORMA_UNIT}
-                                value={proformaDraft.unit}
-                                onValueChange={(v) => patchProformaDraft({ unit: v })}
-                                items={proformaUnits}
-                                triggerClassName="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                        ) : null}
+                        {persistedLocked && canUnlockAwb ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8"
+                            disabled={saving}
+                            onClick={() => {
+                              if (!editing?.id) return;
+                              setSaving(true);
+                              void unlockShipment(editing.id)
+                                .then((row) => {
+                                  setForm((current) => ({ ...current, lock: false }));
+                                  setEditing((current) =>
+                                    current
+                                      ? {
+                                        ...current,
+                                        rowVersion: row.row_version,
+                                        status: row.current_status,
+                                        lockedByName: null,
+                                        lockedAt: null,
+                                        serverLocked: false,
+                                      }
+                                      : current,
+                                  );
+                                  toast.success(`AWB ${row.awb_no} unlocked`);
+                                })
+                                .catch((error) => toast.error(toErrorMessage(error)))
+                                .finally(() => setSaving(false));
+                            }}
+                          >
+                            Unlock
+                          </Button>
+                        ) : null}
+                      </div>
+                      {editing?.id &&
+                        (showShipmentDocumentsCenter || vendorShippingActive || vendorBookingBusy) ? (
+                        <div className="space-y-4 border-t px-4 py-4 md:px-6">
+                          {vendorShippingActive || vendorBookingBusy ? (
+                            vendorMeta.status === "VENDOR_BOOKED" || vendorMeta.otpVerified ? (
+                              <ShipmentBookedBanner
+                                vendorAwb={vendorMeta.vendorAwb}
+                                trackingNumber={vendorMeta.trackingNumber}
+                                provider={vendorMeta.provider}
                               />
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                title="Add custom unit"
-                                aria-label="Add custom unit"
-                                className="h-8 w-8 shrink-0 rounded-none border-0 border-l border-input px-0 shadow-none"
-                                {...erpNavSkip()}
-                                onClick={() => {
-                                  setNewUnitInput("");
-                                  setAddUnitOpen(true);
-                                }}
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Rate">
-                            <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
-                              <ErpNavInput
-                                order={AWB_NAV.PROFORMA_RATE}
-                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                value={proformaDraft.rate}
-                                onValueChange={(v) => patchProformaDraft({ rate: v })}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" && e.shiftKey) {
-                                    e.preventDefault();
-                                    const container = awbFormNavRef.current;
-                                    if (container) {
-                                      focusPrevBeforeOrder(container, AWB_NAV.PROFORMA_RATE);
-                                    }
-                                    return;
-                                  }
-                                  if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    commitProformaLine();
-                                  }
-                                }}
+                            ) : (
+                              <VendorBookingStatusStrip
+                                meta={vendorMeta}
+                                bookingInProgress={vendorBookingBusy}
+                                canRetry={canRetryVendorBooking && !vendorBookingBusy}
+                                onRetry={() => void runVendorRetry()}
+                                lastResult={vendorLastResult}
                               />
-                            </div>
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="Amount">
-                            <Input
-                              value={proformaDraft.amount}
-                              readOnly
-                              className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            />
-                          </FieldWrapper>
-                          <FieldWrapper borderLabel label="IGST %">
-                            <ErpNavInput
-                              order={AWB_NAV.PROFORMA_IGST_PCT}
-                              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              value={proformaDraft.igstPercent}
-                              onValueChange={(v) => patchProformaDraft({ igstPercent: v })}
-                            />
-                          </FieldWrapper>
-                          <div className="col-span-2 flex items-end justify-end gap-1.5 sm:col-span-1 xl:col-span-1">
-                            <Button
-                              type="button"
-                              className="h-8 w-full bg-sidebar px-4 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
-                              {...erpNavSkip()}
-                              onClick={addProformaLine}
-                            >
-                              <Plus className="mr-1 h-4 w-4" />
-                              {editingProformaId ? "Update line" : "Add line"}
-                            </Button>
-                            {editingProformaId ? (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-8 text-xs"
-                                onClick={() => {
-                                  setEditingProformaId(null);
-                                  setProformaDraft(emptyProformaDraft());
-                                }}
-                              >
-                                Cancel
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-4 border-t px-3 py-2.5 text-sm">
-                          <span>
-                            Total Record:{" "}
-                            <span className="font-semibold text-primary">
-                              {proformaSummary.totalRecord}
-                            </span>
-                          </span>
-                          <span>
-                            Quantity:{" "}
-                            <span className="font-semibold text-primary">{proformaSummary.quantity}</span>
-                          </span>
-                          <span>
-                            Weight:{" "}
-                            <span className="font-semibold text-primary">{proformaSummary.weight}</span>
-                          </span>
-                          <span>
-                            Amount:{" "}
-                            <span className="font-semibold text-primary">{proformaSummary.amount}</span>
-                          </span>
-                        </div>
-
-                        <div className="overflow-x-auto border-t">
-                          <table className="w-full min-w-[960px] text-sm">
-                            <TableHeader>
-                              <TableRow className="bg-sidebar hover:bg-sidebar">
-                                {[
-                                  "Box No",
-                                  "Package",
-                                  "Description",
-                                  "HS Code",
-                                  "Quantity",
-                                  "Weight",
-                                  "Unit",
-                                  "Rate",
-                                  "Amount",
-                                  "IGST %",
-                                  "IGST Amount",
-                                  "Action",
-                                ].map((h) => (
-                                  <TableHead
-                                    key={h}
-                                    className="whitespace-nowrap text-sidebar-foreground"
-                                  >
-                                    {h}
-                                  </TableHead>
-                                ))}
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {form.proforma.lines.length === 0 ? (
-                                <TableRow>
-                                  <TableCell
-                                    colSpan={12}
-                                    className="h-16 text-center text-muted-foreground"
-                                  >
-                                    No proforma lines added
-                                  </TableCell>
-                                </TableRow>
-                              ) : (
-                                form.proforma.lines.map((l) => (
-                                  <TableRow key={l.id}>
-                                    <TableCell>{l.boxNo}</TableCell>
-                                    <TableCell>{l.packages}</TableCell>
-                                    <TableCell>{l.description}</TableCell>
-                                    <TableCell>{l.hsCode}</TableCell>
-                                    <TableCell>{l.quantity}</TableCell>
-                                    <TableCell>{l.weight}</TableCell>
-                                    <TableCell>{l.unit}</TableCell>
-                                    <TableCell>{l.rate}</TableCell>
-                                    <TableCell>{l.amount}</TableCell>
-                                    <TableCell>{l.igstPercent}</TableCell>
-                                    <TableCell>{l.igstAmount}</TableCell>
-                                    <TableCell>
-                                      <div className="flex items-center gap-1">
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-8 w-8 text-primary"
-                                          onClick={() => {
-                                            setEditingProformaId(l.id);
-                                            setProformaDraft({
-                                              boxNo: l.boxNo,
-                                              packages: l.packages,
-                                              description: l.description,
-                                              hsnCode: l.hsCode,
-                                              quantity: l.quantity,
-                                              weight: l.weight,
-                                              unit: l.unit,
-                                              rate: l.rate,
-                                              amount: l.amount,
-                                              igstPercent: l.igstPercent || "0",
-                                            });
-                                          }}
-                                          aria-label="Edit proforma line"
-                                        >
-                                          <Pencil className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-8 w-8 text-destructive"
-                                          onClick={() => removeProformaLine(l.id)}
-                                          aria-label="Delete proforma line"
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                ))
-                              )}
-                            </TableBody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-6">
-                      <AwbFormFooter
-                        showPrevious
-                        onPrevious={goPrevTab}
-                        readOnly={isReadOnly}
-                        saving={saving}
-                        onSave={handleSave}
-                        saveLabel={isSaved ? "Update" : "Save"}
-                        onNext={goNextTab}
-                        onCancel={requestCloseForm}
-                      />
-                    </div>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="forwarding" className="mt-0">
-                  <div className="p-4 md:p-6">
-                    <fieldset disabled={entryLocked} className={cn("min-w-0 border-0 p-0", entryLocked && "pointer-events-none opacity-90")}>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                        <FieldWrapper borderLabel label="Delivery AWB">
-                          <ErpNavInput
-                            order={AWB_NAV.FWD_DELIVERY_AWB}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={form.forwarding.deliveryAwb}
-                            onValueChange={(v) => patchForwarding({ deliveryAwb: v })}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Forwarding AWB">
-                          <ErpNavInput
-                            order={AWB_NAV.FWD_FORWARDING_AWB}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={form.forwarding.forwardingAwb}
-                            onValueChange={(v) => patchForwarding({ forwardingAwb: v })}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel lookupSplit label="Delivery Product">
-                          <LookupPairInput
-                            lookup="product"
-                            value={form.forwarding.deliveryProduct}
-                            onChange={(v) => patchForwarding({ deliveryProduct: v })}
-                            navOrder={AWB_NAV.FWD_DELIVERY_PRODUCT}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel lookupSplit label="Delivery Vendor">
-                          <LookupPairInput
-                            lookup="vendor"
-                            value={form.forwarding.deliveryVendor}
-                            onChange={(v) => patchForwarding({ deliveryVendor: v })}
-                            navOrder={AWB_NAV.FWD_DELIVERY_VENDOR}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel lookupSplit label="Delivery Service">
-                          <VendorServiceLookup
-                            vendor={form.forwarding.deliveryVendor}
-                            value={form.forwarding.deliveryService}
-                            onChange={(v) => patchForwarding({ deliveryService: v })}
-                            productId={form.forwarding.deliveryProduct.id || form.product.id}
-                            destinationId={form.consignee.origin.id}
-                            navOrder={AWB_NAV.FWD_DELIVERY_SERVICE}
-                            compact
-                            splitCode
-                            manualSearch
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Vendor Weight">
-                          <ErpNavInput
-                            order={AWB_NAV.FWD_VENDOR_WEIGHT}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={form.forwarding.vendorWeight}
-                            onValueChange={(v) => patchForwarding({ vendorWeight: v })}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Vendor Amount">
-                          <ErpNavInput
-                            order={AWB_NAV.FWD_VENDOR_AMOUNT}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={form.forwarding.vendorAmount}
-                            onValueChange={(v) => patchForwarding({ vendorAmount: v })}
-                          />
-                        </FieldWrapper>
-                        <FieldWrapper borderLabel label="Vendor Invoice">
-                          <ErpNavInput
-                            order={AWB_NAV.FWD_VENDOR_INVOICE}
-                            className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                            value={form.forwarding.vendorInvoice}
-                            onValueChange={(v) => patchForwarding({ vendorInvoice: v })}
-                          />
-                        </FieldWrapper>
-                      </div>
-
-                      <Collapsible
-                        open={vendorChargesOpen}
-                        onOpenChange={setVendorChargesOpen}
-                        className="mt-4"
-                      >
-                        <CollapsibleTrigger
-                          className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60"
-                          {...erpNavSkip()}
-                        >
-                          Click here to enter Vendor Charge details Or Press [Alt + w]
-                          <ChevronDown
-                            className={cn(
-                              "h-4 w-4 transition-transform",
-                              vendorChargesOpen && "rotate-180",
-                            )}
-                          />
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="border border-t-0 bg-card">
-                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-3 xl:grid-cols-6 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                            {(
-                              [
-                                ["Contract", vendorChargeSummary.contractCharges, "fwd-summary-contract"],
-                                ["Fuel", vendorChargeSummary.totalFuel, "fwd-summary-fuel"],
-                                ["Manual", vendorChargeSummary.manualCharges, "fwd-summary-manual"],
-                                ["Vendor GST", vendorChargeSummary.vendorGst, "fwd-summary-vendor-gst"],
-                                ["Vendor Total (incl. GST)", vendorChargeSummary.vendorTotalInclGst, "fwd-summary-vendor-total"],
-                                ["Margin", vendorChargeSummary.margin, "fwd-summary-margin"],
-                              ] as const
-                            ).map(([label, val, testId]) => (
-                              <FieldWrapper key={label} borderLabel label={label}>
-                                <Input
-                                  data-testid={testId}
-                                  value={val}
-                                  readOnly
-                                  className={cn(
-                                    "h-8 rounded-none border-0 px-1.5 text-[13px] shadow-none focus-visible:ring-0",
-                                    label === "Vendor Total (incl. GST)" && "bg-muted/40 font-semibold",
-                                    label === "Margin" && (Number.parseFloat(val) >= 0 ? "bg-emerald-50 font-bold text-emerald-700" : "bg-red-50 font-bold text-red-700"),
-                                    label !== "Margin" && label !== "Vendor Total (incl. GST)" && "bg-muted/30",
-                                  )}
-                                />
-                              </FieldWrapper>
-                            ))}
-                          </div>
-                          {vendorMissingStateWarning ? (
-                            <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="fwd-vendor-state-warning">
-                              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-                              <span>{vendorMissingStateWarning}</span>
+                            )
+                          ) : null}
+                          {showShipmentDocumentsCenter ? (
+                            <div id="shipment-documents-center">
+                              <ShipmentDocumentsCard
+                                shipmentId={editing.id}
+                                refreshKey={vendorPanelKey}
+                                poll={vendorShippingActive}
+                                onEnsureDocument={ensureInternalDocument}
+                              />
                             </div>
                           ) : null}
-                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-                            <FieldWrapper borderLabel label="Description" required>
-                              <ErpNavSelect
-                                order={AWB_NAV.VENDOR_CHARGE_DESCRIPTION}
-                                value={vendorChargeDraft.description || undefined}
-                                onValueChange={(v) => patchVendorChargeDraft({ description: v })}
-                                beforeOpen={ensureVendorChargePrerequisites}
-                                items={VENDOR_CHARGE_DESCRIPTIONS}
-                                triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Amount" required>
-                              <ErpNavInput
-                                order={AWB_NAV.VENDOR_CHARGE_AMOUNT}
-                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                                value={vendorChargeDraft.amount}
-                                onValueChange={(v) => patchVendorChargeDraft({ amount: v })}
-                                onFocus={() => {
-                                  if (!ensureVendorChargePrerequisites()) {
-                                    (document.activeElement as HTMLElement | null)?.blur();
-                                  }
-                                }}
-                              />
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label={`Fuel (${vendorFuelPct}%)`}>
-                              <div className="flex w-full min-w-0 items-stretch">
-                                <ErpNavSelect
-                                  order={AWB_NAV.VENDOR_CHARGE_FUEL}
-                                  value={vendorChargeDraft.fuel}
-                                  onValueChange={(v) => patchVendorChargeDraft({ fuel: v })}
-                                  beforeOpen={ensureVendorChargePrerequisites}
-                                  items={YES_NO}
-                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                                />
+                          {vendorShippingActive || vendorBookingBusy ? (
+                            <VendorActivityTimeline shipmentId={editing.id} refreshKey={vendorPanelKey} />
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {canCarrierActions && !vendorShippingActive ? (
+                        <div className="border-t px-4 py-4 md:px-6">
+                          <FormSection title="Carrier booking & tracking">
+                            <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                              <FieldWrapper label="Provider">
                                 <Input
-                                  value={vendorChargeDraft.fuelAmt}
                                   readOnly
-                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  className="bg-muted/30"
+                                  value={editing?.carrierProviderCode || resolveCarrierCode()}
                                 />
-                              </div>
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Tax On Fuel">
-                              <div className="flex w-full min-w-0 items-stretch">
-                                <ErpNavSelect
-                                  order={AWB_NAV.VENDOR_CHARGE_TAX_ON_FUEL}
-                                  value={vendorChargeDraft.taxOnFuel}
-                                  onValueChange={(v) => patchVendorChargeDraft({ taxOnFuel: v })}
-                                  beforeOpen={ensureVendorChargePrerequisites}
-                                  items={YES_NO}
-                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                                />
+                              </FieldWrapper>
+                              <FieldWrapper label="Booking status">
                                 <Input
-                                  value={vendorChargeDraft.taxOnFuelAmt}
                                   readOnly
-                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  className="bg-muted/30"
+                                  value={editing?.carrierBookingStatus || "NONE"}
                                 />
-                              </div>
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label={`Tax (${vendorGstPct}%)`}>
-                              <div className="flex w-full min-w-0 items-stretch">
-                                <ErpNavSelect
-                                  order={AWB_NAV.VENDOR_CHARGE_TAX}
-                                  value={vendorChargeDraft.tax}
-                                  onValueChange={(v) => patchVendorChargeDraft({ tax: v })}
-                                  beforeOpen={ensureVendorChargePrerequisites}
-                                  items={YES_NO}
-                                  triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
-                                />
+                              </FieldWrapper>
+                              <FieldWrapper label="Booking ref">
                                 <Input
-                                  value={vendorChargeDraft.taxAmt}
                                   readOnly
-                                  className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  className="bg-muted/30"
+                                  value={editing?.carrierBookingRef || ""}
                                 />
-                              </div>
-                            </FieldWrapper>
-                            <FieldWrapper borderLabel label="Total">
-                              <Input
-                                value={vendorChargeDraft.total}
-                                readOnly
-                                className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
-                              />
-                            </FieldWrapper>
-                            <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
+                              </FieldWrapper>
+                              <FieldWrapper label="Tracking no">
+                                <Input
+                                  readOnly
+                                  className="bg-muted/30"
+                                  value={editing?.carrierTrackingNo || ""}
+                                />
+                              </FieldWrapper>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {!carrierBooked ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={saving}
+                                  onClick={() => void handleCarrierBook()}
+                                >
+                                  Book with carrier
+                                </Button>
+                              ) : (
+                                <>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={saving}
+                                    onClick={() => void handleCarrierCancel()}
+                                  >
+                                    Cancel booking
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={saving}
+                                    onClick={() => void handleCarrierTrack()}
+                                  >
+                                    Refresh tracking
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={saving}
+                                    onClick={() => void handleCarrierLabel()}
+                                  >
+                                    Download label
+                                  </Button>
+                                </>
+                              )}
                               <Button
                                 type="button"
-                                className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
-                                {...erpNavOrder(AWB_NAV.VENDOR_CHARGE_ADD)}
-                                onClick={addVendorChargeLine}
+                                size="sm"
+                                variant="outline"
+                                disabled={saving}
+                                onClick={() => void handleCarrierServiceability()}
                               >
-                                <Plus className="mr-1 h-4 w-4" />
-                                Add
+                                Check serviceability
                               </Button>
+                              <span className="self-center text-xs text-muted-foreground">
+                                Supported: {SUPPORTED_CARRIER_CODES.join(", ")}
+                              </span>
+                            </div>
+                          </FormSection>
+                        </div>
+                      ) : null}
+                      <div className="border-t px-4 py-4 md:px-6">
+                        {bookingErrors.length > 0 ? (
+                          <div role="alert" className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                            {bookingErrors.map((msg) => (
+                              <div key={msg}>{msg}</div>
+                            ))}
+                          </div>
+                        ) : null}
+                        <AwbFormFooter
+                          showPrevious={false}
+                          readOnly={isReadOnly}
+                          saving={saving}
+                          onSave={handleSave}
+                          saveLabel={isSaved ? "Update" : "Save"}
+                          onNext={goNextTab}
+                          onCancel={requestCloseForm}
+                        />
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="proforma" className="mt-0">
+                      <div className="p-4 md:p-6">
+                        <div className={cn(entryLocked && "pointer-events-none opacity-90")}>
+                          <FormSection title="Manifest GST Detail">
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                              <FieldWrapper borderLabel label="CSB_Type">
+                                <ErpNavSelect
+                                  order={AWB_NAV.PROFORMA_CSB_TYPE}
+                                  value={form.proforma.csbType}
+                                  onValueChange={(v) => {
+                                    const isComm = v === "CSB 5" || v === "COMMERCIAL" || v === "CBE XIII";
+                                    const isGiftCSB = v === "CSB 4" || v === "CSB 3" || v === "ECM SPX";
+                                    setForm((f) => {
+                                      let exportReason = f.proforma.exportReason;
+                                      if (isComm && (exportReason.toUpperCase().includes("GIFT") || !exportReason)) {
+                                        exportReason = "SALE";
+                                      } else if (isGiftCSB && exportReason === "SALE") {
+                                        exportReason = "";
+                                      }
+                                      return {
+                                        ...f,
+                                        commercial: isComm ? true : isGiftCSB ? false : f.commercial,
+                                        proforma: {
+                                          ...f.proforma,
+                                          csbType: v,
+                                          exportReason,
+                                        },
+                                      };
+                                    });
+                                  }}
+                                  items={CSB_TYPES}
+                                  triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Term Of Invoice">
+                                <ErpNavSelect
+                                  order={AWB_NAV.PROFORMA_TERM_OF_INVOICE}
+                                  value={form.proforma.termOfInvoice || undefined}
+                                  onValueChange={(v) => patchProforma({ termOfInvoice: v })}
+                                  items={TERM_OF_INVOICE}
+                                  triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="GST Invoice">
+                                <ErpNavSelect
+                                  order={AWB_NAV.PROFORMA_GST_INVOICE}
+                                  value={form.proforma.gstInvoice ? "Yes" : "No"}
+                                  onValueChange={(v) => patchProforma({ gstInvoice: v === "Yes" })}
+                                  items={YES_NO}
+                                  triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Invoice No">
+                                <ErpNavInput
+                                  order={AWB_NAV.PROFORMA_INVOICE_NO}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={form.proforma.invoiceNo}
+                                  onValueChange={(v) => patchProforma({ invoiceNo: v })}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Invoice Date">
+                                <ErpNavDateInput
+                                  order={AWB_NAV.PROFORMA_INVOICE_DATE}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={form.proforma.invoiceDate}
+                                  onValueChange={(v) => patchProforma({ invoiceDate: v })}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Department No">
+                                <Input
+                                  readOnly
+                                  className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={form.proforma.departmentNo}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Export Reason">
+                                <ErpNavSelect
+                                  order={AWB_NAV.PROFORMA_EXPORT_REASON}
+                                  value={form.proforma.exportReason}
+                                  onValueChange={(v) => patchProforma({ exportReason: v })}
+                                  items={
+                                    form.commercial || form.proforma.csbType === "CSB 5" || form.proforma.csbType === "COMMERCIAL"
+                                      ? CSB5_EXPORT_REASONS
+                                      : CSB4_EXPORT_REASONS
+                                  }
+                                  triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Format">
+                                <ErpNavSelect
+                                  order={AWB_NAV.PROFORMA_FORMAT}
+                                  value={form.proforma.format || undefined}
+                                  onValueChange={(v) => patchProforma({ format: v })}
+                                  items={PROFORMA_FORMATS}
+                                  triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper
+                                borderLabel
+                                label="Ad Code"
+                                required={form.proforma.csbType.trim().toUpperCase() === "CSB 5" || form.commercial}
+                              >
+                                <ErpNavInput
+                                  order={AWB_NAV.PROFORMA_AD_CODE}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={form.proforma.adCode}
+                                  onValueChange={(v) => patchProforma({ adCode: v })}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Total IGST">
+                                <Input
+                                  readOnly
+                                  className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={proformaTotalIgst}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Bond / UT">
+                                <ErpNavSelect
+                                  order={AWB_NAV.PROFORMA_BOND_UT}
+                                  value={form.proforma.bondUt || "No"}
+                                  onValueChange={(v) =>
+                                    patchProforma({
+                                      bondUt: v,
+                                      payOfIgst: v === "Yes" ? "No" : form.proforma.payOfIgst,
+                                    })
+                                  }
+                                  items={YES_NO}
+                                  triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Pay of IGST">
+                                <ErpNavSelect
+                                  order={AWB_NAV.PROFORMA_PAY_IGST}
+                                  value={form.proforma.payOfIgst || "No"}
+                                  onValueChange={(v) =>
+                                    patchProforma({
+                                      payOfIgst: v,
+                                      bondUt: v === "Yes" ? "No" : form.proforma.bondUt,
+                                    })
+                                  }
+                                  items={YES_NO}
+                                  triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                />
+                              </FieldWrapper>
+                              {form.proforma.bondUt === "Yes" ? (
+                                <>
+                                  <FieldWrapper borderLabel label="LUT No" required>
+                                    <ErpNavInput
+                                      order={AWB_NAV.PROFORMA_LUT_NO}
+                                      className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                      value={form.proforma.lutNo}
+                                      onValueChange={(v) => patchProforma({ lutNo: v })}
+                                      placeholder={loadedClientProfile?.lutNumber || "Enter LUT No"}
+                                    />
+                                  </FieldWrapper>
+                                  <FieldWrapper borderLabel label="LUT Expiry Date" required>
+                                    <ErpNavDateInput
+                                      order={AWB_NAV.PROFORMA_LUT_EXPIRY}
+                                      className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                      value={form.proforma.lutExpiry}
+                                      onValueChange={(v) => patchProforma({ lutExpiry: v })}
+                                      placeholder="YYYY-MM-DD"
+                                    />
+                                  </FieldWrapper>
+                                </>
+                              ) : null}
+                              <FieldWrapper borderLabel label="Ecommerce">
+                                <ErpNavSelect
+                                  order={AWB_NAV.PROFORMA_ECOMMERCE}
+                                  value={form.proforma.ecommerce || "No"}
+                                  onValueChange={(v) => patchProforma({ ecommerce: v })}
+                                  items={YES_NO}
+                                  triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="MEIS">
+                                <ErpNavSelect
+                                  order={AWB_NAV.PROFORMA_MEIS}
+                                  value={form.proforma.meis || "No"}
+                                  onValueChange={(v) => patchProforma({ meis: v })}
+                                  items={YES_NO}
+                                  triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Type of Invoice">
+                                <ErpNavInput
+                                  order={AWB_NAV.PROFORMA_INVOICE_TYPE}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={form.proforma.invoiceType}
+                                  onValueChange={(v) => patchProforma({ invoiceType: v })}
+                                />
+                              </FieldWrapper>
+                            </div>
+                          </FormSection>
+
+                          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]">
+                            <div className="relative rounded border border-border bg-card p-3 pt-5">
+                              <span className="absolute left-2.5 top-0 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-[13px] font-semibold leading-none text-sidebar-foreground">
+                                Import Proforma
+                              </span>
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                                <Button
+                                  type="button"
+                                  variant="link"
+                                  size="sm"
+                                  className="h-auto gap-1.5 p-0 text-sm font-normal text-red-600 hover:text-red-700"
+                                  {...erpNavSkip()}
+                                  onClick={() => {
+                                    const link = document.createElement("a");
+                                    link.href = "/ExcelFormat/AWBPerforma.xls?v=1.3";
+                                    link.download = "AWBPerforma.xls";
+                                    link.click();
+                                  }}
+                                >
+                                  <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                                  Download Excel File Format
+                                </Button>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm text-foreground">Select File</span>
+                                  <Input
+                                    ref={proformaFileRef}
+                                    type="file"
+                                    accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    className="h-8 max-w-[220px] text-[13px]"
+                                    {...erpNavSkip()}
+                                  />
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    className="h-8 bg-emerald-600 px-4 text-white hover:bg-emerald-600/90"
+                                    {...erpNavSkip()}
+                                    disabled={proformaUploading || entryLocked}
+                                    onClick={() => void uploadProformaFile()}
+                                  >
+                                    {proformaUploading ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Upload className="h-3.5 w-3.5" />
+                                    )}
+                                    Upload
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="min-w-[12rem]">
+                              <FormSection title="Currency">
+                                <ErpNavSelect
+                                  order={AWB_NAV.PROFORMA_CURRENCY}
+                                  value={form.proforma.currency}
+                                  onValueChange={(v) => patchProforma({ currency: v })}
+                                  items={PROFORMA_CURRENCIES}
+                                  triggerClassName="h-8 text-[13px]"
+                                  contentClassName="max-h-64"
+                                />
+                              </FormSection>
                             </div>
                           </div>
-                          <div className="overflow-x-auto border-t">
-                            <table className="w-full min-w-[960px] text-sm">
-                              <TableHeader>
-                                <TableRow className="bg-sidebar hover:bg-sidebar">
-                                  {[
-                                    "Description",
-                                    "Rate",
-                                    "Amount",
-                                    "Fuel Apply",
-                                    "Fuel Amt",
-                                    "TaxApply",
-                                    "Tax On Fuel",
-                                    "IGST",
-                                    "SGST",
-                                    "CGST",
-                                    "Total",
-                                    "Charges Type",
-                                    "Action",
-                                  ].map((h) => (
-                                    <TableHead
-                                      key={h}
-                                      className="whitespace-nowrap text-sidebar-foreground"
-                                    >
-                                      {h}
-                                    </TableHead>
-                                  ))}
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {form.forwarding.vendorChargeLines.length === 0 ? (
-                                  <TableRow>
-                                    <TableCell
-                                      colSpan={13}
-                                      className="h-16 text-center text-muted-foreground"
-                                    >
-                                      No vendor charges added
-                                    </TableCell>
+
+                          {form.proforma.currency !== "INR" ? (
+                            <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-blue-200 bg-blue-50/50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-200">
+                              <Info className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                              <span>
+                                Customs Exchange Rate: 1 {form.proforma.currency} = ₹{getCustomsExchangeRate(form.proforma.currency).toFixed(2)} INR.
+                                {" "}Proforma Value: {form.proforma.currency} {proformaSummary.amount} (≈ ₹{(Number(proformaSummary.amount) * getCustomsExchangeRate(form.proforma.currency)).toFixed(2)} INR).
+                                {Number(proformaSummary.amount) * getCustomsExchangeRate(form.proforma.currency) > 100000 && !form.commercial && form.proforma.csbType !== "CSB 5" && (
+                                  <Badge variant="destructive" className="ml-2 text-[10px]">
+                                    Exceeds CSB-IV Limit (₹1,00,000) — CSB-V Commercial Required
+                                  </Badge>
+                                )}
+                              </span>
+                            </div>
+                          ) : null}
+
+                          <div className="mt-4 rounded-md border bg-card">
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-[minmax(4rem,0.72fr)_minmax(4.5rem,0.78fr)_minmax(8rem,1.35fr)_minmax(5rem,0.9fr)_minmax(3.75rem,0.68fr)_minmax(3.75rem,0.68fr)_minmax(6.75rem,1fr)_minmax(3.75rem,0.68fr)_minmax(4.25rem,0.75fr)_minmax(3.5rem,0.65fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                              <FieldWrapper borderLabel label="Box No">
+                                <ErpNavSelect
+                                  key={`proforma-box-${proformaBoxNumbers.join("-") || "none"}`}
+                                  order={AWB_NAV.PROFORMA_BOX_NO}
+                                  value={
+                                    proformaBoxNumbers.includes(proformaDraft.boxNo)
+                                      ? proformaDraft.boxNo
+                                      : undefined
+                                  }
+                                  onValueChange={(v) => patchProformaDraft({ boxNo: v })}
+                                  items={proformaBoxNumbers}
+                                  disabled={proformaBoxNumbers.length === 0}
+                                  triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Packages">
+                                <ErpNavInput
+                                  order={AWB_NAV.PROFORMA_PACKAGES}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={proformaDraft.packages}
+                                  onValueChange={(v) => patchProformaDraft({ packages: v })}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Description">
+                                <ErpNavInput
+                                  order={AWB_NAV.PROFORMA_DESCRIPTION}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={proformaDraft.description}
+                                  onValueChange={(v) => patchProformaDraft({ description: v })}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="HSN Code">
+                                <ErpNavInput
+                                  order={AWB_NAV.PROFORMA_HSN_CODE}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={proformaDraft.hsnCode}
+                                  onValueChange={(v) => patchProformaDraft({ hsnCode: v })}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Quantity">
+                                <ErpNavInput
+                                  order={AWB_NAV.PROFORMA_QUANTITY}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={proformaDraft.quantity}
+                                  onValueChange={(v) => patchProformaDraft({ quantity: v })}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Weight">
+                                <ErpNavInput
+                                  order={AWB_NAV.PROFORMA_WEIGHT}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={proformaDraft.weight}
+                                  onValueChange={(v) => patchProformaDraft({ weight: v })}
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Unit">
+                                <div className="flex w-full min-w-0 items-stretch">
+                                  <ErpNavSelect
+                                    order={AWB_NAV.PROFORMA_UNIT}
+                                    value={proformaDraft.unit}
+                                    onValueChange={(v) => patchProformaDraft({ unit: v })}
+                                    items={proformaUnits}
+                                    triggerClassName="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                  />
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    title="Add custom unit"
+                                    aria-label="Add custom unit"
+                                    className="h-8 w-8 shrink-0 rounded-none border-0 border-l border-input px-0 shadow-none"
+                                    {...erpNavSkip()}
+                                    onClick={() => {
+                                      setNewUnitInput("");
+                                      setAddUnitOpen(true);
+                                    }}
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Rate">
+                                <div {...{ [ERP_MANUAL_SEARCH]: "" }}>
+                                  <ErpNavInput
+                                    order={AWB_NAV.PROFORMA_RATE}
+                                    className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    value={proformaDraft.rate}
+                                    onValueChange={(v) => patchProformaDraft({ rate: v })}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" && e.shiftKey) {
+                                        e.preventDefault();
+                                        const container = awbFormNavRef.current;
+                                        if (container) {
+                                          focusPrevBeforeOrder(container, AWB_NAV.PROFORMA_RATE);
+                                        }
+                                        return;
+                                      }
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        commitProformaLine();
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="Amount">
+                                <Input
+                                  value={proformaDraft.amount}
+                                  readOnly
+                                  className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                />
+                              </FieldWrapper>
+                              <FieldWrapper borderLabel label="IGST %">
+                                <ErpNavInput
+                                  order={AWB_NAV.PROFORMA_IGST_PCT}
+                                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  value={proformaDraft.igstPercent}
+                                  onValueChange={(v) => patchProformaDraft({ igstPercent: v })}
+                                />
+                              </FieldWrapper>
+                              <div className="col-span-2 flex items-end justify-end gap-1.5 sm:col-span-1 xl:col-span-1">
+                                <Button
+                                  type="button"
+                                  className="h-8 w-full bg-sidebar px-4 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                                  {...erpNavSkip()}
+                                  onClick={addProformaLine}
+                                >
+                                  <Plus className="mr-1 h-4 w-4" />
+                                  {editingProformaId ? "Update line" : "Add line"}
+                                </Button>
+                                {editingProformaId ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 text-xs"
+                                    onClick={() => {
+                                      setEditingProformaId(null);
+                                      setProformaDraft(emptyProformaDraft());
+                                    }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-4 border-t px-3 py-2.5 text-sm">
+                              <span>
+                                Total Record:{" "}
+                                <span className="font-semibold text-primary">
+                                  {proformaSummary.totalRecord}
+                                </span>
+                              </span>
+                              <span>
+                                Quantity:{" "}
+                                <span className="font-semibold text-primary">{proformaSummary.quantity}</span>
+                              </span>
+                              <span>
+                                Weight:{" "}
+                                <span className="font-semibold text-primary">{proformaSummary.weight}</span>
+                              </span>
+                              <span>
+                                Amount:{" "}
+                                <span className="font-semibold text-primary">{proformaSummary.amount}</span>
+                              </span>
+                            </div>
+
+                            <div className="overflow-x-auto border-t">
+                              <table className="w-full min-w-[960px] text-sm">
+                                <TableHeader>
+                                  <TableRow className="bg-sidebar hover:bg-sidebar">
+                                    {[
+                                      "Box No",
+                                      "Package",
+                                      "Description",
+                                      "HS Code",
+                                      "Quantity",
+                                      "Weight",
+                                      "Unit",
+                                      "Rate",
+                                      "Amount",
+                                      "IGST %",
+                                      "IGST Amount",
+                                      "Action",
+                                    ].map((h) => (
+                                      <TableHead
+                                        key={h}
+                                        className="whitespace-nowrap text-sidebar-foreground"
+                                      >
+                                        {h}
+                                      </TableHead>
+                                    ))}
                                   </TableRow>
-                                ) : (
-                                  form.forwarding.vendorChargeLines.map((l) => (
-                                    <TableRow key={l.id}>
-                                      <TableCell>{l.description}</TableCell>
-                                      <TableCell>{l.rate}</TableCell>
-                                      <TableCell>{l.amount}</TableCell>
-                                      <TableCell>{l.fuelApply}</TableCell>
-                                      <TableCell>{l.fuelAmt}</TableCell>
-                                      <TableCell>{l.taxApply}</TableCell>
-                                      <TableCell>{l.taxOnFuel}</TableCell>
-                                      <TableCell>{l.igst}</TableCell>
-                                      <TableCell>{l.sgst}</TableCell>
-                                      <TableCell>{l.cgst}</TableCell>
-                                      <TableCell>{l.total}</TableCell>
-                                      <TableCell>{l.chargesType}</TableCell>
-                                      <TableCell>
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-8 w-8 text-destructive"
-                                          onClick={() => removeVendorChargeLine(l.id)}
-                                          aria-label="Delete vendor charge"
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
+                                </TableHeader>
+                                <TableBody>
+                                  {form.proforma.lines.length === 0 ? (
+                                    <TableRow>
+                                      <TableCell
+                                        colSpan={12}
+                                        className="h-16 text-center text-muted-foreground"
+                                      >
+                                        No proforma lines added
                                       </TableCell>
                                     </TableRow>
-                                  ))
-                                )}
-                              </TableBody>
-                            </table>
+                                  ) : (
+                                    form.proforma.lines.map((l) => (
+                                      <TableRow key={l.id}>
+                                        <TableCell>{l.boxNo}</TableCell>
+                                        <TableCell>{l.packages}</TableCell>
+                                        <TableCell>{l.description}</TableCell>
+                                        <TableCell>{l.hsCode}</TableCell>
+                                        <TableCell>{l.quantity}</TableCell>
+                                        <TableCell>{l.weight}</TableCell>
+                                        <TableCell>{l.unit}</TableCell>
+                                        <TableCell>{l.rate}</TableCell>
+                                        <TableCell>{l.amount}</TableCell>
+                                        <TableCell>{l.igstPercent}</TableCell>
+                                        <TableCell>{l.igstAmount}</TableCell>
+                                        <TableCell>
+                                          <div className="flex items-center gap-1">
+                                            <Button
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-8 w-8 text-primary"
+                                              onClick={() => {
+                                                setEditingProformaId(l.id);
+                                                setProformaDraft({
+                                                  boxNo: l.boxNo,
+                                                  packages: l.packages,
+                                                  description: l.description,
+                                                  hsnCode: l.hsCode,
+                                                  quantity: l.quantity,
+                                                  weight: l.weight,
+                                                  unit: l.unit,
+                                                  rate: l.rate,
+                                                  amount: l.amount,
+                                                  igstPercent: l.igstPercent || "0",
+                                                });
+                                              }}
+                                              aria-label="Edit proforma line"
+                                            >
+                                              <Pencil className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-8 w-8 text-destructive"
+                                              onClick={() => removeProformaLine(l.id)}
+                                              aria-label="Delete proforma line"
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          </div>
+                                        </TableCell>
+                                      </TableRow>
+                                    ))
+                                  )}
+                                </TableBody>
+                              </table>
+                            </div>
                           </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-                    </fieldset>
-                    <div className="mt-6">
-                      <AwbFormFooter
-                        showPrevious
-                        onPrevious={goPrevTab}
-                        readOnly={isReadOnly}
-                        saving={saving}
-                        onSave={handleSave}
-                        saveLabel={isSaved ? "Update" : "Save"}
-                        onNext={goNextTab}
-                        onCancel={requestCloseForm}
-                      />
-                    </div>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="kyc" className="mt-0">
-                  <div className="p-4 md:p-6">
-                    <div className={cn(entryLocked && "pointer-events-none opacity-90")}>
-                      <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-                        <TooltipProvider delayDuration={200}>
-                          <IconButton
-                            label="Settings"
-                            onClick={() =>
-                              toast.info("KYC settings will be enabled with backend wiring")
-                            }
-                          >
-                            <Settings className="h-4 w-4" />
-                          </IconButton>
-                          <IconButton
-                            label="Info"
-                            onClick={() =>
-                              toast.info("KYC document guidelines will be enabled with backend wiring")
-                            }
-                          >
-                            <Info className="h-4 w-4" />
-                          </IconButton>
-                          <IconButton
-                            label="List"
-                            onClick={() =>
-                              toast.info("KYC list view will be enabled with backend wiring")
-                            }
-                          >
-                            <List className="h-4 w-4" />
-                          </IconButton>
-                        </TooltipProvider>
-                        <ErpNavSelect
-                          order={AWB_NAV.KYC_SEARCH_FIELD}
-                          value={kycSearchField}
-                          onValueChange={(v) => setKycSearchField(v as SearchField)}
-                          items={SEARCH_FIELDS.map((f) => ({ value: f.value, label: f.label }))}
-                          triggerClassName="h-9 w-[8.5rem]"
-                        />
-                        <ErpNavInput
-                          order={AWB_NAV.KYC_SEARCH_INPUT}
-                          value={kycSearchInput}
-                          onValueChange={setKycSearchInput}
-                          className="h-9 w-40"
-                        />
-                        <Button
-                          size="icon"
-                          className="h-9 w-9 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-                          aria-label="Search KYC"
-                          {...erpNavSkip()}
-                        >
-                          <Search className="h-4 w-4" />
-                        </Button>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,280px)_1fr]">
-                        <div className="flex flex-col gap-4">
-                          <FieldWrapper label="Type">
-                            <ErpNavSelect
-                              order={AWB_NAV.KYC_TYPE}
-                              value={kycDocType}
-                              onValueChange={setKycDocType}
-                              items={KYC_TYPES}
-                            />
-                          </FieldWrapper>
-                          <input
-                            ref={kycFileRef}
-                            type="file"
-                            className="hidden"
-                            onChange={(e) => {
-                              handleKycFile(e.target.files);
-                              e.target.value = "";
-                            }}
+                        </div>
+                        <div className="mt-6">
+                          <AwbFormFooter
+                            showPrevious
+                            onPrevious={goPrevTab}
+                            readOnly={isReadOnly}
+                            saving={saving}
+                            onSave={handleSave}
+                            saveLabel={isSaved ? "Update" : "Save"}
+                            onNext={goNextTab}
+                            onCancel={requestCloseForm}
                           />
-                          <button
-                            type="button"
-                            onClick={() => kycFileRef.current?.click()}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              handleKycFile(e.dataTransfer.files);
-                            }}
-                            className="flex min-h-[180px] flex-col items-center justify-center rounded-md border-2 border-dashed border-emerald-500/60 bg-emerald-500/5 p-6 text-center text-sm font-medium uppercase tracking-wide text-emerald-600 hover:bg-emerald-500/10"
-                          >
-                            Drag and drop a file or select add image
-                          </button>
-                        </div>
-
-                        <div className="overflow-x-auto">
-                          <table className="w-full min-w-[520px] text-sm">
-                            <TableHeader>
-                              <TableRow className="bg-sidebar hover:bg-sidebar">
-                                {["Id", "File Name", "Entry Type", "Entry Date", "Action"].map((h) => (
-                                  <TableHead key={h} className="text-sidebar-foreground">
-                                    {h}
-                                  </TableHead>
-                                ))}
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {filteredKycDocs.length === 0 ? (
-                                <TableRow>
-                                  <TableCell
-                                    colSpan={5}
-                                    className="h-32 text-center text-muted-foreground"
-                                  >
-                                    No KYC documents added
-                                  </TableCell>
-                                </TableRow>
-                              ) : (
-                                filteredKycDocs.map((d, i) => (
-                                  <TableRow key={d.id}>
-                                    <TableCell>{i + 1}</TableCell>
-                                    <TableCell>{d.fileName}</TableCell>
-                                    <TableCell>{d.entryType}</TableCell>
-                                    <TableCell>{d.entryDate}</TableCell>
-                                    <TableCell>
-                                      <div className="flex items-center gap-1">
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-8 w-8"
-                                          disabled={!d.contentB64}
-                                          onClick={() => downloadKycDocument(d)}
-                                          aria-label="Download KYC document"
-                                        >
-                                          <Download className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-8 w-8 text-destructive"
-                                          onClick={() => removeKycDocument(d.id)}
-                                          aria-label="Delete KYC document"
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                ))
-                              )}
-                            </TableBody>
-                          </table>
                         </div>
                       </div>
-                    </div>
+                    </TabsContent>
 
-                    <div className="mt-6">
-                      <AwbFormFooter
-                        showPrevious
-                        onPrevious={goPrevTab}
-                        readOnly={isReadOnly}
-                        saving={saving}
-                        onSave={handleSave}
-                        saveLabel={isSaved ? "Update" : "Save"}
-                        onNext={goNextTab}
-                        onCancel={requestCloseForm}
-                      />
-                    </div>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="notification" className="mt-0">
-                  <div className="p-4 md:p-6">
-                    <div className={cn(entryLocked && "pointer-events-none opacity-90")}>
-                      <FormSection title="Notification">
-                        <div className="flex flex-col gap-3">
-                          <div className="flex items-center gap-2">
-                            <Checkbox
-                              id="notify-email"
-                              checked={form.notifyEmail}
-                              onCheckedChange={(checked) =>
-                                setForm((current) => ({ ...current, notifyEmail: checked === true }))
-                              }
-                              {...erpNavOrder(AWB_NAV.NOTIFY_EMAIL)}
-                            />
-                            <label htmlFor="notify-email" className="text-sm">
-                              Email shipper and consignee after save
-                            </label>
+                    <TabsContent value="forwarding" className="mt-0">
+                      <div className="p-4 md:p-6">
+                        <fieldset disabled={entryLocked} className={cn("min-w-0 border-0 p-0", entryLocked && "pointer-events-none opacity-90")}>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                            <FieldWrapper borderLabel label="Delivery AWB">
+                              <ErpNavInput
+                                order={AWB_NAV.FWD_DELIVERY_AWB}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={form.forwarding.deliveryAwb}
+                                onValueChange={(v) => patchForwarding({ deliveryAwb: v })}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Forwarding AWB">
+                              <ErpNavInput
+                                order={AWB_NAV.FWD_FORWARDING_AWB}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={form.forwarding.forwardingAwb}
+                                onValueChange={(v) => patchForwarding({ forwardingAwb: v })}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel lookupSplit label="Delivery Product">
+                              <LookupPairInput
+                                lookup="product"
+                                value={form.forwarding.deliveryProduct}
+                                onChange={(v) => patchForwarding({ deliveryProduct: v })}
+                                navOrder={AWB_NAV.FWD_DELIVERY_PRODUCT}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel lookupSplit label="Delivery Vendor">
+                              <LookupPairInput
+                                lookup="vendor"
+                                value={form.forwarding.deliveryVendor}
+                                onChange={(v) => patchForwarding({ deliveryVendor: v })}
+                                navOrder={AWB_NAV.FWD_DELIVERY_VENDOR}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel lookupSplit label="Delivery Service">
+                              <VendorServiceLookup
+                                vendor={form.forwarding.deliveryVendor}
+                                value={form.forwarding.deliveryService}
+                                onChange={(v) => patchForwarding({ deliveryService: v })}
+                                productId={form.forwarding.deliveryProduct.id || form.product.id}
+                                destinationId={form.consignee.origin.id}
+                                navOrder={AWB_NAV.FWD_DELIVERY_SERVICE}
+                                compact
+                                splitCode
+                                manualSearch
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Vendor Weight">
+                              <ErpNavInput
+                                order={AWB_NAV.FWD_VENDOR_WEIGHT}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={form.forwarding.vendorWeight}
+                                onValueChange={(v) => patchForwarding({ vendorWeight: v })}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Vendor Amount">
+                              <ErpNavInput
+                                order={AWB_NAV.FWD_VENDOR_AMOUNT}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={form.forwarding.vendorAmount}
+                                onValueChange={(v) => patchForwarding({ vendorAmount: v })}
+                              />
+                            </FieldWrapper>
+                            <FieldWrapper borderLabel label="Vendor Invoice">
+                              <ErpNavInput
+                                order={AWB_NAV.FWD_VENDOR_INVOICE}
+                                className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                value={form.forwarding.vendorInvoice}
+                                onValueChange={(v) => patchForwarding({ vendorInvoice: v })}
+                              />
+                            </FieldWrapper>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Checkbox
-                              id="notify-sms"
-                              checked={form.notifySms}
-                              onCheckedChange={(checked) =>
-                                setForm((current) => ({ ...current, notifySms: checked === true }))
-                              }
-                              {...erpNavOrder(AWB_NAV.NOTIFY_SMS)}
-                            />
-                            <label htmlFor="notify-sms" className="text-sm">
-                              SMS shipper and consignee after save
-                            </label>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            A failed email or SMS leaves the saved AWB in place and shows a warning.
-                          </p>
-                        </div>
-                      </FormSection>
-                    </div>
-                    <div className="mt-6">
-                      <AwbFormFooter
-                        showPrevious
-                        onPrevious={goPrevTab}
-                        readOnly={isReadOnly}
-                        saving={saving}
-                        onSave={handleSave}
-                        saveLabel={isSaved ? "Update" : "Save"}
-                        onCancel={requestCloseForm}
-                      />
-                    </div>
-                  </div>
-                </TabsContent>
-              </ErpFormNavProvider>
-            </div>
-          </Tabs>
 
-          <Dialog open={rateCompareOpen} onOpenChange={setRateCompareOpen}>
-            <DialogContent className="max-w-4xl gap-0 overflow-hidden p-0 sm:max-w-4xl">
-              <div className="bg-sidebar px-4 py-3">
-                <DialogTitle className="text-base font-semibold text-sidebar-foreground">
-                  Vendor Rate Compare
-                </DialogTitle>
-              </div>
-              <div className="max-h-[70vh] overflow-auto p-4">
-                {rateCompareMessage ? (
-                  <p className="mb-3 text-sm text-muted-foreground">{rateCompareMessage}</p>
-                ) : null}
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Origin</TableHead>
-                      <TableHead>Vendor Name</TableHead>
-                      <TableHead>Service Type</TableHead>
-                      <TableHead className="text-right">Weight</TableHead>
-                      <TableHead className="text-right">Rate/Kg</TableHead>
-                      <TableHead className="text-right">Final Amount</TableHead>
-                      <TableHead />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rateCompareRows.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center text-muted-foreground">
-                          {ratingBusy === "compare" ? "Comparing vendor tariffs…" : "No rates to show"}
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      rateCompareRows.map((row) => (
-                        <TableRow key={`${row.contractId}-${row.service}`}>
-                          <TableCell>{row.origin || "—"}</TableCell>
-                          <TableCell>{row.vendorName}</TableCell>
-                          <TableCell>{row.service || "—"}</TableCell>
-                          <TableCell className="text-right">{row.weight.toFixed(3)}</TableCell>
-                          <TableCell className="text-right">{row.ratePerKg.toFixed(2)}</TableCell>
-                          <TableCell className="text-right">{row.totalAmount.toFixed(2)}</TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              type="button"
-                              size="sm"
-                              className="h-8 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-                              onClick={() => selectComparedVendor(row)}
+                          {fwdFormatWarning ? (
+                            <div
+                              data-testid="fwd-format-warning"
+                              className="mt-2 flex items-center gap-1.5 rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-900"
                             >
-                              Select
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </DialogContent>
-          </Dialog>
+                              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                              <span>{fwdFormatWarning}</span>
+                            </div>
+                          ) : null}
 
-          <Dialog open={addUnitOpen} onOpenChange={setAddUnitOpen}>
-            <DialogContent className="max-w-sm gap-0 overflow-hidden p-0 sm:max-w-sm">
-              <div className="bg-sidebar px-4 py-3">
-                <DialogTitle className="text-base font-semibold text-sidebar-foreground">
-                  Add Unit
-                </DialogTitle>
-              </div>
-              <div className="flex flex-col gap-4 p-6">
-                <FieldWrapper label="Unit code">
-                  <Input
-                    autoFocus
-                    value={newUnitInput}
-                    onChange={(e) => setNewUnitInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        addProformaUnit();
-                      }
-                    }}
-                  />
-                </FieldWrapper>
-                <div className="flex justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => setAddUnitOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    type="button"
-                    className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-                    onClick={addProformaUnit}
-                  >
-                    Add
-                  </Button>
+                          <Collapsible
+                            open={vendorChargesOpen}
+                            onOpenChange={setVendorChargesOpen}
+                            className="mt-4"
+                          >
+                            <CollapsibleTrigger
+                              data-testid="fwd-collapsible-trigger"
+                              className="flex w-full items-center justify-between rounded-md border bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              {...erpNavOrder(AWB_NAV.FWD_COLLAPSIBLE_TRIGGER)}
+                              tabIndex={0}
+                            >
+                              Click here to enter Vendor Charge details Or Press [Alt + w]
+                              <ChevronDown
+                                className={cn(
+                                  "h-4 w-4 transition-transform",
+                                  vendorChargesOpen && "rotate-180",
+                                )}
+                              />
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="border border-t-0 bg-card">
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-b px-3 py-3 sm:grid-cols-3 xl:grid-cols-6 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                                {(
+                                  [
+                                    ["Contract", vendorChargeSummary.contractCharges, "fwd-summary-contract"],
+                                    ["Fuel", vendorChargeSummary.totalFuel, "fwd-summary-fuel"],
+                                    ["Manual", vendorChargeSummary.manualCharges, "fwd-summary-manual"],
+                                    ["Vendor GST", vendorChargeSummary.vendorGst, "fwd-summary-vendor-gst"],
+                                    ["Vendor Total (incl. GST)", vendorChargeSummary.vendorTotalInclGst, "fwd-summary-vendor-total"],
+                                    ["Margin", vendorChargeSummary.margin, "fwd-summary-margin"],
+                                  ] as const
+                                ).map(([label, val, testId]) => (
+                                  <FieldWrapper key={label} borderLabel label={label}>
+                                    <Input
+                                      data-testid={testId}
+                                      value={val}
+                                      readOnly
+                                      className={cn(
+                                        "h-8 rounded-none border-0 px-1.5 text-[13px] shadow-none focus-visible:ring-0",
+                                        label === "Vendor Total (incl. GST)" && "bg-muted/40 font-semibold",
+                                        label === "Margin" && (Number.parseFloat(val) >= 0 ? "bg-emerald-50 font-bold text-emerald-700" : "bg-red-50 font-bold text-red-700"),
+                                        label !== "Margin" && label !== "Vendor Total (incl. GST)" && "bg-muted/30",
+                                      )}
+                                    />
+                                  </FieldWrapper>
+                                ))}
+                              </div>
+                              {vendorMissingStateWarning ? (
+                                <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="fwd-vendor-state-warning">
+                                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                                  <span>{vendorMissingStateWarning}</span>
+                                </div>
+                              ) : null}
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-[minmax(9rem,1.25fr)_minmax(5.5rem,0.85fr)_repeat(3,minmax(7.25rem,1fr))_minmax(4.75rem,0.8fr)_auto] xl:items-end [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+                                <FieldWrapper borderLabel label="Description" required>
+                                  <ErpNavSelect
+                                    order={AWB_NAV.VENDOR_CHARGE_DESCRIPTION}
+                                    value={vendorChargeDraft.description || undefined}
+                                    onValueChange={(v) => patchVendorChargeDraft({ description: v })}
+                                    beforeOpen={ensureVendorChargePrerequisites}
+                                    items={vendorChargeDescriptions}
+                                    triggerClassName="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Amount" required>
+                                  <ErpNavInput
+                                    order={AWB_NAV.VENDOR_CHARGE_AMOUNT}
+                                    className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    value={vendorChargeDraft.amount}
+                                    onValueChange={(v) => patchVendorChargeDraft({ amount: v })}
+                                    onFocus={() => {
+                                      if (!ensureVendorChargePrerequisites()) {
+                                        (document.activeElement as HTMLElement | null)?.blur();
+                                      }
+                                    }}
+                                  />
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label={`Fuel (${vendorFuelPct}%)`}>
+                                  <div className="flex w-full min-w-0 items-stretch">
+                                    <ErpNavSelect
+                                      order={AWB_NAV.VENDOR_CHARGE_FUEL}
+                                      value={vendorChargeDraft.fuel}
+                                      onValueChange={(v) => patchVendorChargeDraft({ fuel: v })}
+                                      beforeOpen={ensureVendorChargePrerequisites}
+                                      items={YES_NO}
+                                      triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                    />
+                                    <Input
+                                      value={vendorChargeDraft.fuelAmt}
+                                      readOnly
+                                      className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    />
+                                  </div>
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Tax On Fuel">
+                                  <div className="flex w-full min-w-0 items-stretch">
+                                    <ErpNavSelect
+                                      order={AWB_NAV.VENDOR_CHARGE_TAX_ON_FUEL}
+                                      value={vendorChargeDraft.taxOnFuel}
+                                      onValueChange={(v) => patchVendorChargeDraft({ taxOnFuel: v })}
+                                      beforeOpen={ensureVendorChargePrerequisites}
+                                      items={YES_NO}
+                                      triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                    />
+                                    <Input
+                                      value={vendorChargeDraft.taxOnFuelAmt}
+                                      readOnly
+                                      className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    />
+                                  </div>
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label={`Tax (${vendorGstPct}%)`}>
+                                  <div className="flex w-full min-w-0 items-stretch">
+                                    <ErpNavSelect
+                                      order={AWB_NAV.VENDOR_CHARGE_TAX}
+                                      value={vendorChargeDraft.tax}
+                                      onValueChange={(v) => patchVendorChargeDraft({ tax: v })}
+                                      beforeOpen={ensureVendorChargePrerequisites}
+                                      items={YES_NO}
+                                      triggerClassName="h-8 w-[4.25rem] shrink-0 rounded-none border-0 border-r border-input bg-transparent px-1 text-[13px] shadow-none focus:ring-0"
+                                    />
+                                    <Input
+                                      value={vendorChargeDraft.taxAmt}
+                                      readOnly
+                                      className="h-8 min-w-0 flex-1 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                    />
+                                  </div>
+                                </FieldWrapper>
+                                <FieldWrapper borderLabel label="Total">
+                                  <Input
+                                    value={vendorChargeDraft.total}
+                                    readOnly
+                                    className="h-8 rounded-none border-0 bg-muted/30 px-1.5 text-[13px] shadow-none focus-visible:ring-0"
+                                  />
+                                </FieldWrapper>
+                                <div className="col-span-2 flex items-end justify-end sm:col-span-1 xl:col-span-1">
+                                  <Button
+                                    type="button"
+                                    className="h-8 w-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground sm:w-auto"
+                                    {...erpNavOrder(AWB_NAV.VENDOR_CHARGE_ADD)}
+                                    onClick={addVendorChargeLine}
+                                  >
+                                    <Plus className="mr-1 h-4 w-4" />
+                                    Add
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="overflow-x-auto border-t">
+                                <table className="w-full min-w-[960px] text-sm">
+                                  <TableHeader>
+                                    <TableRow className="bg-sidebar hover:bg-sidebar">
+                                      {[
+                                        "Description",
+                                        "Rate",
+                                        "Amount",
+                                        "Fuel Apply",
+                                        "Fuel Amt",
+                                        "TaxApply",
+                                        "Tax On Fuel",
+                                        "IGST",
+                                        "SGST",
+                                        "CGST",
+                                        "Total",
+                                        "Charges Type",
+                                        "Action",
+                                      ].map((h) => (
+                                        <TableHead
+                                          key={h}
+                                          className="whitespace-nowrap text-sidebar-foreground"
+                                        >
+                                          {h}
+                                        </TableHead>
+                                      ))}
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {form.forwarding.vendorChargeLines.length === 0 ? (
+                                      <TableRow>
+                                        <TableCell
+                                          colSpan={13}
+                                          className="h-16 text-center text-muted-foreground"
+                                        >
+                                          No vendor charges added
+                                        </TableCell>
+                                      </TableRow>
+                                    ) : (
+                                      form.forwarding.vendorChargeLines.map((l) => (
+                                        <TableRow key={l.id}>
+                                          <TableCell>{l.description}</TableCell>
+                                          <TableCell>{l.rate}</TableCell>
+                                          <TableCell>{l.amount}</TableCell>
+                                          <TableCell>{l.fuelApply}</TableCell>
+                                          <TableCell>{l.fuelAmt}</TableCell>
+                                          <TableCell>{l.taxApply}</TableCell>
+                                          <TableCell>{l.taxOnFuel}</TableCell>
+                                          <TableCell>{l.igst}</TableCell>
+                                          <TableCell>{l.sgst}</TableCell>
+                                          <TableCell>{l.cgst}</TableCell>
+                                          <TableCell>{l.total}</TableCell>
+                                          <TableCell>{l.chargesType}</TableCell>
+                                          <TableCell>
+                                            <Button
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-8 w-8 text-destructive"
+                                              onClick={() => removeVendorChargeLine(l.id)}
+                                              aria-label="Delete vendor charge"
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          </TableCell>
+                                        </TableRow>
+                                      ))
+                                    )}
+                                  </TableBody>
+                                </table>
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+                        </fieldset>
+                        <div className="mt-6">
+                          <AwbFormFooter
+                            showPrevious
+                            onPrevious={goPrevTab}
+                            readOnly={isReadOnly}
+                            saving={saving}
+                            onSave={handleSave}
+                            saveLabel={isSaved ? "Update" : "Save"}
+                            onNext={goNextTab}
+                            onCancel={requestCloseForm}
+                          />
+                        </div>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="kyc" className="mt-0">
+                      <div className="p-4 md:p-6">
+                        <div className={cn(entryLocked && "pointer-events-none opacity-90")}>
+                          <div className="space-y-4">
+                            <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+                              <TooltipProvider delayDuration={200}>
+                                <IconButton
+                                  label="Settings"
+                                  onClick={() =>
+                                    toast.info("KYC settings will be enabled with backend wiring")
+                                  }
+                                >
+                                  <Settings className="h-4 w-4" />
+                                </IconButton>
+                                <IconButton
+                                  label="Info"
+                                  onClick={() =>
+                                    toast.info("KYC document guidelines will be enabled with backend wiring")
+                                  }
+                                >
+                                  <Info className="h-4 w-4" />
+                                </IconButton>
+                                <IconButton
+                                  label="List"
+                                  onClick={() =>
+                                    toast.info("KYC list view will be enabled with backend wiring")
+                                  }
+                                >
+                                  <List className="h-4 w-4" />
+                                </IconButton>
+                              </TooltipProvider>
+                              <ErpNavSelect
+                                order={AWB_NAV.KYC_SEARCH_FIELD}
+                                value={kycSearchField}
+                                onValueChange={(v) => setKycSearchField(v as SearchField)}
+                                items={SEARCH_FIELDS.map((f) => ({ value: f.value, label: f.label }))}
+                                triggerClassName="h-9 w-[8.5rem]"
+                              />
+                              <ErpNavInput
+                                order={AWB_NAV.KYC_SEARCH_INPUT}
+                                value={kycSearchInput}
+                                onValueChange={setKycSearchInput}
+                                className="h-9 w-40"
+                              />
+                              <Button
+                                size="icon"
+                                className="h-9 w-9 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+                                aria-label="Search KYC"
+                                {...erpNavSkip()}
+                              >
+                                <Search className="h-4 w-4" />
+                              </Button>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(240px,300px)_1fr]">
+                              <fieldset disabled={entryLocked} className={cn("flex flex-col gap-3 border-0 p-0", entryLocked && "opacity-80")}>
+                                <FieldWrapper label="Type">
+                                  <ErpNavSelect
+                                    order={AWB_NAV.KYC_TYPE}
+                                    value={kycDocType}
+                                    onValueChange={(v) => {
+                                      setKycDocType(v);
+                                      if (v === "Passport Number" || v === "Proforma Invoice" || v === "Document") {
+                                        setKycDocSide("BOTH");
+                                      } else {
+                                        setKycDocSide("FRONT");
+                                      }
+                                    }}
+                                    items={KYC_TYPES}
+                                  />
+                                </FieldWrapper>
+
+                                <FieldWrapper label="Document No. (Optional for ID)">
+                                  <Input
+                                    disabled={entryLocked}
+                                    placeholder="e.g. 1234 5678 9012"
+                                    value={kycDocNo}
+                                    onChange={(e) => setKycDocNo(e.target.value.toUpperCase())}
+                                    className="h-9"
+                                  />
+                                </FieldWrapper>
+
+                                <FieldWrapper label="Document Side">
+                                  <div className="flex items-center gap-1.5">
+                                    {(["FRONT", "BACK", "BOTH"] as const).map((s) => (
+                                      <Button
+                                        key={s}
+                                        type="button"
+                                        size="sm"
+                                        variant={kycDocSide === s ? "default" : "outline"}
+                                        className={cn("h-8 flex-1 text-xs px-2", kycDocSide === s && "font-semibold")}
+                                        disabled={entryLocked}
+                                        onClick={() => setKycDocSide(s)}
+                                      >
+                                        {s === "BOTH" ? "Single/Both" : s === "FRONT" ? "Front" : "Back"}
+                                      </Button>
+                                    ))}
+                                  </div>
+                                </FieldWrapper>
+
+                                <FieldWrapper label="Expiry Date (Passports/DL/Visas)">
+                                  <Input
+                                    type="date"
+                                    disabled={entryLocked}
+                                    value={kycExpiryDate}
+                                    onChange={(e) => {
+                                      setKycExpiryDate(e.target.value);
+                                      if (e.target.value && isDocExpired(e.target.value)) {
+                                        toast.warning("Warning: Document expiry date is in the past.");
+                                      }
+                                    }}
+                                    className={cn("h-9", isDocExpired(kycExpiryDate) && "border-amber-500 text-amber-600 font-medium")}
+                                  />
+                                </FieldWrapper>
+
+                                <input
+                                  ref={kycFileRef}
+                                  type="file"
+                                  accept="image/jpeg,image/png,application/pdf"
+                                  className="hidden"
+                                  disabled={entryLocked}
+                                  onChange={(e) => {
+                                    handleKycFile(e.target.files);
+                                    e.target.value = "";
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  disabled={entryLocked}
+                                  onClick={() => kycFileRef.current?.click()}
+                                  onDragOver={(e) => e.preventDefault()}
+                                  onDrop={(e) => {
+                                    e.preventDefault();
+                                    if (!entryLocked) handleKycFile(e.dataTransfer.files);
+                                  }}
+                                  className="flex min-h-[140px] flex-col items-center justify-center rounded-md border-2 border-dashed border-emerald-500/60 bg-emerald-500/5 p-4 text-center text-sm font-medium uppercase tracking-wide text-emerald-600 hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-50"
+                                >
+                                  <Upload className="mb-2 h-5 w-5 text-emerald-600" />
+                                  Drag and drop a file or select add image
+                                  <span className="mt-1 text-[11px] font-normal normal-case text-muted-foreground">
+                                    PDF, JPG, PNG (Max 5MB)
+                                  </span>
+                                </button>
+                              </fieldset>
+
+                              <div className="overflow-x-auto">
+                                <table className="w-full min-w-[620px] text-sm">
+                                  <TableHeader>
+                                    <TableRow className="bg-sidebar hover:bg-sidebar">
+                                      {["Id", "File Name", "Doc Type", "Doc No", "Side", "Expiry Date", "Entry Date", "Action"].map((h) => (
+                                        <TableHead key={h} className="text-sidebar-foreground">
+                                          {h}
+                                        </TableHead>
+                                      ))}
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {filteredKycDocs.length === 0 ? (
+                                      <TableRow>
+                                        <TableCell
+                                          colSpan={8}
+                                          className="h-32 text-center text-muted-foreground"
+                                        >
+                                          No KYC documents added
+                                        </TableCell>
+                                      </TableRow>
+                                    ) : (
+                                      filteredKycDocs.map((d, i) => (
+                                        <TableRow key={d.id}>
+                                          <TableCell>{i + 1}</TableCell>
+                                          <TableCell className="max-w-[140px] truncate" title={d.fileName}>{d.fileName}</TableCell>
+                                          <TableCell>{d.entryType}</TableCell>
+                                          <TableCell>
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="font-mono text-xs">
+                                                {revealedKycIds.has(d.id)
+                                                  ? (d.documentNo || "—")
+                                                  : maskDocumentNumber(d.entryType, d.documentNo) || "—"}
+                                              </span>
+                                              {isMaskableType(d.entryType) && d.documentNo && (
+                                                <Button
+                                                  size="icon"
+                                                  variant="ghost"
+                                                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                                  onClick={async () => {
+                                                    if (revealedKycIds.has(d.id)) {
+                                                      setRevealedKycIds((prev) => {
+                                                        const next = new Set(prev);
+                                                        next.delete(d.id);
+                                                        return next;
+                                                      });
+                                                    } else {
+                                                      const allowed = hasPermission("txn.kyc-reveal", "search") || hasPermission("txn.awb-entry", "modify");
+                                                      if (!allowed) {
+                                                        toast.error("Permission denied: txn.kyc-reveal required to unmask identity numbers");
+                                                        return;
+                                                      }
+                                                      setRevealedKycIds((prev) => new Set(prev).add(d.id));
+                                                      await logKycReveal({
+                                                        shipmentId: editing?.id || "draft",
+                                                        documentId: d.id,
+                                                        field: "document_no",
+                                                        docType: d.entryType,
+                                                      });
+                                                      toast.success("Document number unmasked (access audited)");
+                                                    }
+                                                  }}
+                                                  aria-label={revealedKycIds.has(d.id) ? "Mask document number" : "Reveal document number"}
+                                                >
+                                                  {revealedKycIds.has(d.id) ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                                </Button>
+                                              )}
+                                            </div>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Badge variant="outline" className="text-[11px] font-normal">
+                                              {d.side === "BACK" ? "Back" : d.side === "FRONT" ? "Front" : "Single / Both"}
+                                            </Badge>
+                                          </TableCell>
+                                          <TableCell>
+                                            <div className="flex items-center gap-1">
+                                              <span>{d.expiryDate || "—"}</span>
+                                              {d.expiryDate && isDocExpired(d.expiryDate) && (
+                                                <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">Expired</Badge>
+                                              )}
+                                            </div>
+                                          </TableCell>
+                                          <TableCell>{d.entryDate}</TableCell>
+                                          <TableCell>
+                                            <div className="flex items-center gap-1">
+                                              <Button
+                                                size="icon"
+                                                variant="ghost"
+                                                className="h-8 w-8"
+                                                disabled={!d.contentB64 && !d.fileUrl}
+                                                onClick={() => void downloadKycDocument(d)}
+                                                aria-label="Download KYC document"
+                                              >
+                                                <Download className="h-4 w-4" />
+                                              </Button>
+                                              <Button
+                                                size="icon"
+                                                variant="ghost"
+                                                className="h-8 w-8 text-destructive"
+                                                disabled={entryLocked}
+                                                onClick={() => void removeKycDocument(d.id)}
+                                                aria-label="Delete KYC document"
+                                              >
+                                                <Trash2 className="h-4 w-4" />
+                                              </Button>
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      ))
+                                    )}
+                                  </TableBody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-6">
+                          <AwbFormFooter
+                            showPrevious
+                            onPrevious={goPrevTab}
+                            readOnly={isReadOnly}
+                            saving={saving}
+                            onSave={handleSave}
+                            saveLabel={isSaved ? "Update" : "Save"}
+                            onNext={goNextTab}
+                            onCancel={requestCloseForm}
+                          />
+                        </div>
+                      </div>
+                    </TabsContent>
+                  </ErpFormNavProvider>
                 </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+              </Tabs>
 
-          <Dialog open={formSetupOpen} onOpenChange={(o) => !o && closeFormSetup()}>
-            <DialogContent className="max-w-3xl gap-0 overflow-hidden p-0 sm:max-w-3xl">
-              <div className="bg-sidebar px-4 py-3">
-                <DialogTitle className="text-base font-semibold text-sidebar-foreground">
-                  Form Setup
-                </DialogTitle>
-              </div>
-              <div className="grid grid-cols-1 gap-6 p-6 sm:grid-cols-2 lg:grid-cols-4">
-                {AWB_FORM_SETUP_COLUMNS.map((column, colIdx) => (
-                  <div key={colIdx} className="flex flex-col gap-3">
-                    {column.map(({ key, label }) => (
-                      <div key={key} className="flex items-start gap-2">
-                        <Checkbox
-                          id={`awbSetup-${key}`}
-                          checked={formSetupDraft[key]}
-                          onCheckedChange={(c) =>
-                            setFormSetupDraft((s) => ({ ...s, [key]: c === true }))
+              <Dialog open={rateCompareOpen} onOpenChange={setRateCompareOpen}>
+                <DialogContent className="max-w-4xl gap-0 overflow-hidden p-0 sm:max-w-4xl">
+                  <div className="bg-sidebar px-4 py-3">
+                    <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+                      Vendor Rate Compare
+                    </DialogTitle>
+                  </div>
+                  <div className="max-h-[70vh] overflow-auto p-4">
+                    {rateCompareMessage ? (
+                      <p className="mb-3 text-sm text-muted-foreground">{rateCompareMessage}</p>
+                    ) : null}
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Origin</TableHead>
+                          <TableHead>Vendor Name</TableHead>
+                          <TableHead>Service Type</TableHead>
+                          <TableHead className="text-right">Weight</TableHead>
+                          <TableHead className="text-right">Rate/Kg</TableHead>
+                          <TableHead className="text-right">Final Amount</TableHead>
+                          <TableHead />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {rateCompareRows.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center text-muted-foreground">
+                              {ratingBusy === "compare" ? "Comparing vendor tariffs…" : "No rates to show"}
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          rateCompareRows.map((row) => (
+                            <TableRow key={`${row.contractId}-${row.service}`}>
+                              <TableCell>{row.origin || "—"}</TableCell>
+                              <TableCell>{row.vendorName}</TableCell>
+                              <TableCell>{row.service || "—"}</TableCell>
+                              <TableCell className="text-right">{row.weight.toFixed(3)}</TableCell>
+                              <TableCell className="text-right">{row.ratePerKg.toFixed(2)}</TableCell>
+                              <TableCell className="text-right">{row.totalAmount.toFixed(2)}</TableCell>
+                              <TableCell className="text-right">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="h-8 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                                  onClick={() => selectComparedVendor(row)}
+                                >
+                                  Select
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={addUnitOpen} onOpenChange={setAddUnitOpen}>
+                <DialogContent className="max-w-sm gap-0 overflow-hidden p-0 sm:max-w-sm">
+                  <div className="bg-sidebar px-4 py-3">
+                    <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+                      Add Unit
+                    </DialogTitle>
+                  </div>
+                  <div className="flex flex-col gap-4 p-6">
+                    <FieldWrapper label="Unit code">
+                      <Input
+                        autoFocus
+                        value={newUnitInput}
+                        onChange={(e) => setNewUnitInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addProformaUnit();
                           }
-                        />
-                        <label
-                          htmlFor={`awbSetup-${key}`}
-                          className="text-sm leading-snug text-foreground"
-                        >
-                          {label}
-                        </label>
+                        }}
+                      />
+                    </FieldWrapper>
+                    <div className="flex justify-end gap-2">
+                      <Button type="button" variant="outline" onClick={() => setAddUnitOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+                        onClick={addProformaUnit}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={formSetupOpen} onOpenChange={(o) => !o && closeFormSetup()}>
+                <DialogContent className="max-w-3xl gap-0 overflow-hidden p-0 sm:max-w-3xl">
+                  <div className="bg-sidebar px-4 py-3">
+                    <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+                      Form Setup
+                    </DialogTitle>
+                  </div>
+                  <div className="grid grid-cols-1 gap-6 p-6 sm:grid-cols-2 lg:grid-cols-4">
+                    {AWB_FORM_SETUP_COLUMNS.map((column, colIdx) => (
+                      <div key={colIdx} className="flex flex-col gap-3">
+                        {column.map(({ key, label }) => (
+                          <div key={key} className="flex items-start gap-2">
+                            <Checkbox
+                              id={`awbSetup-${key}`}
+                              checked={formSetupDraft[key]}
+                              onCheckedChange={(c) =>
+                                setFormSetupDraft((s) => ({ ...s, [key]: c === true }))
+                              }
+                            />
+                            <label
+                              htmlFor={`awbSetup-${key}`}
+                              className="text-sm leading-snug text-foreground"
+                            >
+                              {label}
+                            </label>
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
-                ))}
-              </div>
-              <div className="flex justify-end gap-2 px-6 pb-6">
-                <Button
-                  onClick={handleFormSetupSave}
-                  className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-                >
-                  Save
-                </Button>
-                <Button variant="destructive" onClick={closeFormSetup}>
-                  Cancel
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+                  <div className="flex justify-end gap-2 px-6 pb-6">
+                    <Button
+                      onClick={handleFormSetupSave}
+                      className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+                    >
+                      Save
+                    </Button>
+                    <Button variant="destructive" onClick={closeFormSetup}>
+                      Cancel
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
 
-          <Dialog open={entryOpen} onOpenChange={(o) => !o && closeEntry()}>
-            <DialogContent className="max-w-md gap-0 overflow-hidden p-0 sm:max-w-md">
-              <div className="bg-sidebar px-4 py-3">
-                <DialogTitle className="text-base font-semibold text-sidebar-foreground">
-                  Entry
-                </DialogTitle>
+              <Dialog open={entryOpen} onOpenChange={(o) => !o && closeEntry()}>
+                <DialogContent className="max-w-md gap-0 overflow-hidden p-0 sm:max-w-md">
+                  <div className="bg-sidebar px-4 py-3">
+                    <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+                      Entry
+                    </DialogTitle>
+                  </div>
+                  <div className="flex flex-col gap-4 p-6">
+                    <FieldWrapper label="Entry Type">
+                      <Select value={entryType} onValueChange={setEntryType}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ENTRY_TYPES.map((t) => (
+                            <SelectItem key={t} value={t}>
+                              {t}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FieldWrapper>
+                    <FieldWrapper label="Master AWB">
+                      <Input
+                        value={masterAwb}
+                        onChange={(e) => setMasterAwb(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void handleEntrySearch();
+                        }}
+                      />
+                    </FieldWrapper>
+                  </div>
+                  <div className="flex justify-end gap-2 px-6 pb-6">
+                    <Button
+                      onClick={() => void handleEntrySearch()}
+                      disabled={saving}
+                      className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+                    >
+                      {saving ? "Loading…" : "Search"}
+                    </Button>
+                    <Button variant="destructive" onClick={closeEntry}>
+                      Close
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </Card>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1">
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                  AWB Entry List
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  View, search, and manage air waybill bookings.
+                </p>
               </div>
-              <div className="flex flex-col gap-4 p-6">
-                <FieldWrapper label="Entry Type">
-                  <Select value={entryType} onValueChange={setEntryType}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ENTRY_TYPES.map((t) => (
-                        <SelectItem key={t} value={t}>
-                          {t}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </FieldWrapper>
-                <FieldWrapper label="Master AWB">
-                  <Input
-                    value={masterAwb}
-                    onChange={(e) => setMasterAwb(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void handleEntrySearch();
-                    }}
-                  />
-                </FieldWrapper>
-              </div>
-              <div className="flex justify-end gap-2 px-6 pb-6">
-                <Button
-                  onClick={() => void handleEntrySearch()}
-                  disabled={saving}
-                  className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-                >
-                  {saving ? "Loading…" : "Search"}
-                </Button>
-                <Button variant="destructive" onClick={closeEntry}>
-                  Close
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </Card>
-      ) : (
-        <>
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-              AWB Entry List
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              View, search, and manage air waybill bookings.
-            </p>
-          </div>
 
-          <Card className="min-w-0 overflow-hidden p-0">
-            <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
-              <TooltipProvider delayDuration={200}>
-                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                  <DataIoToolbar
-                    export={{
-                      filename: "awb-entries",
-                      title: "AWB Entries",
-                      columns: [
-                        { key: "awbNo", header: "AWB No" },
-                        { key: "bookDate", header: "Book Date" },
-                        { key: "shipperName", header: "Shipper Name" },
-                        { key: "customerCode", header: "Customer Code" },
-                        { key: "customerName", header: "Customer Name" },
-                        { key: "consigneeName", header: "Consignee Name" },
-                        { key: "destination", header: "Destination" },
-                        { key: "product", header: "Product" },
-                        { key: "vendor", header: "Vendor" },
-                        { key: "actualWeight", header: "Actual Weight" },
-                        { key: "chargeWeight", header: "Charge Weight" },
-                        { key: "pieces", header: "Pieces" },
-                        { key: "deliveryVendor", header: "Delivery Vendor" },
-                      ],
-                      getRows: () =>
-                        filtered.map((r) => {
-                          const d = listFromRow(r);
-                          return {
-                            awbNo: d.awbNo,
-                            bookDate: d.bookDate,
-                            shipperName: d.shipperName,
-                            customerCode: d.customerCode,
-                            customerName: d.customerName,
-                            consigneeName: d.consigneeName,
-                            destination: d.destination,
-                            product: d.product,
-                            vendor: d.vendor,
-                            actualWeight: d.actualWeight,
-                            chargeWeight: d.chargeWeight,
-                            pieces: d.pieces,
-                            deliveryVendor: d.deliveryVendor,
-                          };
-                        }),
-                    }}
-                  />
-                  <IconButton label="Filter" onClick={() => clearColFilters()}>
-                    <Filter className="h-4 w-4" />
-                  </IconButton>
-                  <IconButton label="Refresh" onClick={handleRefresh}>
-                    <RefreshCw className="h-4 w-4" />
-                  </IconButton>
+              <Card className="min-w-0 overflow-hidden p-0">
+                <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
+                  <TooltipProvider delayDuration={200}>
+                    <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                      <DataIoToolbar
+                        export={{
+                          filename: "awb-entries",
+                          title: "AWB Entries",
+                          columns: [
+                            { key: "awbNo", header: "AWB No" },
+                            { key: "bookDate", header: "Book Date" },
+                            { key: "shipperName", header: "Shipper Name" },
+                            { key: "customerCode", header: "Customer Code" },
+                            { key: "customerName", header: "Customer Name" },
+                            { key: "consigneeName", header: "Consignee Name" },
+                            { key: "destination", header: "Destination" },
+                            { key: "product", header: "Product" },
+                            { key: "vendor", header: "Vendor" },
+                            { key: "actualWeight", header: "Actual Weight" },
+                            { key: "chargeWeight", header: "Charge Weight" },
+                            { key: "pieces", header: "Pieces" },
+                            { key: "deliveryVendor", header: "Delivery Vendor" },
+                          ],
+                          getRows: () =>
+                            filtered.map((r) => {
+                              const d = listFromRow(r);
+                              return {
+                                awbNo: d.awbNo,
+                                bookDate: d.bookDate,
+                                shipperName: d.shipperName,
+                                customerCode: d.customerCode,
+                                customerName: d.customerName,
+                                consigneeName: d.consigneeName,
+                                destination: d.destination,
+                                product: d.product,
+                                vendor: d.vendor,
+                                actualWeight: d.actualWeight,
+                                chargeWeight: d.chargeWeight,
+                                pieces: d.pieces,
+                                deliveryVendor: d.deliveryVendor,
+                              };
+                            }),
+                        }}
+                      />
+                      <IconButton label="Filter" onClick={() => clearColFilters()}>
+                        <Filter className="h-4 w-4" />
+                      </IconButton>
+                      <IconButton label="Refresh" onClick={handleRefresh}>
+                        <RefreshCw className="h-4 w-4" />
+                      </IconButton>
+                    </div>
+                  </TooltipProvider>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3 lg:justify-end">
+                    <Select value={searchField} onValueChange={(v) => setSearchField(v as SearchField)}>
+                      <SelectTrigger className="h-9 w-[10.5rem]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SEARCH_FIELDS.map((f) => (
+                          <SelectItem key={f.value} value={f.value}>
+                            {f.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSearch();
+                      }}
+                      className="h-9 w-full min-w-[10rem] sm:w-48"
+                    />
+                    <Button
+                      size="icon"
+                      className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
+                      onClick={handleSearch}
+                      aria-label="Search"
+                    >
+                      <Search className="h-4 w-4" />
+                    </Button>
+                    <Button size="sm" onClick={openAdd} className="h-9 shrink-0 gap-1.5">
+                      <Plus className="h-4 w-4" />
+                      Add
+                    </Button>
+                  </div>
                 </div>
-              </TooltipProvider>
-              <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3 lg:justify-end">
-                <Select value={searchField} onValueChange={(v) => setSearchField(v as SearchField)}>
-                  <SelectTrigger className="h-9 w-[10.5rem]">
+
+                <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
+                  <table className="w-max min-w-full caption-bottom text-sm">
+                    <TableHeader>
+                      <TableRow className="bg-sidebar hover:bg-sidebar">
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.awbNoHead)}>
+                          AWB No
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.bookDate)}>
+                          Book Date
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.shipperName)}>
+                          Shipper Name
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.customerCode)}>
+                          Customer Code
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.customerName)}>
+                          Customer Name
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.consigneeName)}>
+                          Consignee Name
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.destination)}>
+                          Destination
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.product)}>
+                          Product
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.vendor)}>
+                          Vendor
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.actualWeight)}>
+                          Actual Weight
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.chargeWeight)}>
+                          Charge Weight
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.pieces)}>
+                          Pieces
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.deliveryVendor)}>
+                          Delivery Vendor
+                        </TableHead>
+                        <TableHead className={cn("text-sidebar-foreground", awbCol.action)}>
+                          Action
+                        </TableHead>
+                      </TableRow>
+                      <TableRow className="bg-muted/20 hover:bg-muted/20">
+                        {(
+                          [
+                            ["awbNo", awbCol.awbNoFilter],
+                            ["bookDate", awbCol.bookDate],
+                            ["shipperName", awbCol.shipperName],
+                            ["customerCode", awbCol.customerCode],
+                            ["customerName", awbCol.customerName],
+                            ["consigneeName", awbCol.consigneeName],
+                            ["destination", awbCol.destination],
+                            ["product", awbCol.product],
+                            ["vendor", awbCol.vendor],
+                            ["actualWeight", awbCol.actualWeight],
+                            ["chargeWeight", awbCol.chargeWeight],
+                            ["pieces", awbCol.pieces],
+                            ["deliveryVendor", awbCol.deliveryVendor],
+                          ] as const
+                        ).map(([key, colClass]) => (
+                          <TableHead key={key} className={cn("py-2", colClass)}>
+                            <Input
+                              value={colFilters[key]}
+                              onChange={(e) => {
+                                setColFilters((f) => ({ ...f, [key]: e.target.value }));
+                                setPage(1);
+                              }}
+                              className={awbCol.filter}
+                            />
+                          </TableHead>
+                        ))}
+                        <TableHead className={awbCol.actionFilter} />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pageRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={14}
+                            className="h-32 text-center text-sm text-muted-foreground"
+                          >
+                            No data available in table
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        pageRows.map((r) => {
+                          const d = listFromRow(r);
+                          return (
+                            <TableRow key={r.id}>
+                              <TableCell className={awbCol.awbNo}>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => openEdit(r)}
+                                    className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline dark:text-emerald-400"
+                                  >
+                                    {d.awbNo}
+                                  </button>
+                                  {r.status ? (
+                                    <Badge
+                                      variant={
+                                        r.status === "BOOKED"
+                                          ? "default"
+                                          : r.status === "CANCELLED"
+                                            ? "destructive"
+                                            : "secondary"
+                                      }
+                                      className="text-[10px]"
+                                    >
+                                      {r.status}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </TableCell>
+                              <TableCell className={awbCol.bookDate}>{d.bookDate}</TableCell>
+                              <TableCell className={awbCol.shipperName}>{d.shipperName}</TableCell>
+                              <TableCell className={awbCol.customerCode}>{d.customerCode}</TableCell>
+                              <TableCell className={awbCol.customerName}>{d.customerName}</TableCell>
+                              <TableCell className={awbCol.consigneeName}>{d.consigneeName}</TableCell>
+                              <TableCell className={awbCol.destination}>{d.destination}</TableCell>
+                              <TableCell className={awbCol.product}>{d.product}</TableCell>
+                              <TableCell className={awbCol.vendor}>{d.vendor}</TableCell>
+                              <TableCell className={awbCol.actualWeight}>{d.actualWeight}</TableCell>
+                              <TableCell className={awbCol.chargeWeight}>{d.chargeWeight}</TableCell>
+                              <TableCell className={awbCol.pieces}>{d.pieces}</TableCell>
+                              <TableCell className={awbCol.deliveryVendor}>{d.deliveryVendor}</TableCell>
+                              <TableCell className={awbCol.actionCell}>
+                                <div className="flex justify-center">
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8 text-destructive hover:text-destructive"
+                                    onClick={() => setDeleteTarget(r)}
+                                    aria-label={`Delete AWB ${d.awbNo}`}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </table>
+                </div>
+
+                <TablePager
+                  totalPages={totalPages}
+                  currentPage={currentPage}
+                  setPage={setPage}
+                  startIdx={startIdx}
+                  endIdx={endIdx}
+                  total={filtered.length}
+                />
+              </Card>
+            </>
+          )}
+
+          <VendorOtpDialog
+            open={vendorOtpOpen}
+            busy={vendorBookingBusy}
+            error={vendorOtpError}
+            shipperMobile={vendorOtpMobile}
+            sandboxOtp={vendorSandboxOtp}
+            onVerify={(otp) => void runVendorOtpVerify(otp)}
+            onResend={() => void runVendorRetry()}
+            onCancel={() => {
+              if (!vendorBookingBusy) {
+                setVendorOtpOpen(false);
+                setVendorSandboxOtp(null);
+              }
+            }}
+          />
+
+          <AlertDialog
+            open={weightErrorModal.open}
+            onOpenChange={(open) => {
+              if (!open) setWeightErrorModal({ open: false, message: "" });
+            }}
+          >
+            <AlertDialogContent className="max-w-md p-6">
+              <AlertDialogHeader className="items-center text-center">
+                <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400">
+                  <AlertTriangle className="h-8 w-8" aria-hidden />
+                </div>
+                <AlertDialogTitle className="text-center text-lg font-semibold text-foreground">
+                  Weight Out of Range
+                </AlertDialogTitle>
+                <AlertDialogDescription className="mt-2 text-center text-sm font-medium text-destructive">
+                  {weightErrorModal.message}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="mt-4 sm:justify-center">
+                <AlertDialogAction
+                  onClick={() => setWeightErrorModal({ open: false, message: "" })}
+                  className="w-28 bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  OK
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog
+            open={proformaImportErrors.length > 0}
+            onOpenChange={(open) => {
+              if (!open) setProformaImportErrors([]);
+            }}
+          >
+            <AlertDialogContent className="max-w-2xl">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Proforma import</AlertDialogTitle>
+                <AlertDialogDescription>Fix these rows and upload the file again.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="max-h-72 overflow-auto rounded border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="px-2 py-1">Row #</th>
+                      <th className="px-2 py-1">Column</th>
+                      <th className="px-2 py-1">Value</th>
+                      <th className="px-2 py-1">Message</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {proformaImportErrors.map((error, index) => (
+                      <tr key={`${error.row}-${error.column}-${index}`} className="border-b">
+                        <td className="px-2 py-1">{error.row}</td>
+                        <td className="px-2 py-1">{error.column}</td>
+                        <td className="px-2 py-1">{error.value}</td>
+                        <td className="px-2 py-1">{error.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogCancel
+                  onClick={() => {
+                    const blob = new Blob([proformaErrorReportCsv(proformaImportErrors)], {
+                      type: "text/csv;charset=utf-8",
+                    });
+                    const link = document.createElement("a");
+                    link.href = URL.createObjectURL(blob);
+                    link.download = "proforma-import-errors.csv";
+                    link.click();
+                    URL.revokeObjectURL(link.href);
+                  }}
+                >
+                  Download error report
+                </AlertDialogCancel>
+                <AlertDialogAction onClick={() => setProformaImportErrors([])}>OK</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog
+            open={proformaPreview != null}
+            onOpenChange={(open) => {
+              if (!open) setProformaPreview(null);
+            }}
+          >
+            <AlertDialogContent className="max-w-lg">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Confirm proforma import</AlertDialogTitle>
+                <AlertDialogDescription className="whitespace-pre-wrap text-left">
+                  {proformaPreview?.warnings.join("\n")}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <p className="text-sm">
+                {proformaPreview?.lines.length ?? 0} rows are ready. Amount{" "}
+                {(proformaPreview?.lines ?? [])
+                  .reduce((sum, line) => sum + (Number.parseFloat(line.amount) || 0), 0)
+                  .toFixed(2)}
+                .
+              </p>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    if (!proformaPreview) return;
+                    const lines = proformaPreview.lines;
+                    setProformaPreview(null);
+                    placeImportedProforma(lines);
+                  }}
+                >
+                  Confirm
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog
+            open={proformaImportPending != null}
+            onOpenChange={(open) => {
+              if (!open) setProformaImportPending(null);
+            }}
+          >
+            <AlertDialogContent className="max-w-md">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Proforma lines already exist</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Append the imported rows to the grid, or replace the rows that are already there.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    if (proformaImportPending) applyImportedProforma("append", proformaImportPending);
+                  }}
+                >
+                  Append
+                </AlertDialogAction>
+                <AlertDialogAction
+                  onClick={() => {
+                    if (proformaImportPending) applyImportedProforma("replace", proformaImportPending);
+                  }}
+                >
+                  Replace
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog
+            open={vendorChargePrereqErrors != null}
+            onOpenChange={(open) => {
+              if (!open) setVendorChargePrereqErrors(null);
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                  <AlertTriangle className="h-8 w-8" aria-hidden />
+                </div>
+                <AlertDialogTitle className="sr-only">Vendor charge validation</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <ul className="list-disc space-y-1 pl-5 text-left text-sm text-foreground">
+                    {vendorChargePrereqErrors?.map((msg) => (
+                      <li key={msg}>{msg}</li>
+                    ))}
+                  </ul>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogAction onClick={() => setVendorChargePrereqErrors(null)}>OK</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog open={leavePromptOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>You have an unfinished AWB entry.</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Are you sure you want to leave? Any unsaved changes will be discarded.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" onClick={() => void finishLeavePrompt("continue")}>
+                  Continue Editing
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => void finishLeavePrompt("discard")}
+                >
+                  Discard Changes
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{authed ? "Cancel shipment?" : "Delete AWB entry?"}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {authed
+                    ? `This will cancel AWB ${deleteTarget?.awbNo}. Cancelled shipments cannot be edited.`
+                    : `This will permanently remove AWB ${deleteTarget?.awbNo}. This action cannot be undone.`}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Close</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={confirmDelete}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  {authed ? "Cancel Shipment" : "Delete"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog
+            open={!!cancelShipmentTarget}
+            onOpenChange={(o) => !o && setCancelShipmentTarget(null)}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Cancel shipment?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will cancel AWB {cancelShipmentTarget?.awbNo}. Cancelled shipments cannot be
+                  edited.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Close</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={confirmCancelShipment}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Cancel Shipment
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      );
+    }
+
+    function FormSection({
+      title,
+      children,
+      className,
+    }: {
+      title: string;
+      children: React.ReactNode;
+      className?: string;
+    }) {
+      return (
+        <div
+          className={cn(
+            "relative min-w-0 rounded border border-border bg-card p-2.5 pt-5 shadow-none",
+            className,
+          )}
+        >
+          {/* Centered on the top border — do not use nested <fieldset>/<legend> (breaks inside the page fieldset). */}
+          <span className="absolute left-2.5 top-1 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-sm font-semibold leading-none text-sidebar-foreground">
+            {title}
+          </span>
+          {children}
+        </div>
+      );
+    }
+
+    function PartySection({
+      title,
+      party,
+      onChange,
+      originLookup,
+      originRequired,
+      companyRequired = true,
+      addressRequired = false,
+      phoneRequired = false,
+      pincodeCountryCode = "IN",
+      invalidNavOrders,
+      fieldError,
+      onValidationError,
+    }: {
+      title: string;
+      party: PartyDetails;
+      onChange: (patch: Partial<PartyDetails>) => void;
+      originLookup: LookupKey;
+      originRequired?: boolean;
+      companyRequired?: boolean;
+      addressRequired?: boolean;
+      phoneRequired?: boolean;
+      pincodeCountryCode?: string;
+      invalidNavOrders?: Set<number>;
+      fieldError?: (order: number) => string | undefined;
+      onValidationError?: (message: string) => void;
+    }) {
+      const isConsignee = title.includes("Consignee");
+      const originLabel = isConsignee ? "Destination" : "Origin";
+      const nav = isConsignee
+        ? {
+          origin: AWB_NAV.CONSIGNEE_DESTINATION,
+          company: AWB_NAV.CONSIGNEE_COMPANY,
+          contact: AWB_NAV.CONSIGNEE_CONTACT,
+          address1: AWB_NAV.CONSIGNEE_ADDRESS1,
+          address2: AWB_NAV.CONSIGNEE_ADDRESS2,
+          pincode: AWB_NAV.CONSIGNEE_PINCODE,
+          city: AWB_NAV.CONSIGNEE_CITY,
+          state: AWB_NAV.CONSIGNEE_STATE,
+          telephone: AWB_NAV.CONSIGNEE_TELEPHONE,
+          mobile: AWB_NAV.CONSIGNEE_MOBILE,
+          email: AWB_NAV.CONSIGNEE_EMAIL,
+          country: AWB_NAV.CONSIGNEE_COUNTRY,
+          iec: AWB_NAV.CONSIGNEE_IEC,
+          docType: AWB_NAV.CONSIGNEE_DOC_TYPE,
+          docNo: AWB_NAV.CONSIGNEE_DOC_NO,
+        }
+        : {
+          origin: AWB_NAV.SHIPPER_ORIGIN,
+          company: AWB_NAV.SHIPPER_COMPANY,
+          contact: AWB_NAV.SHIPPER_CONTACT,
+          address1: AWB_NAV.SHIPPER_ADDRESS1,
+          address2: AWB_NAV.SHIPPER_ADDRESS2,
+          pincode: AWB_NAV.SHIPPER_PINCODE,
+          city: AWB_NAV.SHIPPER_CITY,
+          state: AWB_NAV.SHIPPER_STATE,
+          telephone: AWB_NAV.SHIPPER_TELEPHONE,
+          mobile: AWB_NAV.SHIPPER_MOBILE,
+          email: AWB_NAV.SHIPPER_EMAIL,
+          country: AWB_NAV.SHIPPER_COUNTRY,
+          iec: AWB_NAV.SHIPPER_IEC,
+          docType: AWB_NAV.SHIPPER_DOC_TYPE,
+          docNo: AWB_NAV.SHIPPER_DOC_NO,
+        };
+      const [docUnmasked, setDocUnmasked] = useState(false);
+      const { hasPermission } = useAuth();
+      const onCommit = useErpNavCommit();
+      const onPincodeCommit = useErpNavCommit(nav.pincode);
+      const inputClass = "h-9 px-2 text-[13px]";
+      const destinationCountrySeq = useRef(0);
+      const applyOriginCountry = (destinationId: string | undefined) => {
+        if (!destinationId) return;
+        const seq = ++destinationCountrySeq.current;
+        void destinationCountryName(destinationId).then((country) => {
+          if (seq !== destinationCountrySeq.current || !country) return;
+          onChange({ country });
+        });
+      };
+
+      return (
+        <FormSection title={title}>
+          <div className="grid grid-cols-1 content-start gap-1.5">
+            <FieldWrapper
+              borderLabel
+              lookupSplit
+              label={originLabel}
+              required={originRequired}
+              invalid={invalidNavOrders?.has(nav.origin)}
+              error={fieldError?.(nav.origin)}
+            >
+              <LookupPairInput
+                lookup={originLookup}
+                value={party.origin}
+                onChange={(v) => onChange({ origin: v })}
+                onSelect={(v) => applyOriginCountry(v.id)}
+                navOrder={nav.origin}
+              />
+            </FieldWrapper>
+            <FieldWrapper
+              borderLabel
+              lookupSplit
+              label="Company Name"
+              required={companyRequired}
+              invalid={invalidNavOrders?.has(nav.company)}
+              error={fieldError?.(nav.company)}
+            >
+              <PartyContactLookup
+                role={isConsignee ? "consignee" : "shipper"}
+                value={party.companyName}
+                onCompanyChange={(v) => onChange({ companyName: { ...v, name: clipText(v.name, 100) } })}
+                compact
+                splitCode
+                manualSearch
+                emptySearchMessage="Please enter a company name."
+                noResultsMessage={AWB_LOOKUP_NO_RESULTS}
+                navOrder={nav.company}
+                onCommit={onCommit}
+                onSelectContact={(c) => {
+                  const origin =
+                    c.origin.code || c.origin.name
+                      ? { id: c.origin.id, code: c.origin.code, name: c.origin.name }
+                      : party.origin;
+                  onChange({
+                    companyName: { id: c.id, code: c.code, name: c.name },
+                    contactName: c.contactName || c.name,
+                    address1: c.address1,
+                    address2: c.address2,
+                    pincode: c.pincode,
+                    city: c.city,
+                    state: c.state,
+                    telephone: c.telephone,
+                    mobileNo: c.mobileNo,
+                    email: c.email,
+                    documentType: c.documentType,
+                    documentNo: c.documentNo,
+                    iecNo: c.iecNo,
+                    origin,
+                  });
+                  applyOriginCountry(origin.id);
+                }}
+              />
+            </FieldWrapper>
+            <div className="grid grid-cols-2 gap-2">
+              <FieldWrapper borderLabel label="Contact Name">
+                <ErpNavInput
+                  order={nav.contact}
+                  className={inputClass}
+                  value={party.contactName}
+                  maxLength={100}
+                  onValueChange={(v) => onChange({ contactName: clipText(v, 100) })}
+                />
+              </FieldWrapper>
+              <FieldWrapper borderLabel label="Address 1" required={addressRequired} error={fieldError?.(nav.address1)}>
+                <ErpNavInput
+                  order={nav.address1}
+                  className={inputClass}
+                  value={party.address1}
+                  maxLength={100}
+                  onValueChange={(v) => onChange({ address1: clipText(v, 100) })}
+                />
+              </FieldWrapper>
+            </div>
+            <FieldWrapper borderLabel label="Address 2">
+              <ErpNavInput
+                order={nav.address2}
+                className={inputClass}
+                value={party.address2}
+                maxLength={100}
+                onValueChange={(v) => onChange({ address2: clipText(v, 100) })}
+              />
+            </FieldWrapper>
+            <div className="grid grid-cols-2 gap-2">
+              <FieldWrapper borderLabel label="Pincode" required={addressRequired} error={fieldError?.(nav.pincode)}>
+                <PincodeAutocomplete
+                  navOrder={nav.pincode}
+                  className={inputClass}
+                  placeholder=""
+                  value={party.pincode}
+                  countryCode={pincodeCountryCode}
+                  onValueChange={(v) => onChange({ pincode: v })}
+                  onSelect={(item) =>
+                    onChange({
+                      pincode: item.pincode,
+                      city: item.city,
+                      state: item.state,
+                    })
+                  }
+                  onCommit={onPincodeCommit}
+                />
+              </FieldWrapper>
+              <FieldWrapper borderLabel label="City" required={addressRequired} error={fieldError?.(nav.city)}>
+                <ErpNavInput
+                  order={nav.city}
+                  className={inputClass}
+                  value={party.city}
+                  maxLength={50}
+                  onValueChange={(v) => onChange({ city: clipText(v, 50) })}
+                />
+              </FieldWrapper>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <FieldWrapper borderLabel label="State" required={addressRequired} error={fieldError?.(nav.state)}>
+                <ErpNavInput
+                  order={nav.state}
+                  className={inputClass}
+                  value={party.state}
+                  maxLength={50}
+                  onValueChange={(v) => onChange({ state: clipText(v, 50) })}
+                />
+              </FieldWrapper>
+              <FieldWrapper borderLabel label="Telephone">
+                <ErpNavInput
+                  order={nav.telephone}
+                  className={inputClass}
+                  value={party.telephone}
+                  maxLength={15}
+                  onValueChange={(v) => onChange({ telephone: clipText(v, 15) })}
+                />
+              </FieldWrapper>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <FieldWrapper borderLabel label="Mobile No." required={phoneRequired} error={fieldError?.(nav.mobile)}>
+                <ErpNavInput
+                  order={nav.mobile}
+                  className={inputClass}
+                  value={party.mobileNo}
+                  maxLength={15}
+                  onValueChange={(v) => onChange({ mobileNo: clipText(v, 15) })}
+                />
+              </FieldWrapper>
+              <FieldWrapper borderLabel label="E-Mail" error={fieldError?.(nav.email)}>
+                <ErpNavInput
+                  order={nav.email}
+                  className={inputClass}
+                  value={party.email}
+                  maxLength={100}
+                  onValueChange={(v) => onChange({ email: clipText(v, 100) })}
+                />
+              </FieldWrapper>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <FieldWrapper borderLabel label="Country" required={phoneRequired}>
+                <ErpNavInput
+                  order={nav.country}
+                  className={`cursor-default bg-muted/40 ${inputClass}`}
+                  value={party.country}
+                  readOnly
+                  onValueChange={(v) => onChange({ country: v })}
+                />
+              </FieldWrapper>
+              <FieldWrapper borderLabel label="IEC No" error={fieldError?.(nav.iec)}>
+                <ErpNavInput
+                  order={nav.iec}
+                  className={inputClass}
+                  value={party.iecNo}
+                  maxLength={10}
+                  onValueChange={(v) => onChange({ iecNo: clipText(v.toUpperCase(), 10) })}
+                  onBlur={() => {
+                    if (party.iecNo && party.iecNo.trim()) {
+                      const res = validateDocumentId("IEC", party.iecNo, `${isConsignee ? "Consignee" : "Shipper"} IEC`);
+                      if (!res.valid && res.message) {
+                        toast.error(res.message);
+                      }
+                    }
+                  }}
+                />
+              </FieldWrapper>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <FieldWrapper borderLabel label="Document Type">
+                <ErpNavSelect
+                  order={nav.docType}
+                  value={party.documentType || undefined}
+                  onValueChange={(v) => onChange({ documentType: v })}
+                  items={DOCUMENT_TYPES}
+                  nextOrder={nav.docNo}
+                  triggerClassName={inputClass}
+                />
+              </FieldWrapper>
+              <FieldWrapper
+                borderLabel
+                label={
+                  <div className="flex items-center justify-between w-full">
+                    <span>Document No.</span>
+                    {isMaskableType(party.documentType) && party.documentNo ? (
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          if (docUnmasked) {
+                            setDocUnmasked(false);
+                          } else {
+                            const allowed = hasPermission("txn.kyc-reveal", "search") || hasPermission("txn.awb-entry", "modify");
+                            if (!allowed) {
+                              toast.error("Permission denied: txn.kyc-reveal required to unmask identity numbers");
+                              return;
+                            }
+                            setDocUnmasked(true);
+                            await logKycReveal({
+                              shipmentId: "00000000-0000-0000-0000-000000000000",
+                              field: isConsignee ? "consignee_document_no" : "shipper_document_no",
+                              docType: party.documentType,
+                            });
+                            toast.success("Document number unmasked (access audited)");
+                          }
+                        }}
+                        aria-label={docUnmasked ? "Mask document number" : "Reveal document number"}
+                      >
+                        {docUnmasked ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                        <span>{docUnmasked ? "Mask" : "Reveal"}</span>
+                      </button>
+                    ) : null}
+                  </div>
+                }
+              >
+                <ErpNavInput
+                  order={nav.docNo}
+                  className={inputClass}
+                  value={
+                    !docUnmasked && isMaskableType(party.documentType)
+                      ? maskDocumentNumber(party.documentType, party.documentNo)
+                      : party.documentNo
+                  }
+                  onFocus={() => {
+                    if (isMaskableType(party.documentType)) setDocUnmasked(true);
+                  }}
+                  onValueChange={(v) => onChange({ documentNo: v.toUpperCase() })}
+                  onBlur={() => {
+                    setDocUnmasked(false);
+                    if (party.documentType && party.documentNo && party.documentNo.trim()) {
+                      const check = validateDocumentNoFormat(party.documentType, party.documentNo);
+                      if (!check.valid && check.message) {
+                        if (onValidationError) {
+                          onValidationError(check.message);
+                        } else {
+                          toast.error(check.message);
+                        }
+                      } else {
+                        const res = validateDocumentId(party.documentType, party.documentNo, `${isConsignee ? "Consignee" : "Shipper"} ${party.documentType}`);
+                        if (!res.valid && res.message) {
+                          toast.error(res.message);
+                        }
+                      }
+                    }
+                  }}
+                />
+              </FieldWrapper>
+            </div>
+          </div>
+        </FormSection>
+      );
+    }
+
+    function ServicesSection({
+      form,
+      setForm,
+      airlineRequired,
+      invalidNavOrders,
+      fieldError,
+    }: {
+      form: AwbFullForm;
+      setForm: React.Dispatch<React.SetStateAction<AwbFullForm>>;
+      airlineRequired?: boolean;
+      invalidNavOrders?: Set<number>;
+      fieldError?: (order: number) => string | undefined;
+    }) {
+      const onCommit = useErpNavCommit();
+      const onVendorCommit = useErpNavCommit(AWB_NAV.VENDOR);
+      const hasVendor = Boolean(
+        form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim(),
+      );
+      const inputClass = "h-9 px-2 text-[13px]";
+      const skip = erpNavSkip();
+
+      return (
+        <FormSection title="Services Details">
+          <div className="grid grid-cols-1 content-start gap-1.5">
+            <FieldWrapper
+              borderLabel
+              lookupSplit
+              label="Product"
+              required
+              invalid={invalidNavOrders?.has(AWB_NAV.PRODUCT)}
+              error={fieldError?.(AWB_NAV.PRODUCT)}
+            >
+              <LookupPairInput
+                lookup="product"
+                value={form.product}
+                onChange={(v) => setForm((f) => ({ ...f, product: v }))}
+                navOrder={AWB_NAV.PRODUCT}
+              />
+            </FieldWrapper>
+            <FieldWrapper
+              borderLabel
+              lookupSplit
+              label="Vendor"
+              required
+              invalid={invalidNavOrders?.has(AWB_NAV.VENDOR)}
+              error={fieldError?.(AWB_NAV.VENDOR)}
+            >
+              <LookupPairInput
+                lookup="vendor"
+                value={form.vendor}
+                onChange={(v) =>
+                  setForm((f) => ({
+                    ...f,
+                    vendor: v,
+                    service: emptyPair(),
+                  }))
+                }
+                navOrder={AWB_NAV.VENDOR}
+                onCommit={onVendorCommit}
+              />
+            </FieldWrapper>
+            <FieldWrapper borderLabel lookupSplit label="Airline" required={airlineRequired}>
+              <LookupPairInput
+                lookup="airline"
+                value={{ code: form.airline, name: form.airline }}
+                onChange={(v) =>
+                  setForm((f) => ({
+                    ...f,
+                    airline: (v.name || v.code || "").trim(),
+                  }))
+                }
+              />
+            </FieldWrapper>
+            <div className="min-w-0">
+              <FieldWrapper
+                borderLabel
+                lookupSplit
+                label="Service"
+                required
+                invalid={invalidNavOrders?.has(AWB_NAV.SERVICE)}
+                error={fieldError?.(AWB_NAV.SERVICE)}
+              >
+                <VendorServiceLookup
+                  vendor={form.vendor}
+                  value={form.service}
+                  onChange={(v) => setForm((f) => ({ ...f, service: v }))}
+                  productId={form.product.id}
+                  destinationId={form.consignee.origin.id}
+                  compact
+                  splitCode
+                  manualSearch
+                  noResultsMessage={AWB_LOOKUP_NO_RESULTS}
+                  navOrder={AWB_NAV.SERVICE}
+                  onCommit={onCommit}
+                />
+              </FieldWrapper>
+              {hasVendor ? null : (
+                <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">
+                  Select a Vendor to load mapped services.
+                </p>
+              )}
+            </div>
+            <FieldWrapper borderLabel label="Shipment Value">
+              <div className="flex w-full min-w-0 items-stretch">
+                <ErpNavInput
+                  order={AWB_NAV.SHIPMENT_VALUE}
+                  className={`min-w-0 flex-1 ${inputClass}`}
+                  value={form.shipmentValue}
+                  onValueChange={(v) => setForm((f) => ({ ...f, shipmentValue: decimalNumber(v) }))}
+                  onBlur={() => setForm((f) => ({ ...f, shipmentValue: formatMoney2(f.shipmentValue) }))}
+                />
+                <Select
+                  value={form.shipmentCurrency}
+                  onValueChange={(v) => setForm((f) => ({ ...f, shipmentCurrency: v }))}
+                >
+                  <SelectTrigger
+                    className="h-8 w-16 shrink-0 rounded-none border-0 border-l border-input px-1 text-[13px] shadow-none focus:ring-0"
+                    {...skip}
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {SEARCH_FIELDS.map((f) => (
-                      <SelectItem key={f.value} value={f.value}>
-                        {f.label}
+                    {CURRENCIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <Input
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSearch();
-                  }}
-                  className="h-9 w-full min-w-[10rem] sm:w-48"
-                />
-                <Button
-                  size="icon"
-                  className="h-9 w-9 shrink-0 bg-sidebar text-sidebar-foreground hover:bg-sidebar/90 hover:text-sidebar-foreground"
-                  onClick={handleSearch}
-                  aria-label="Search"
-                >
-                  <Search className="h-4 w-4" />
-                </Button>
-                <Button size="sm" onClick={openAdd} className="h-9 shrink-0 gap-1.5">
-                  <Plus className="h-4 w-4" />
-                  Add
-                </Button>
               </div>
+            </FieldWrapper>
+            <div className="grid grid-cols-2 gap-2">
+              <FieldWrapper borderLabel label="Pieces">
+                <div className="flex w-full min-w-0 items-stretch">
+                  <ErpNavInput
+                    order={AWB_NAV.PIECES}
+                    className={`min-w-0 flex-1 ${inputClass}`}
+                    value={form.pieces}
+                    onValueChange={(v) => setForm((f) => ({ ...f, pieces: v }))}
+                  />
+                  <Select
+                    value={form.piecesUnit}
+                    onValueChange={(v) => setForm((f) => ({ ...f, piecesUnit: v }))}
+                  >
+                    <SelectTrigger
+                      className="h-8 w-16 shrink-0 rounded-none border-0 border-l border-input px-1 text-[13px] shadow-none focus:ring-0"
+                      {...skip}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PIECE_UNITS.map((u) => (
+                        <SelectItem key={u} value={u}>
+                          {u}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </FieldWrapper>
+              <FieldWrapper borderLabel label="Actual Weight">
+                <div className="flex w-full min-w-0 items-stretch">
+                  <ErpNavInput
+                    order={AWB_NAV.ACTUAL_WEIGHT}
+                    className={`min-w-0 flex-1 ${inputClass}`}
+                    value={form.actualWeight}
+                    onValueChange={(v) => setForm((f) => ({ ...f, actualWeight: v }))}
+                  />
+                  <Select
+                    value={form.weightUnit}
+                    onValueChange={(v) => setForm((f) => ({ ...f, weightUnit: v }))}
+                  >
+                    <SelectTrigger
+                      className="h-8 w-14 shrink-0 rounded-none border-0 border-l border-input px-1 text-[13px] shadow-none focus:ring-0"
+                      {...skip}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WEIGHT_UNITS.map((u) => (
+                        <SelectItem key={u} value={u}>
+                          {u}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </FieldWrapper>
             </div>
-
-            <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
-              <table className="w-max min-w-full caption-bottom text-sm">
-                <TableHeader>
-                  <TableRow className="bg-sidebar hover:bg-sidebar">
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.awbNoHead)}>
-                      AWB No
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.bookDate)}>
-                      Book Date
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.shipperName)}>
-                      Shipper Name
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.customerCode)}>
-                      Customer Code
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.customerName)}>
-                      Customer Name
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.consigneeName)}>
-                      Consignee Name
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.destination)}>
-                      Destination
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.product)}>
-                      Product
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.vendor)}>
-                      Vendor
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.actualWeight)}>
-                      Actual Weight
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.chargeWeight)}>
-                      Charge Weight
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.pieces)}>
-                      Pieces
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.deliveryVendor)}>
-                      Delivery Vendor
-                    </TableHead>
-                    <TableHead className={cn("text-sidebar-foreground", awbCol.action)}>
-                      Action
-                    </TableHead>
-                  </TableRow>
-                  <TableRow className="bg-muted/20 hover:bg-muted/20">
-                    {(
-                      [
-                        ["awbNo", awbCol.awbNoFilter],
-                        ["bookDate", awbCol.bookDate],
-                        ["shipperName", awbCol.shipperName],
-                        ["customerCode", awbCol.customerCode],
-                        ["customerName", awbCol.customerName],
-                        ["consigneeName", awbCol.consigneeName],
-                        ["destination", awbCol.destination],
-                        ["product", awbCol.product],
-                        ["vendor", awbCol.vendor],
-                        ["actualWeight", awbCol.actualWeight],
-                        ["chargeWeight", awbCol.chargeWeight],
-                        ["pieces", awbCol.pieces],
-                        ["deliveryVendor", awbCol.deliveryVendor],
-                      ] as const
-                    ).map(([key, colClass]) => (
-                      <TableHead key={key} className={cn("py-2", colClass)}>
-                        <Input
-                          value={colFilters[key]}
-                          onChange={(e) => {
-                            setColFilters((f) => ({ ...f, [key]: e.target.value }));
-                            setPage(1);
-                          }}
-                          className={awbCol.filter}
-                        />
-                      </TableHead>
-                    ))}
-                    <TableHead className={awbCol.actionFilter} />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pageRows.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={14}
-                        className="h-32 text-center text-sm text-muted-foreground"
-                      >
-                        No data available in table
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    pageRows.map((r) => {
-                      const d = listFromRow(r);
-                      return (
-                        <TableRow key={r.id}>
-                          <TableCell className={awbCol.awbNo}>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => openEdit(r)}
-                                className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline dark:text-emerald-400"
-                              >
-                                {d.awbNo}
-                              </button>
-                              {r.status ? (
-                                <Badge
-                                  variant={
-                                    r.status === "BOOKED"
-                                      ? "default"
-                                      : r.status === "CANCELLED"
-                                        ? "destructive"
-                                        : "secondary"
-                                  }
-                                  className="text-[10px]"
-                                >
-                                  {r.status}
-                                </Badge>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                          <TableCell className={awbCol.bookDate}>{d.bookDate}</TableCell>
-                          <TableCell className={awbCol.shipperName}>{d.shipperName}</TableCell>
-                          <TableCell className={awbCol.customerCode}>{d.customerCode}</TableCell>
-                          <TableCell className={awbCol.customerName}>{d.customerName}</TableCell>
-                          <TableCell className={awbCol.consigneeName}>{d.consigneeName}</TableCell>
-                          <TableCell className={awbCol.destination}>{d.destination}</TableCell>
-                          <TableCell className={awbCol.product}>{d.product}</TableCell>
-                          <TableCell className={awbCol.vendor}>{d.vendor}</TableCell>
-                          <TableCell className={awbCol.actualWeight}>{d.actualWeight}</TableCell>
-                          <TableCell className={awbCol.chargeWeight}>{d.chargeWeight}</TableCell>
-                          <TableCell className={awbCol.pieces}>{d.pieces}</TableCell>
-                          <TableCell className={awbCol.deliveryVendor}>{d.deliveryVendor}</TableCell>
-                          <TableCell className={awbCol.actionCell}>
-                            <div className="flex justify-center">
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                onClick={() => setDeleteTarget(r)}
-                                aria-label={`Delete AWB ${d.awbNo}`}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </table>
+            <div className="grid grid-cols-2 gap-2">
+              <FieldWrapper borderLabel label="Volumetric Weight">
+                <ErpNavInput
+                  order={AWB_NAV.VOL_WEIGHT}
+                  className={inputClass}
+                  value={form.volWeight}
+                  onValueChange={(v) => setForm((f) => ({ ...f, volWeight: v }))}
+                />
+              </FieldWrapper>
+              <FieldWrapper borderLabel label="Charge Weight">
+                <ErpNavInput
+                  order={AWB_NAV.CHARGE_WEIGHT}
+                  className={inputClass}
+                  value={form.chargeWeight}
+                  onValueChange={(v) => setForm((f) => ({ ...f, chargeWeight: v }))}
+                />
+              </FieldWrapper>
             </div>
-
-            <TablePager
-              totalPages={totalPages}
-              currentPage={currentPage}
-              setPage={setPage}
-              startIdx={startIdx}
-              endIdx={endIdx}
-              total={filtered.length}
-            />
-          </Card>
-        </>
-      )}
-
-      <VendorOtpDialog
-        open={vendorOtpOpen}
-        busy={vendorBookingBusy}
-        error={vendorOtpError}
-        shipperMobile={vendorOtpMobile}
-        sandboxOtp={vendorSandboxOtp}
-        onVerify={(otp) => void runVendorOtpVerify(otp)}
-        onResend={() => void runVendorRetry()}
-        onCancel={() => {
-          if (!vendorBookingBusy) {
-            setVendorOtpOpen(false);
-            setVendorSandboxOtp(null);
-          }
-        }}
-      />
-
-      <AlertDialog
-        open={weightErrorModal.open}
-        onOpenChange={(open) => {
-          if (!open) setWeightErrorModal({ open: false, message: "" });
-        }}
-      >
-        <AlertDialogContent className="max-w-md p-6">
-          <AlertDialogHeader className="items-center text-center">
-            <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400">
-              <AlertTriangle className="h-8 w-8" aria-hidden />
-            </div>
-            <AlertDialogTitle className="text-center text-lg font-semibold text-foreground">
-              Weight Out of Range
-            </AlertDialogTitle>
-            <AlertDialogDescription className="mt-2 text-center text-sm font-medium text-destructive">
-              {weightErrorModal.message}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="mt-4 sm:justify-center">
-            <AlertDialogAction
-              onClick={() => setWeightErrorModal({ open: false, message: "" })}
-              className="w-28 bg-primary text-primary-foreground hover:bg-primary/90"
-            >
-              OK
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
-        open={proformaImportErrors.length > 0}
-        onOpenChange={(open) => {
-          if (!open) setProformaImportErrors([]);
-        }}
-      >
-        <AlertDialogContent className="max-w-2xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Proforma import</AlertDialogTitle>
-            <AlertDialogDescription>Fix these rows and upload the file again.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="max-h-72 overflow-auto rounded border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left">
-                  <th className="px-2 py-1">Row #</th>
-                  <th className="px-2 py-1">Column</th>
-                  <th className="px-2 py-1">Value</th>
-                  <th className="px-2 py-1">Message</th>
-                </tr>
-              </thead>
-              <tbody>
-                {proformaImportErrors.map((error, index) => (
-                  <tr key={`${error.row}-${error.column}-${index}`} className="border-b">
-                    <td className="px-2 py-1">{error.row}</td>
-                    <td className="px-2 py-1">{error.column}</td>
-                    <td className="px-2 py-1">{error.value}</td>
-                    <td className="px-2 py-1">{error.message}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              onClick={() => {
-                const blob = new Blob([proformaErrorReportCsv(proformaImportErrors)], {
-                  type: "text/csv;charset=utf-8",
-                });
-                const link = document.createElement("a");
-                link.href = URL.createObjectURL(blob);
-                link.download = "proforma-import-errors.csv";
-                link.click();
-                URL.revokeObjectURL(link.href);
-              }}
-            >
-              Download error report
-            </AlertDialogCancel>
-            <AlertDialogAction onClick={() => setProformaImportErrors([])}>OK</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
-        open={proformaPreview != null}
-        onOpenChange={(open) => {
-          if (!open) setProformaPreview(null);
-        }}
-      >
-        <AlertDialogContent className="max-w-lg">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm proforma import</AlertDialogTitle>
-            <AlertDialogDescription className="whitespace-pre-wrap text-left">
-              {proformaPreview?.warnings.join("\n")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <p className="text-sm">
-            {proformaPreview?.lines.length ?? 0} rows are ready. Amount{" "}
-            {(proformaPreview?.lines ?? [])
-              .reduce((sum, line) => sum + (Number.parseFloat(line.amount) || 0), 0)
-              .toFixed(2)}
-            .
-          </p>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (!proformaPreview) return;
-                const lines = proformaPreview.lines;
-                setProformaPreview(null);
-                placeImportedProforma(lines);
-              }}
-            >
-              Confirm
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
-        open={proformaImportPending != null}
-        onOpenChange={(open) => {
-          if (!open) setProformaImportPending(null);
-        }}
-      >
-        <AlertDialogContent className="max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Proforma lines already exist</AlertDialogTitle>
-            <AlertDialogDescription>
-              Append the imported rows to the grid, or replace the rows that are already there.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (proformaImportPending) applyImportedProforma("append", proformaImportPending);
-              }}
-            >
-              Append
-            </AlertDialogAction>
-            <AlertDialogAction
-              onClick={() => {
-                if (proformaImportPending) applyImportedProforma("replace", proformaImportPending);
-              }}
-            >
-              Replace
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
-        open={vendorChargePrereqErrors != null}
-        onOpenChange={(open) => {
-          if (!open) setVendorChargePrereqErrors(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-600">
-              <AlertTriangle className="h-8 w-8" aria-hidden />
-            </div>
-            <AlertDialogTitle className="sr-only">Vendor charge validation</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <ul className="list-disc space-y-1 pl-5 text-left text-sm text-foreground">
-                {vendorChargePrereqErrors?.map((msg) => (
-                  <li key={msg}>{msg}</li>
-                ))}
-              </ul>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setVendorChargePrereqErrors(null)}>OK</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={leavePromptOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>You have an unfinished AWB entry.</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to leave? Any unsaved changes will be discarded.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
-            <Button type="button" variant="outline" onClick={() => void finishLeavePrompt("continue")}>
-              Continue Editing
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => void finishLeavePrompt("discard")}
-            >
-              Discard Changes
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{authed ? "Cancel shipment?" : "Delete AWB entry?"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {authed
-                ? `This will cancel AWB ${deleteTarget?.awbNo}. Cancelled shipments cannot be edited.`
-                : `This will permanently remove AWB ${deleteTarget?.awbNo}. This action cannot be undone.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Close</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {authed ? "Cancel Shipment" : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
-        open={!!cancelShipmentTarget}
-        onOpenChange={(o) => !o && setCancelShipmentTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Cancel shipment?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will cancel AWB {cancelShipmentTarget?.awbNo}. Cancelled shipments cannot be
-              edited.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Close</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmCancelShipment}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Cancel Shipment
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-}
-
-function FormSection({
-  title,
-  children,
-  className,
-}: {
-  title: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "relative min-w-0 rounded border border-border bg-card p-2.5 pt-5 shadow-none",
-        className,
-      )}
-    >
-      {/* Centered on the top border — do not use nested <fieldset>/<legend> (breaks inside the page fieldset). */}
-      <span className="absolute left-2.5 top-1 z-20 inline-flex h-6 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-sidebar px-3 text-sm font-semibold leading-none text-sidebar-foreground">
-        {title}
-      </span>
-      {children}
-    </div>
-  );
-}
-
-function PartySection({
-  title,
-  party,
-  onChange,
-  originLookup,
-  originRequired,
-  companyRequired = true,
-  addressRequired = false,
-  phoneRequired = false,
-  pincodeCountryCode = "IN",
-  invalidNavOrders,
-  fieldError,
-  onValidationError,
-}: {
-  title: string;
-  party: PartyDetails;
-  onChange: (patch: Partial<PartyDetails>) => void;
-  originLookup: LookupKey;
-  originRequired?: boolean;
-  companyRequired?: boolean;
-  addressRequired?: boolean;
-  phoneRequired?: boolean;
-  pincodeCountryCode?: string;
-  invalidNavOrders?: Set<number>;
-  fieldError?: (order: number) => string | undefined;
-  onValidationError?: (message: string) => void;
-}) {
-  const isConsignee = title.includes("Consignee");
-  const originLabel = isConsignee ? "Destination" : "Origin";
-  const nav = isConsignee
-    ? {
-      origin: AWB_NAV.CONSIGNEE_DESTINATION,
-      company: AWB_NAV.CONSIGNEE_COMPANY,
-      contact: AWB_NAV.CONSIGNEE_CONTACT,
-      address1: AWB_NAV.CONSIGNEE_ADDRESS1,
-      address2: AWB_NAV.CONSIGNEE_ADDRESS2,
-      pincode: AWB_NAV.CONSIGNEE_PINCODE,
-      city: AWB_NAV.CONSIGNEE_CITY,
-      state: AWB_NAV.CONSIGNEE_STATE,
-      telephone: AWB_NAV.CONSIGNEE_TELEPHONE,
-      mobile: AWB_NAV.CONSIGNEE_MOBILE,
-      email: AWB_NAV.CONSIGNEE_EMAIL,
-      country: AWB_NAV.CONSIGNEE_COUNTRY,
-      iec: AWB_NAV.CONSIGNEE_IEC,
-      docType: AWB_NAV.CONSIGNEE_DOC_TYPE,
-      docNo: AWB_NAV.CONSIGNEE_DOC_NO,
-    }
-    : {
-      origin: AWB_NAV.SHIPPER_ORIGIN,
-      company: AWB_NAV.SHIPPER_COMPANY,
-      contact: AWB_NAV.SHIPPER_CONTACT,
-      address1: AWB_NAV.SHIPPER_ADDRESS1,
-      address2: AWB_NAV.SHIPPER_ADDRESS2,
-      pincode: AWB_NAV.SHIPPER_PINCODE,
-      city: AWB_NAV.SHIPPER_CITY,
-      state: AWB_NAV.SHIPPER_STATE,
-      telephone: AWB_NAV.SHIPPER_TELEPHONE,
-      mobile: AWB_NAV.SHIPPER_MOBILE,
-      email: AWB_NAV.SHIPPER_EMAIL,
-      country: AWB_NAV.SHIPPER_COUNTRY,
-      iec: AWB_NAV.SHIPPER_IEC,
-      docType: AWB_NAV.SHIPPER_DOC_TYPE,
-      docNo: AWB_NAV.SHIPPER_DOC_NO,
-    };
-  const onCommit = useErpNavCommit();
-  const onPincodeCommit = useErpNavCommit(nav.pincode);
-  const inputClass = "h-9 px-2 text-[13px]";
-  const destinationCountrySeq = useRef(0);
-  const applyOriginCountry = (destinationId: string | undefined) => {
-    if (!destinationId) return;
-    const seq = ++destinationCountrySeq.current;
-    void destinationCountryName(destinationId).then((country) => {
-      if (seq !== destinationCountrySeq.current || !country) return;
-      onChange({ country });
-    });
-  };
-
-  return (
-    <FormSection title={title}>
-      <div className="grid grid-cols-1 content-start gap-1.5">
-        <FieldWrapper
-          borderLabel
-          lookupSplit
-          label={originLabel}
-          required={originRequired}
-          invalid={invalidNavOrders?.has(nav.origin)}
-          error={fieldError?.(nav.origin)}
-        >
-          <LookupPairInput
-            lookup={originLookup}
-            value={party.origin}
-            onChange={(v) => onChange({ origin: v })}
-            onSelect={(v) => applyOriginCountry(v.id)}
-            navOrder={nav.origin}
-          />
-        </FieldWrapper>
-        <FieldWrapper
-          borderLabel
-          lookupSplit
-          label="Company Name"
-          required={companyRequired}
-          invalid={invalidNavOrders?.has(nav.company)}
-          error={fieldError?.(nav.company)}
-        >
-          <PartyContactLookup
-            role={isConsignee ? "consignee" : "shipper"}
-            value={party.companyName}
-            onCompanyChange={(v) => onChange({ companyName: { ...v, name: clipText(v.name, 100) } })}
-            compact
-            splitCode
-            manualSearch
-            emptySearchMessage="Please enter a company name."
-            noResultsMessage={AWB_LOOKUP_NO_RESULTS}
-            navOrder={nav.company}
-            onCommit={onCommit}
-            onSelectContact={(c) => {
-              const origin =
-                c.origin.code || c.origin.name
-                  ? { id: c.origin.id, code: c.origin.code, name: c.origin.name }
-                  : party.origin;
-              onChange({
-                companyName: { id: c.id, code: c.code, name: c.name },
-                contactName: c.contactName || c.name,
-                address1: c.address1,
-                address2: c.address2,
-                pincode: c.pincode,
-                city: c.city,
-                state: c.state,
-                telephone: c.telephone,
-                mobileNo: c.mobileNo,
-                email: c.email,
-                documentType: c.documentType,
-                documentNo: c.documentNo,
-                iecNo: c.iecNo,
-                origin,
-              });
-              applyOriginCountry(origin.id);
-            }}
-          />
-        </FieldWrapper>
-        <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Contact Name">
-            <ErpNavInput
-              order={nav.contact}
-              className={inputClass}
-              value={party.contactName}
-              maxLength={100}
-              onValueChange={(v) => onChange({ contactName: clipText(v, 100) })}
-            />
-          </FieldWrapper>
-          <FieldWrapper borderLabel label="Address 1" required={addressRequired} error={fieldError?.(nav.address1)}>
-            <ErpNavInput
-              order={nav.address1}
-              className={inputClass}
-              value={party.address1}
-              maxLength={100}
-              onValueChange={(v) => onChange({ address1: clipText(v, 100) })}
-            />
-          </FieldWrapper>
-        </div>
-        <FieldWrapper borderLabel label="Address 2">
-          <ErpNavInput
-            order={nav.address2}
-            className={inputClass}
-            value={party.address2}
-            maxLength={100}
-            onValueChange={(v) => onChange({ address2: clipText(v, 100) })}
-          />
-        </FieldWrapper>
-        <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Pincode" required={addressRequired} error={fieldError?.(nav.pincode)}>
-            <PincodeAutocomplete
-              navOrder={nav.pincode}
-              className={inputClass}
-              placeholder=""
-              value={party.pincode}
-              countryCode={pincodeCountryCode}
-              onValueChange={(v) => onChange({ pincode: v })}
-              onSelect={(item) =>
-                onChange({
-                  pincode: item.pincode,
-                  city: item.city,
-                  state: item.state,
-                })
-              }
-              onCommit={onPincodeCommit}
-            />
-          </FieldWrapper>
-          <FieldWrapper borderLabel label="City" required={addressRequired} error={fieldError?.(nav.city)}>
-            <ErpNavInput
-              order={nav.city}
-              className={inputClass}
-              value={party.city}
-              maxLength={50}
-              onValueChange={(v) => onChange({ city: clipText(v, 50) })}
-            />
-          </FieldWrapper>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="State" required={addressRequired} error={fieldError?.(nav.state)}>
-            <ErpNavInput
-              order={nav.state}
-              className={inputClass}
-              value={party.state}
-              maxLength={50}
-              onValueChange={(v) => onChange({ state: clipText(v, 50) })}
-            />
-          </FieldWrapper>
-          <FieldWrapper borderLabel label="Telephone">
-            <ErpNavInput
-              order={nav.telephone}
-              className={inputClass}
-              value={party.telephone}
-              maxLength={15}
-              onValueChange={(v) => onChange({ telephone: clipText(v, 15) })}
-            />
-          </FieldWrapper>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Mobile No." required={phoneRequired} error={fieldError?.(nav.mobile)}>
-            <ErpNavInput
-              order={nav.mobile}
-              className={inputClass}
-              value={party.mobileNo}
-              maxLength={15}
-              onValueChange={(v) => onChange({ mobileNo: clipText(v, 15) })}
-            />
-          </FieldWrapper>
-          <FieldWrapper borderLabel label="E-Mail" error={fieldError?.(nav.email)}>
-            <ErpNavInput
-              order={nav.email}
-              className={inputClass}
-              value={party.email}
-              maxLength={100}
-              onValueChange={(v) => onChange({ email: clipText(v, 100) })}
-            />
-          </FieldWrapper>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Country" required={phoneRequired}>
-            <ErpNavInput
-              order={nav.country}
-              className={`cursor-default bg-muted/40 ${inputClass}`}
-              value={party.country}
-              readOnly
-              onValueChange={(v) => onChange({ country: v })}
-            />
-          </FieldWrapper>
-          <FieldWrapper borderLabel label="IEC No" error={fieldError?.(nav.iec)}>
-            <ErpNavInput
-              order={nav.iec}
-              className={inputClass}
-              value={party.iecNo}
-              maxLength={10}
-              onValueChange={(v) => onChange({ iecNo: clipText(v.toUpperCase(), 10) })}
-              onBlur={() => {
-                if (party.iecNo && party.iecNo.trim()) {
-                  const res = validateDocumentId("IEC", party.iecNo, `${isConsignee ? "Consignee" : "Shipper"} IEC`);
-                  if (!res.valid && res.message) {
-                    toast.error(res.message);
-                  }
-                }
-              }}
-            />
-          </FieldWrapper>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Document Type">
-            <ErpNavSelect
-              order={nav.docType}
-              value={party.documentType || undefined}
-              onValueChange={(v) => onChange({ documentType: v })}
-              items={DOCUMENT_TYPES}
-              nextOrder={nav.docNo}
-              triggerClassName={inputClass}
-            />
-          </FieldWrapper>
-          <FieldWrapper borderLabel label="Document No.">
-            <ErpNavInput
-              order={nav.docNo}
-              className={inputClass}
-              value={party.documentNo}
-              onValueChange={(v) => onChange({ documentNo: v.toUpperCase() })}
-              onBlur={() => {
-                if (party.documentType && party.documentNo && party.documentNo.trim()) {
-                  const check = validateDocumentNoFormat(party.documentType, party.documentNo);
-                  if (!check.valid && check.message) {
-                    if (onValidationError) {
-                      onValidationError(check.message);
-                    } else {
-                      toast.error(check.message);
-                    }
-                  } else {
-                    const res = validateDocumentId(party.documentType, party.documentNo, `${isConsignee ? "Consignee" : "Shipper"} ${party.documentType}`);
-                    if (!res.valid && res.message) {
-                      toast.error(res.message);
-                    }
-                  }
-                }
-              }}
-            />
-          </FieldWrapper>
-        </div>
-      </div>
-    </FormSection>
-  );
-}
-
-function ServicesSection({
-  form,
-  setForm,
-  airlineRequired,
-  invalidNavOrders,
-  fieldError,
-}: {
-  form: AwbFullForm;
-  setForm: React.Dispatch<React.SetStateAction<AwbFullForm>>;
-  airlineRequired?: boolean;
-  invalidNavOrders?: Set<number>;
-  fieldError?: (order: number) => string | undefined;
-}) {
-  const onCommit = useErpNavCommit();
-  const onVendorCommit = useErpNavCommit(AWB_NAV.VENDOR);
-  const hasVendor = Boolean(
-    form.vendor.id || form.vendor.code.trim() || form.vendor.name.trim(),
-  );
-  const inputClass = "h-9 px-2 text-[13px]";
-  const skip = erpNavSkip();
-
-  return (
-    <FormSection title="Services Details">
-      <div className="grid grid-cols-1 content-start gap-1.5">
-        <FieldWrapper
-          borderLabel
-          lookupSplit
-          label="Product"
-          required
-          invalid={invalidNavOrders?.has(AWB_NAV.PRODUCT)}
-          error={fieldError?.(AWB_NAV.PRODUCT)}
-        >
-          <LookupPairInput
-            lookup="product"
-            value={form.product}
-            onChange={(v) => setForm((f) => ({ ...f, product: v }))}
-            navOrder={AWB_NAV.PRODUCT}
-          />
-        </FieldWrapper>
-        <FieldWrapper
-          borderLabel
-          lookupSplit
-          label="Vendor"
-          required
-          invalid={invalidNavOrders?.has(AWB_NAV.VENDOR)}
-          error={fieldError?.(AWB_NAV.VENDOR)}
-        >
-          <LookupPairInput
-            lookup="vendor"
-            value={form.vendor}
-            onChange={(v) =>
-              setForm((f) => ({
-                ...f,
-                vendor: v,
-                service: emptyPair(),
-              }))
-            }
-            navOrder={AWB_NAV.VENDOR}
-            onCommit={onVendorCommit}
-          />
-        </FieldWrapper>
-        <FieldWrapper borderLabel lookupSplit label="Airline" required={airlineRequired}>
-          <LookupPairInput
-            lookup="airline"
-            value={{ code: form.airline, name: form.airline }}
-            onChange={(v) =>
-              setForm((f) => ({
-                ...f,
-                airline: (v.name || v.code || "").trim(),
-              }))
-            }
-          />
-        </FieldWrapper>
-        <div className="min-w-0">
-          <FieldWrapper
-            borderLabel
-            lookupSplit
-            label="Service"
-            required
-            invalid={invalidNavOrders?.has(AWB_NAV.SERVICE)}
-            error={fieldError?.(AWB_NAV.SERVICE)}
-          >
-            <VendorServiceLookup
-              vendor={form.vendor}
-              value={form.service}
-              onChange={(v) => setForm((f) => ({ ...f, service: v }))}
-              productId={form.product.id}
-              destinationId={form.consignee.origin.id}
-              compact
-              splitCode
-              manualSearch
-              noResultsMessage={AWB_LOOKUP_NO_RESULTS}
-              navOrder={AWB_NAV.SERVICE}
-              onCommit={onCommit}
-            />
-          </FieldWrapper>
-          {hasVendor ? null : (
-            <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">
-              Select a Vendor to load mapped services.
-            </p>
-          )}
-        </div>
-        <FieldWrapper borderLabel label="Shipment Value">
-          <div className="flex w-full min-w-0 items-stretch">
-            <ErpNavInput
-              order={AWB_NAV.SHIPMENT_VALUE}
-              className={`min-w-0 flex-1 ${inputClass}`}
-              value={form.shipmentValue}
-              onValueChange={(v) => setForm((f) => ({ ...f, shipmentValue: decimalNumber(v) }))}
-              onBlur={() => setForm((f) => ({ ...f, shipmentValue: formatMoney2(f.shipmentValue) }))}
-            />
-            <Select
-              value={form.shipmentCurrency}
-              onValueChange={(v) => setForm((f) => ({ ...f, shipmentCurrency: v }))}
-            >
-              <SelectTrigger
-                className="h-8 w-16 shrink-0 rounded-none border-0 border-l border-input px-1 text-[13px] shadow-none focus:ring-0"
-                {...skip}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CURRENCIES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </FieldWrapper>
-        <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Pieces">
-            <div className="flex w-full min-w-0 items-stretch">
-              <ErpNavInput
-                order={AWB_NAV.PIECES}
-                className={`min-w-0 flex-1 ${inputClass}`}
-                value={form.pieces}
-                onValueChange={(v) => setForm((f) => ({ ...f, pieces: v }))}
-              />
-              <Select
-                value={form.piecesUnit}
-                onValueChange={(v) => setForm((f) => ({ ...f, piecesUnit: v }))}
-              >
-                <SelectTrigger
-                  className="h-8 w-16 shrink-0 rounded-none border-0 border-l border-input px-1 text-[13px] shadow-none focus:ring-0"
-                  {...skip}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PIECE_UNITS.map((u) => (
-                    <SelectItem key={u} value={u}>
-                      {u}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </FieldWrapper>
-          <FieldWrapper borderLabel label="Actual Weight">
-            <div className="flex w-full min-w-0 items-stretch">
-              <ErpNavInput
-                order={AWB_NAV.ACTUAL_WEIGHT}
-                className={`min-w-0 flex-1 ${inputClass}`}
-                value={form.actualWeight}
-                onValueChange={(v) => setForm((f) => ({ ...f, actualWeight: v }))}
-              />
-              <Select
-                value={form.weightUnit}
-                onValueChange={(v) => setForm((f) => ({ ...f, weightUnit: v }))}
-              >
-                <SelectTrigger
-                  className="h-8 w-14 shrink-0 rounded-none border-0 border-l border-input px-1 text-[13px] shadow-none focus:ring-0"
-                  {...skip}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WEIGHT_UNITS.map((u) => (
-                    <SelectItem key={u} value={u}>
-                      {u}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </FieldWrapper>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <FieldWrapper borderLabel label="Volumetric Weight">
-            <ErpNavInput
-              order={AWB_NAV.VOL_WEIGHT}
-              className={inputClass}
-              value={form.volWeight}
-              onValueChange={(v) => setForm((f) => ({ ...f, volWeight: v }))}
-            />
-          </FieldWrapper>
-          <FieldWrapper borderLabel label="Charge Weight">
-            <ErpNavInput
-              order={AWB_NAV.CHARGE_WEIGHT}
-              className={inputClass}
-              value={form.chargeWeight}
-              onValueChange={(v) => setForm((f) => ({ ...f, chargeWeight: v }))}
-            />
-          </FieldWrapper>
-        </div>
-        <div className="flex flex-nowrap items-center gap-2 pt-0.5">
-          {(
-            [
-              ["commercial", "Commercial", AWB_NAV.COMMERCIAL],
-              ["oda", "ODA", AWB_NAV.ODA],
-              ["medicalCharges", "Medical Charges", AWB_NAV.MEDICAL],
-            ] as const
-          ).map(([key, label, order]) => {
-            const checked = form[key];
-            return (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={checked}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded border px-2.5 text-[12px] font-medium",
-                  checked
-                    ? "border-foreground bg-foreground text-background"
-                    : "border-input bg-background text-foreground hover:bg-muted/40",
-                )}
-                onClick={() => {
-                  if (key === "commercial") {
-                    const nextCommercial = !form.commercial;
-                    setForm((f) => {
-                      let exportReason = f.proforma.exportReason;
-                      let csbType = f.proforma.csbType;
-                      if (nextCommercial) {
-                        csbType = "CSB 5";
-                        if (exportReason.toUpperCase().includes("GIFT") || !exportReason) {
-                          exportReason = "SALE";
-                        }
+            <div className="flex flex-nowrap items-center gap-2 pt-0.5">
+              {(
+                [
+                  ["commercial", "Commercial", AWB_NAV.COMMERCIAL],
+                  ["oda", "ODA", AWB_NAV.ODA],
+                  ["medicalCharges", "Medical Charges", AWB_NAV.MEDICAL],
+                ] as const
+              ).map(([key, label, order]) => {
+                const checked = form[key];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={checked}
+                    className={cn(
+                      "inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded border px-2.5 text-[12px] font-medium",
+                      checked
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-input bg-background text-foreground hover:bg-muted/40",
+                    )}
+                    onClick={() => {
+                      if (key === "commercial") {
+                        const nextCommercial = !form.commercial;
+                        setForm((f) => {
+                          let exportReason = f.proforma.exportReason;
+                          let csbType = f.proforma.csbType;
+                          if (nextCommercial) {
+                            csbType = "CSB 5";
+                            if (exportReason.toUpperCase().includes("GIFT") || !exportReason) {
+                              exportReason = "SALE";
+                            }
+                          } else {
+                            // When Commercial is unticked, do not auto-fill CSB 4 or gift defaults.
+                            // Leave blank and require operator to choose.
+                            csbType = "";
+                            exportReason = "";
+                          }
+                          return {
+                            ...f,
+                            commercial: nextCommercial,
+                            proforma: {
+                              ...f.proforma,
+                              csbType,
+                              exportReason,
+                            },
+                          };
+                        });
                       } else {
-                        // When Commercial is unticked, do not auto-fill CSB 4 or gift defaults.
-                        // Leave blank and require operator to choose.
-                        csbType = "";
-                        exportReason = "";
+                        setForm((f) => ({ ...f, [key]: !f[key] }));
                       }
-                      return {
-                        ...f,
-                        commercial: nextCommercial,
-                        proforma: {
-                          ...f.proforma,
-                          csbType,
-                          exportReason,
-                        },
-                      };
-                    });
-                  } else {
-                    setForm((f) => ({ ...f, [key]: !f[key] }));
-                  }
-                }}
-                {...erpNavOrder(order)}
+                    }}
+                    {...erpNavOrder(order)}
+                  >
+                    <span
+                      className={cn(
+                        "grid h-3.5 w-3.5 place-content-center rounded-sm border",
+                        checked ? "border-background bg-background text-foreground" : "border-input bg-background",
+                      )}
+                    >
+                      {checked ? <Check className="h-3 w-3" /> : null}
+                    </span>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </FormSection>
+      );
+    }
+
+    function ShipmentDetailsFields({
+      form,
+      setForm,
+      paymentTypeReadOnly,
+      clientLoading,
+      isReadOnly,
+      executiveBranchId,
+      executiveLocation,
+      fieldError,
+    }: {
+      form: AwbFullForm;
+      setForm: React.Dispatch<React.SetStateAction<AwbFullForm>>;
+      paymentTypeReadOnly: boolean;
+      clientLoading: boolean;
+      isReadOnly: boolean;
+      executiveBranchId?: string | null;
+      executiveLocation?: string | null;
+      fieldError?: (order: number) => string | undefined;
+    }) {
+      const { onValueChange: onPaymentTypeChange, contentProps: paymentTypeSelectContentProps, itemProps: paymentTypeSelectItemProps } =
+        useErpSelectNav((v: string) => setForm((f) => ({ ...f, paymentType: v })), {
+          fromOrder: AWB_NAV.PAYMENT_TYPE,
+        });
+      const inputClass = "h-9 px-2 text-[13px]";
+
+      return (
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
+          <div className="min-w-0">
+            <FieldWrapper borderLabel label="Payment Type" error={fieldError?.(AWB_NAV.PAYMENT_TYPE)}>
+              <Select
+                value={form.paymentType || undefined}
+                onValueChange={onPaymentTypeChange}
+                disabled={isReadOnly || paymentTypeReadOnly || clientLoading}
               >
-                <span
-                  className={cn(
-                    "grid h-3.5 w-3.5 place-content-center rounded-sm border",
-                    checked ? "border-background bg-background text-foreground" : "border-input bg-background",
-                  )}
+                <SelectTrigger
+                  {...erpNavOrder(AWB_NAV.PAYMENT_TYPE)}
+                  className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
                 >
-                  {checked ? <Check className="h-3 w-3" /> : null}
-                </span>
-                {label}
-              </button>
-            );
-          })}
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent {...paymentTypeSelectContentProps}>
+                  {PAYMENT_TYPES.map((p) => (
+                    <SelectItem key={p} value={p} {...paymentTypeSelectItemProps}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+            {paymentTypeReadOnly ? (
+              <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">
+                Locked to Client Master. Enable “Allow Payment Type Override” in Form Setup to edit.
+              </p>
+            ) : null}
+          </div>
+          <FieldWrapper borderLabel label="Content" error={fieldError?.(AWB_NAV.CONTENT)}>
+            <ErpNavInput
+              order={AWB_NAV.CONTENT}
+              className={inputClass}
+              value={form.content}
+              onValueChange={(v) => setForm((f) => ({ ...f, content: v }))}
+            />
+          </FieldWrapper>
+          <FieldWrapper borderLabel label="Instruction" error={fieldError?.(AWB_NAV.INSTRUCTION)}>
+            <ErpNavInput
+              order={AWB_NAV.INSTRUCTION}
+              className={inputClass}
+              value={form.instruction}
+              onValueChange={(v) => setForm((f) => ({ ...f, instruction: v }))}
+            />
+          </FieldWrapper>
+          <FieldWrapper borderLabel lookupSplit label="Field Executive" error={fieldError?.(AWB_NAV.FIELD_EXECUTIVE)}>
+            <LookupPairInput
+              lookup="fieldExecutive"
+              value={form.fieldExecutive}
+              onChange={(v) => setForm((f) => ({ ...f, fieldExecutive: v }))}
+              navOrder={AWB_NAV.FIELD_EXECUTIVE}
+              branchId={executiveBranchId}
+              locationCode={executiveLocation}
+            />
+          </FieldWrapper>
+          <FieldWrapper borderLabel label="Cash Receipt No." error={fieldError?.(AWB_NAV.CASH_RECEIPT_NO)}>
+            <ErpNavInput
+              order={AWB_NAV.CASH_RECEIPT_NO}
+              className={inputClass}
+              value={form.cashReceiptNo}
+              onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptNo: v }))}
+            />
+          </FieldWrapper>
+          <FieldWrapper borderLabel label="Amount Received" error={fieldError?.(AWB_NAV.AMOUNT_RECEIVED)}>
+            <ErpNavInput
+              order={AWB_NAV.AMOUNT_RECEIVED}
+              className={inputClass}
+              value={form.amountReceived}
+              onValueChange={(v) => setForm((f) => ({ ...f, amountReceived: v }))}
+            />
+          </FieldWrapper>
+          <FieldWrapper borderLabel label="Balance Amount" error={fieldError?.(AWB_NAV.BALANCE_AMOUNT)}>
+            <ErpNavInput
+              order={AWB_NAV.BALANCE_AMOUNT}
+              readOnly
+              className={inputClass}
+              value={form.balanceAmount}
+              onValueChange={() => undefined}
+            />
+          </FieldWrapper>
+          <FieldWrapper borderLabel label="Cash Receipt Date" error={fieldError?.(AWB_NAV.CASH_RECEIPT_DATE)}>
+            <ErpNavDateInput
+              order={AWB_NAV.CASH_RECEIPT_DATE}
+              className={inputClass}
+              value={form.cashReceiptDate}
+              onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptDate: v }))}
+            />
+          </FieldWrapper>
+          <FieldWrapper borderLabel label="Expected Delivery Date" error={fieldError?.(AWB_NAV.EXPECTED_DELIVERY)}>
+            <ErpNavDateInput
+              order={AWB_NAV.EXPECTED_DELIVERY}
+              className={inputClass}
+              value={form.expectedDeliveryDate}
+              onValueChange={(v) => setForm((f) => ({ ...f, expectedDeliveryDate: v }))}
+            />
+          </FieldWrapper>
         </div>
-      </div>
-    </FormSection>
-  );
-}
+      );
+    }
 
-function ShipmentDetailsFields({
-  form,
-  setForm,
-  paymentTypeReadOnly,
-  clientLoading,
-  isReadOnly,
-  executiveBranchId,
-  executiveLocation,
-  fieldError,
-}: {
-  form: AwbFullForm;
-  setForm: React.Dispatch<React.SetStateAction<AwbFullForm>>;
-  paymentTypeReadOnly: boolean;
-  clientLoading: boolean;
-  isReadOnly: boolean;
-  executiveBranchId?: string | null;
-  executiveLocation?: string | null;
-  fieldError?: (order: number) => string | undefined;
-}) {
-  const { onValueChange: onPaymentTypeChange, contentProps: paymentTypeSelectContentProps, itemProps: paymentTypeSelectItemProps } =
-    useErpSelectNav((v: string) => setForm((f) => ({ ...f, paymentType: v })), {
-      fromOrder: AWB_NAV.PAYMENT_TYPE,
-    });
-  const inputClass = "h-9 px-2 text-[13px]";
-
-  return (
-    <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4 [&_label]:whitespace-nowrap [&_label]:text-[11px]">
-      <div className="min-w-0">
-        <FieldWrapper borderLabel label="Payment Type">
-          <Select
-            value={form.paymentType || undefined}
-            onValueChange={onPaymentTypeChange}
-            disabled={isReadOnly || paymentTypeReadOnly || clientLoading}
-          >
-            <SelectTrigger
-              {...erpNavOrder(AWB_NAV.PAYMENT_TYPE)}
-              className="h-8 rounded-none border-0 bg-transparent px-1.5 text-[13px] shadow-none focus:ring-0"
+    function AwbFormFooter({
+      showPrevious = true,
+      onPrevious,
+      onSave,
+      onNext,
+      onCancel,
+      readOnly = false,
+      saving = false,
+      saveLabel = "Save",
+    }: {
+      showPrevious?: boolean;
+      onPrevious?: () => void;
+      onSave: () => void;
+      onNext?: () => void;
+      onCancel: () => void;
+      readOnly?: boolean;
+      saving?: boolean;
+      saveLabel?: "Save" | "Update";
+    }) {
+      const showSave = saveLabel === "Update" || !readOnly;
+      return (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            {showPrevious && onPrevious ? (
+              <Button className="h-11 min-w-32 rounded-full bg-amber-600 px-8 text-sm text-white shadow-sm hover:bg-amber-700" onClick={onPrevious} disabled={saving}>
+                Previous
+              </Button>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {showSave ? (
+              <Button
+                onClick={onSave}
+                disabled={saving || readOnly}
+                title={readOnly ? "Unlock this AWB before saving it" : undefined}
+                className="h-11 min-w-32 rounded-full bg-emerald-600 px-8 text-sm text-white shadow-sm hover:bg-emerald-600/90"
+                {...erpNavOrder(AWB_NAV.FOOTER_SAVE)}
+              >
+                {saveLabel}
+              </Button>
+            ) : null}
+            {onNext ? (
+              <Button
+                className="h-11 min-w-32 rounded-full bg-sidebar px-8 text-sm text-sidebar-foreground shadow-sm hover:bg-sidebar/90 hover:text-sidebar-foreground"
+                onClick={onNext}
+                disabled={saving}
+                {...erpNavOrder(AWB_NAV.FOOTER_NEXT)}
+              >
+                Next
+              </Button>
+            ) : null}
+            <Button
+              variant="destructive"
+              className="h-11 min-w-32 rounded-full px-8 text-sm shadow-sm"
+              onClick={onCancel}
+              disabled={saving}
+              {...erpNavOrder(AWB_NAV.FOOTER_CLOSE)}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent {...paymentTypeSelectContentProps}>
-              {PAYMENT_TYPES.map((p) => (
-                <SelectItem key={p} value={p} {...paymentTypeSelectItemProps}>
-                  {p}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </FieldWrapper>
-        {paymentTypeReadOnly ? (
-          <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">
-            Locked to Client Master. Enable “Allow Payment Type Override” in Form Setup to edit.
-          </p>
-        ) : null}
-      </div>
-      <FieldWrapper borderLabel label="Content">
-        <ErpNavInput
-          order={AWB_NAV.CONTENT}
-          className={inputClass}
-          value={form.content}
-          onValueChange={(v) => setForm((f) => ({ ...f, content: v }))}
-        />
-      </FieldWrapper>
-      <FieldWrapper borderLabel label="Instruction">
-        <ErpNavInput
-          order={AWB_NAV.INSTRUCTION}
-          className={inputClass}
-          value={form.instruction}
-          onValueChange={(v) => setForm((f) => ({ ...f, instruction: v }))}
-        />
-      </FieldWrapper>
-      <FieldWrapper borderLabel lookupSplit label="Field Executive">
-        <LookupPairInput
-          lookup="fieldExecutive"
-          value={form.fieldExecutive}
-          onChange={(v) => setForm((f) => ({ ...f, fieldExecutive: v }))}
-          navOrder={AWB_NAV.FIELD_EXECUTIVE}
-          branchId={executiveBranchId}
-          locationCode={executiveLocation}
-        />
-      </FieldWrapper>
-      <FieldWrapper borderLabel label="Cash Receipt No." error={fieldError?.(AWB_NAV.CASH_RECEIPT_NO)}>
-        <ErpNavInput
-          order={AWB_NAV.CASH_RECEIPT_NO}
-          className={inputClass}
-          value={form.cashReceiptNo}
-          onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptNo: v }))}
-        />
-      </FieldWrapper>
-      <FieldWrapper borderLabel label="Amount Received" error={fieldError?.(AWB_NAV.AMOUNT_RECEIVED)}>
-        <ErpNavInput
-          order={AWB_NAV.AMOUNT_RECEIVED}
-          className={inputClass}
-          value={form.amountReceived}
-          onValueChange={(v) => setForm((f) => ({ ...f, amountReceived: decimalNumber(v) }))}
-          onBlur={() => setForm((f) => ({ ...f, amountReceived: formatMoney2(f.amountReceived) }))}
-        />
-      </FieldWrapper>
-      <FieldWrapper borderLabel label="Balance Amount">
-        <ErpNavInput
-          order={AWB_NAV.BALANCE_AMOUNT}
-          readOnly
-          className={inputClass}
-          value={form.balanceAmount}
-          onValueChange={() => undefined}
-        />
-      </FieldWrapper>
-      <FieldWrapper borderLabel label="Cash Receipt Date" error={fieldError?.(AWB_NAV.CASH_RECEIPT_DATE)}>
-        <ErpNavDateInput
-          order={AWB_NAV.CASH_RECEIPT_DATE}
-          className={inputClass}
-          value={form.cashReceiptDate}
-          onValueChange={(v) => setForm((f) => ({ ...f, cashReceiptDate: v }))}
-        />
-      </FieldWrapper>
-      <FieldWrapper borderLabel label="Expected Delivery Date" error={fieldError?.(AWB_NAV.EXPECTED_DELIVERY)}>
-        <ErpNavDateInput
-          order={AWB_NAV.EXPECTED_DELIVERY}
-          className={inputClass}
-          value={form.expectedDeliveryDate}
-          onValueChange={(v) => setForm((f) => ({ ...f, expectedDeliveryDate: v }))}
-        />
-      </FieldWrapper>
-    </div>
-  );
-}
+              Cancel
+            </Button>
+          </div>
+        </div>
+      );
+    }
 
-function AwbFormFooter({
-  showPrevious = true,
-  onPrevious,
-  onSave,
-  onNext,
-  onCancel,
-  readOnly = false,
-  saving = false,
-  saveLabel = "Save",
-}: {
-  showPrevious?: boolean;
-  onPrevious?: () => void;
-  onSave: () => void;
-  onNext?: () => void;
-  onCancel: () => void;
-  readOnly?: boolean;
-  saving?: boolean;
-  saveLabel?: "Save" | "Update";
-}) {
-  const showSave = saveLabel === "Update" || !readOnly;
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <div>
-        {showPrevious && onPrevious ? (
-          <Button className="h-11 min-w-32 rounded-full bg-amber-600 px-8 text-sm text-white shadow-sm hover:bg-amber-700" onClick={onPrevious} disabled={saving}>
-            Previous
-          </Button>
-        ) : null}
-      </div>
-      <div className="flex flex-wrap gap-3">
-        {showSave ? (
-          <Button
-            onClick={onSave}
-            disabled={saving || readOnly}
-            title={readOnly ? "Unlock this AWB before saving it" : undefined}
-            className="h-11 min-w-32 rounded-full bg-emerald-600 px-8 text-sm text-white shadow-sm hover:bg-emerald-600/90"
-            {...erpNavOrder(AWB_NAV.FOOTER_SAVE)}
-          >
-            {saveLabel}
-          </Button>
-        ) : null}
-        {onNext ? (
-          <Button
-            className="h-11 min-w-32 rounded-full bg-sidebar px-8 text-sm text-sidebar-foreground shadow-sm hover:bg-sidebar/90 hover:text-sidebar-foreground"
-            onClick={onNext}
-            disabled={saving}
-            {...erpNavOrder(AWB_NAV.FOOTER_NEXT)}
-          >
-            Next
-          </Button>
-        ) : null}
-        <Button
-          variant="destructive"
-          className="h-11 min-w-32 rounded-full px-8 text-sm shadow-sm"
-          onClick={onCancel}
-          disabled={saving}
-          {...erpNavOrder(AWB_NAV.FOOTER_CLOSE)}
+    function YesNoField({
+      label,
+      value,
+      onChange,
+      borderLabel,
+    }: {
+      label: string;
+      value: boolean;
+      onChange: (v: boolean) => void;
+      borderLabel?: boolean;
+    }) {
+      const toggle = (
+        <div
+          className={cn(
+            "flex w-full min-w-0 items-stretch overflow-hidden",
+            !borderLabel && "h-9 rounded-md border",
+          )}
         >
-          Cancel
-        </Button>
-      </div>
-    </div>
-  );
-}
+          <Button
+            type="button"
+            variant="ghost"
+            className={cn(
+              "h-8 flex-1 rounded-none px-2 text-[13px]",
+              !borderLabel && "h-9",
+              value
+                ? "bg-emerald-600 text-white hover:bg-emerald-600/90 hover:text-white"
+                : "text-muted-foreground hover:bg-muted/60",
+            )}
+            onClick={() => onChange(true)}
+          >
+            Yes
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className={cn(
+              "h-8 flex-1 rounded-none border-l px-2 text-[13px]",
+              !borderLabel && "h-9",
+              !value
+                ? "bg-emerald-600 text-white hover:bg-emerald-600/90 hover:text-white"
+                : "text-muted-foreground hover:bg-muted/60",
+            )}
+            onClick={() => onChange(false)}
+          >
+            No
+          </Button>
+        </div>
+      );
 
-function YesNoField({
-  label,
-  value,
-  onChange,
-  borderLabel,
-}: {
-  label: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-  borderLabel?: boolean;
-}) {
-  const toggle = (
-    <div
-      className={cn(
-        "flex w-full min-w-0 items-stretch overflow-hidden",
-        !borderLabel && "h-9 rounded-md border",
-      )}
-    >
-      <Button
-        type="button"
-        variant="ghost"
-        className={cn(
-          "h-8 flex-1 rounded-none px-2 text-[13px]",
-          !borderLabel && "h-9",
-          value
-            ? "bg-emerald-600 text-white hover:bg-emerald-600/90 hover:text-white"
-            : "text-muted-foreground hover:bg-muted/60",
-        )}
-        onClick={() => onChange(true)}
-      >
-        Yes
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        className={cn(
-          "h-8 flex-1 rounded-none border-l px-2 text-[13px]",
-          !borderLabel && "h-9",
-          !value
-            ? "bg-emerald-600 text-white hover:bg-emerald-600/90 hover:text-white"
-            : "text-muted-foreground hover:bg-muted/60",
-        )}
-        onClick={() => onChange(false)}
-      >
-        No
-      </Button>
-    </div>
-  );
+      if (borderLabel) {
+        return (
+          <FieldWrapper borderLabel label={label}>
+            {toggle}
+          </FieldWrapper>
+        );
+      }
 
-  if (borderLabel) {
-    return (
-      <FieldWrapper borderLabel label={label}>
-        {toggle}
-      </FieldWrapper>
-    );
-  }
+      return <FieldWrapper label={label}>{toggle}</FieldWrapper>;
+    }
 
-  return <FieldWrapper label={label}>{toggle}</FieldWrapper>;
-}
-
-function LookupPairInput({
-  value,
-  onChange,
-  lookup,
-  disabled,
-  navOrder,
-  onCommit: onCommitProp,
-  onSelect,
-  emptySearchMessage,
-  noResultsMessage = AWB_LOOKUP_NO_RESULTS,
-  minChars = 1,
-  displayVariant,
-  branchId,
-  locationCode,
-}: {
-  value: LookupPair;
-  onChange: (v: LookupPair) => void;
-  lookup: LookupKey;
-  disabled?: boolean;
-  navOrder?: number;
-  onCommit?: () => void;
-  onSelect?: (v: LookupPair) => void;
-  emptySearchMessage?: string;
-  noResultsMessage?: string;
-  minChars?: number;
-  displayVariant?: LookupDisplayVariant;
-  branchId?: string | null;
-  locationCode?: string | null;
-}) {
-  const defaultCommit = useErpNavCommit();
-  const onCommit = onCommitProp ?? defaultCommit;
-  return (
-    <SearchableLookupPair
-      value={value}
-      onChange={onChange}
-      onSelect={onSelect}
-      lookup={lookup}
-      disabled={disabled}
-      compact
-      splitCode
-      manualSearch
-      minChars={minChars}
-      branchId={branchId}
-      locationCode={locationCode}
-      navOrder={navOrder}
-      onCommit={onCommit}
-      emptySearchMessage={emptySearchMessage}
-      noResultsMessage={noResultsMessage}
-      displayVariant={displayVariant}
-      namePlaceholder=""
-      codePlaceholder=""
-      searchPlaceholder=""
-    />
-  );
-}
+    function LookupPairInput({
+      value,
+      onChange,
+      lookup,
+      disabled,
+      navOrder,
+      onCommit: onCommitProp,
+      onSelect,
+      emptySearchMessage,
+      noResultsMessage = AWB_LOOKUP_NO_RESULTS,
+      minChars = 1,
+      displayVariant,
+      branchId,
+      locationCode,
+    }: {
+      value: LookupPair;
+      onChange: (v: LookupPair) => void;
+      lookup: LookupKey;
+      disabled?: boolean;
+      navOrder?: number;
+      onCommit?: () => void;
+      onSelect?: (v: LookupPair) => void;
+      emptySearchMessage?: string;
+      noResultsMessage?: string;
+      minChars?: number;
+      displayVariant?: LookupDisplayVariant;
+      branchId?: string | null;
+      locationCode?: string | null;
+    }) {
+      const defaultCommit = useErpNavCommit();
+      const onCommit = onCommitProp ?? defaultCommit;
+      return (
+        <SearchableLookupPair
+          value={value}
+          onChange={onChange}
+          onSelect={onSelect}
+          lookup={lookup}
+          disabled={disabled}
+          compact
+          splitCode
+          manualSearch
+          minChars={minChars}
+          branchId={branchId}
+          locationCode={locationCode}
+          navOrder={navOrder}
+          onCommit={onCommit}
+          emptySearchMessage={emptySearchMessage}
+          noResultsMessage={noResultsMessage}
+          displayVariant={displayVariant}
+          namePlaceholder=""
+          codePlaceholder=""
+          searchPlaceholder=""
+        />
+      );
+    }
 

@@ -48,18 +48,27 @@ export async function cleanupReference(referenceNo: string) {
 
   if (rows && rows.length > 0) {
     for (const r of rows) {
-      await dbAdmin.from('proforma_items').delete().eq('shipment_id', r.id);
-      await dbAdmin.from('shipment_pieces').delete().eq('shipment_id', r.id);
-      await dbAdmin.from('shipment_charges').delete().eq('shipment_id', r.id);
-      await dbAdmin.from('shipment_documents').delete().eq('shipment_id', r.id);
-      await dbAdmin.from('shipment_events').delete().eq('shipment_id', r.id);
-      await dbAdmin.from('shipment_rating_audit').delete().eq('shipment_id', r.id);
-      await dbAdmin.from('shipments').delete().eq('id', r.id);
+      try { await dbAdmin.from('proforma_items').delete().eq('shipment_id', r.id); } catch {}
+      try { await dbAdmin.from('shipment_pieces').delete().eq('shipment_id', r.id); } catch {}
+      try { await dbAdmin.from('shipment_charges').delete().eq('shipment_id', r.id); } catch {}
+      try { await dbAdmin.from('shipment_documents').delete().eq('shipment_id', r.id); } catch {}
+      try { await dbAdmin.from('shipment_rating_audit').delete().eq('shipment_id', r.id); } catch {}
+      try {
+        await dbAdmin
+          .from('shipments')
+          .update({
+            deleted_at: new Date().toISOString(),
+            reference_no: `CLEANUP_${r.id.slice(0, 8)}_${Date.now()}`,
+          })
+          .eq('id', r.id);
+      } catch {}
     }
   }
 }
 
 export async function openAwbForm(page: Page, fresh = false) {
+  page.on('console', (msg) => console.log('PAGE LOG:', msg.type(), msg.text()));
+  page.on('pageerror', (err) => console.log('PAGE ERROR:', err.message, err.stack));
   await page.goto(fresh ? '/transaction/awb-entry?view=form&fresh=1' : '/transaction/awb-entry?view=form');
   await page.waitForLoadState('networkidle');
   await expect(page.locator('text=Karthik Test Admin')).toBeVisible({ timeout: 15000 });
@@ -81,7 +90,7 @@ export async function selectLookup(page: Page, navOrder: number, text: string) {
 
   // If not visible, click the search icon next to the input
   const container = input.locator('xpath=ancestor::div[contains(@class,"lookup-code") or contains(@class,"relative")][1]');
-  const searchBtn = container.locator('button[data-lookup-search-btn], button[aria-label="Search"]').first();
+  const searchBtn = container.locator('button[data-lookup-search-btn], button[aria-label="Search"], button[aria-label*="Search"]').first();
   if (await searchBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
     await searchBtn.click();
     await page.waitForTimeout(500);

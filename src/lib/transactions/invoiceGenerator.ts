@@ -9,6 +9,7 @@ import {
   listShipmentDocuments,
   saveShipmentDocument,
 } from "@/lib/transactions/shipmentDocuments";
+import { maskDocumentNumber } from "@/lib/security/kycMasking";
 
 export type InvoiceParty = {
   name?: string;
@@ -212,7 +213,8 @@ function partyHtml(p: InvoiceParty, opts?: { showDoc?: boolean }): string {
     const label = (p.documentType || "AADHAAR").toUpperCase().includes("AADHAAR")
       ? "Aadhaar Number"
       : p.documentType || "Document No";
-    lines.push(`${esc(label)}: ${esc(p.documentNo)}`);
+    const maskedNo = maskDocumentNumber(p.documentType, p.documentNo);
+    lines.push(`${esc(label)}: ${esc(maskedNo)}`);
   }
   if (phone) lines.push(`Phone: ${esc(phone)}`);
   if (p.email) lines.push(`Email: ${esc(p.email)}`);
