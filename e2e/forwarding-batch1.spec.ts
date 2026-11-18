@@ -241,35 +241,59 @@ test.describe('Forwarding Tab Batch 1 E2E Tests', () => {
   });
 
   test('FW-13 / F6. Locked shipment Forwarding tab is read-only', async ({ page }) => {
-    // 1. Find a locked shipment
-    const { data: locked } = await dbAdmin
+    // 1. Find or create a locked shipment
+    let { data: locked } = await dbAdmin
       .from('shipments')
       .select('awb_no')
       .eq('is_locked', true)
+      .is('deleted_at', null)
       .limit(1)
-      .single();
+      .maybeSingle();
+
+    let temporarilyLockedAwb: string | null = null;
+    if (!locked) {
+      // Find an active test shipment, e.g. TEST_AWB_FWD_F1
+      const { data: active } = await dbAdmin
+        .from('shipments')
+        .select('awb_no')
+        .eq('reference_no', 'TEST_AWB_FWD_F1')
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle();
+      if (active) {
+        await dbAdmin.from('shipments').update({ is_locked: true }).eq('awb_no', active.awb_no);
+        locked = active;
+        temporarilyLockedAwb = active.awb_no;
+      }
+    }
 
     if (!locked) return;
 
-    // 2. Open AWB Entry Form
-    await openAwbForm(page, false);
+    try {
+      // 2. Open AWB Entry Form
+      await openAwbForm(page, false);
 
-    // 3. Search and open the locked shipment via Top Toolbar
-    const searchInput = page.locator('input[aria-label="AWB No"]').first();
-    await searchInput.fill(locked.awb_no);
-    await page.locator('button[aria-label="Search AWB"]').first().click();
-    await page.waitForTimeout(2000);
+      // 3. Search and open the locked shipment via Top Toolbar
+      const searchInput = page.locator('input[aria-label="AWB No"]').first();
+      await searchInput.fill(locked.awb_no);
+      await page.locator('button[aria-label="Search AWB"]').first().click();
+      await page.waitForTimeout(2000);
 
-    // 4. Switch to Forwarding tab
-    await page.getByRole('tab', { name: 'Forwarding' }).click();
-    await page.waitForTimeout(500);
+      // 4. Switch to Forwarding tab
+      await page.getByRole('tab', { name: 'Forwarding' }).click();
+      await page.waitForTimeout(500);
 
-    // 5. Verify the Forwarding inputs are disabled inside the disabled fieldset
-    const deliveryAwbInput = page.locator('input[data-erp-nav-order="1000"]').first();
-    await expect(deliveryAwbInput).toBeDisabled();
+      // 5. Verify the Forwarding inputs are disabled inside the disabled fieldset
+      const deliveryAwbInput = page.locator('input[data-erp-nav-order="1000"]').first();
+      await expect(deliveryAwbInput).toBeDisabled();
 
-    // 6. Verify Save/Update button in footer is disabled
-    const saveOrUpdateBtn = page.getByRole('button', { name: /Save|Update/i }).first();
-    await expect(saveOrUpdateBtn).toBeDisabled();
+      // 6. Verify Save/Update button in footer is disabled
+      const saveOrUpdateBtn = page.getByRole('button', { name: /Save|Update/i }).first();
+      await expect(saveOrUpdateBtn).toBeDisabled();
+    } finally {
+      if (temporarilyLockedAwb) {
+        await dbAdmin.from('shipments').update({ is_locked: false }).eq('awb_no', temporarilyLockedAwb);
+      }
+    }
   });
 });

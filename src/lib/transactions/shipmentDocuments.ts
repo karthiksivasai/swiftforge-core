@@ -308,3 +308,74 @@ export async function logKycReveal(args: {
   return (data as { ok?: boolean })?.ok === true;
 }
 
+export type ShipperSavedKycItem = {
+  id: string;
+  shipper_id: string;
+  seq: number;
+  kyc_type: string;
+  file_name: string | null;
+  document_no: string | null;
+  side: "FRONT" | "BACK" | "BOTH" | "Single/Both";
+  expiry_date: string | null;
+  storage_path: string | null;
+  mime_type: string | null;
+  file_size: number | null;
+  entry_date: string;
+};
+
+/**
+ * Fetch saved KYC documents for a Shipper from shipper_kyc_documents.
+ */
+export async function getShipperSavedKyc(args: {
+  shipperId?: string;
+  shipperCode?: string;
+  mobile?: string;
+  shipperName?: string;
+}): Promise<ShipperSavedKycItem[]> {
+  const { data, error } = await supabase.rpc("get_shipper_saved_kyc", {
+    p_shipper_id: args.shipperId || null,
+    p_shipper_code: args.shipperCode || null,
+    p_mobile: args.mobile || null,
+    p_shipper_name: args.shipperName || null,
+  });
+  if (error) {
+    console.warn("Could not fetch shipper saved KYC:", error.message);
+    return [];
+  }
+  return (data || []) as ShipperSavedKycItem[];
+}
+
+/**
+ * Persist an uploaded KYC document to the Shipper Master for future reuse across bookings.
+ */
+export async function saveKycToShipperMaster(args: {
+  doc: {
+    entryType: string;
+    fileName: string;
+    documentNo?: string;
+    side?: string;
+    expiryDate?: string;
+    storagePath?: string;
+    mimeType?: string;
+    fileSize?: number;
+  };
+  shipperId?: string;
+  shipperCode?: string;
+  mobile?: string;
+  shipperName?: string;
+}): Promise<{ ok: boolean; id?: string; reason?: string }> {
+  const { data, error } = await supabase.rpc("save_kyc_to_shipper_master", {
+    p_doc: args.doc,
+    p_shipper_id: args.shipperId || null,
+    p_shipper_code: args.shipperCode || null,
+    p_mobile: args.mobile || null,
+    p_shipper_name: args.shipperName || null,
+  });
+  if (error) {
+    console.warn("Could not save KYC to shipper master:", error.message);
+    return { ok: false, reason: error.message };
+  }
+  return (data || { ok: false }) as { ok: boolean; id?: string; reason?: string };
+}
+
+

@@ -250,7 +250,7 @@ export function IconButton({
           className,
         )}
         onClick={onClick}
-        aria-label={label}
+        aria-label={typeof label === "string" ? label : undefined}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
         onPointerEnter={() => setHover(true)}

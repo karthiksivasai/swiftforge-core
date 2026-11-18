@@ -88,6 +88,7 @@ describe("Proforma Tab Audit Live Verification", () => {
         reference_no: ref,
         airline: null,
         service: "FEDEX",
+        airline: "FEDEX",
         payment_type: "CASH",
         content: "SAMPLE ITEMS",
         instruction: "TEST PROFORMA",

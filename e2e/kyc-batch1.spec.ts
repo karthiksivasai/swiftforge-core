@@ -201,7 +201,7 @@ test.describe('KYC Tab Batch 1 E2E Tests (KYC-01, KYC-02, KYC-06, KYC-11, KYC-12
     const searchInput = page.locator('input[aria-label="AWB No"]').first();
     await searchInput.fill(shipment.awb_no);
     await page.locator('button[aria-label="Search AWB"]').first().click();
-    await page.waitForTimeout(2000);
+    await expect(page.locator('li[data-sonner-toast]').filter({ hasText: /Opened AWB/i }).first()).toBeVisible({ timeout: 10000 });
 
     // Switch to KYC tab
     await page.locator('button[role="tab"]').filter({ hasText: 'KYC' }).click();
@@ -209,7 +209,7 @@ test.describe('KYC Tab Batch 1 E2E Tests (KYC-01, KYC-02, KYC-06, KYC-11, KYC-12
 
     const kycTabContent = page.locator('div[role="tabpanel"][data-state="active"]');
     const rows = kycTabContent.locator('table tbody tr');
-    expect(await rows.count()).toBe(2);
+    await expect(rows).toHaveCount(2, { timeout: 10000 });
 
     // Verify BOTH Download buttons are enabled (KYC-01 fix verified!)
     const row1Download = rows.nth(0).locator('button[aria-label="Download KYC document"]');
@@ -223,6 +223,7 @@ test.describe('KYC Tab Batch 1 E2E Tests (KYC-01, KYC-02, KYC-06, KYC-11, KYC-12
 
   test('K3. Document soft-delete on UI updates DB with deleted_at and prevents resurrection (KYC-06)', async ({ page }) => {
     test.setTimeout(120000);
+    page.on('console', (msg) => console.log('[BROWSER CONSOLE K3]', msg.type(), msg.text()));
 
     const { data: shipment } = await dbAdmin
       .from('shipments')
@@ -239,23 +240,25 @@ test.describe('KYC Tab Batch 1 E2E Tests (KYC-01, KYC-02, KYC-06, KYC-11, KYC-12
     const searchInput = page.locator('input[aria-label="AWB No"]').first();
     await searchInput.fill(shipment.awb_no);
     await page.locator('button[aria-label="Search AWB"]').first().click();
-    await page.waitForTimeout(2000);
+    await expect(page.locator('li[data-sonner-toast]').filter({ hasText: /Opened AWB/i }).first()).toBeVisible({ timeout: 10000 });
 
     await page.locator('button[role="tab"]').filter({ hasText: 'KYC' }).click();
     await page.waitForTimeout(500);
 
     const kycTabContent = page.locator('div[role="tabpanel"][data-state="active"]');
     const rows = kycTabContent.locator('table tbody tr');
-    expect(await rows.count()).toBe(2);
+    await expect(rows).toHaveCount(2, { timeout: 10000 });
 
     // Delete Row 1 (Aadhaar)
     await rows.nth(0).locator('button[aria-label="Delete KYC document"]').click();
 
     // Only 1 row remains on screen
     await expect(rows).toHaveCount(1, { timeout: 10000 });
+    await expect(page.locator('li[data-sonner-toast]').filter({ hasText: /Document removed/i }).first()).toBeVisible({ timeout: 10000 });
 
-    // Save/Update shipment
-    await page.getByRole('button', { name: /Save|Update/i }).first().click();
+    // Save/Update shipment on active tab
+    const saveBtn = page.locator('button').filter({ hasText: /^(Save|Update)$/ }).first();
+    await saveBtn.click();
     await expect(page.locator('li[data-sonner-toast]').filter({ hasText: /AWB.*(booked|created|saved|updated)/i }).first()).toBeVisible({ timeout: 30000 });
 
     // Verify in database that 1 document was soft-deleted
@@ -354,6 +357,12 @@ test.describe('KYC Tab Batch 1 E2E Tests (KYC-01, KYC-02, KYC-06, KYC-11, KYC-12
     expect(deleteRpcResult.error).toBeTruthy();
     expect(deleteRpcResult.error.message).toMatch(/Shipment is locked/i);
 
+    // Unlock shipment to restore clean state for other tests/reruns
+    await dbAdmin
+      .from('shipments')
+      .update({ is_locked: false })
+      .eq('id', shipment.id);
+
     console.log('✅ KYC-11 Verified: Fieldset locked in UI and server RPCs strictly reject mutations on locked AWB!');
   });
 
@@ -393,6 +402,10 @@ test.describe('KYC Tab Batch 1 E2E Tests (KYC-01, KYC-02, KYC-06, KYC-11, KYC-12
     expect(deleteLogs.length).toBeGreaterThanOrEqual(1);
 
     console.log(`✅ KYC-12 Verified: ${createLogs.length} ADD and ${deleteLogs.length} DELETE audit logs recorded!`);
+  });
+
+  test.afterAll(async () => {
+    await cleanupReference('TEST_AWB_KYC_BATCH1_K1');
   });
 });
 

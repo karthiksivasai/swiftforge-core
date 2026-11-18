@@ -454,4 +454,25 @@ There are 65 pre-existing TypeScript errors across 23 legacy files elsewhere in 
 | `src/routes/utility.tax-charges-setup.tax-setup.tsx` | 1 | Tax Setup Utility |
 | `src/routes/utility.users.access-rights.tsx` | 1 | Access Rights Screen |
 
+## I. Forwarding & KYC Go-Live Checklist (18 Nov 2026)
+
+### 1. Forwarding Unique Number & Vendor Deduplication
+- **Pre-migration Check**: Before applying `0156_forwarding_unique_number.sql` in production, query and check for duplicate `forwarding_awb` per vendor (`select vendor_id, forwarding_awb, count(*) from shipments where forwarding_awb is not null and deleted_at is null group by vendor_id, forwarding_awb having count(*) > 1;`).
+- Any duplicate numbers in production must be resolved or disambiguated prior to applying the unique partial index `idx_shipments_vendor_forwarding_unique`.
+
+### 2. KYC Enforcement at Manifest / Dispatch (D11)
+- **Counter Booking**: KYC is NOT mandatory to Save/Book an international shipment at the counter (prevents customer counter bottlenecks).
+- **Visual Warning**: A clear "KYC pending" banner is displayed on the AWB form and status strip for international shipments without verified documents.
+- **Status Tracking**: The shipment's `kyc_status` column stores `PENDING` or `COMPLETE`.
+- **Customs Gate**: Hard blocking of international shipments with `kyc_status = 'PENDING'` will be enforced at the **Manifest / Outscan / Dispatch screen** when that screen is audited.
+
+### 3. Supabase Storage Architecture (D13)
+- The production Supabase environment must have the private `tenant-files` bucket configured with RLS policies isolating tenant storage.
+- All KYC uploads are saved to `tenants/{tenant_id}/kyc/{shipment_id}/{uuid}_{filename}` and opened with 300-second expiring signed URLs.
+
+### 4. Identity Masking & Data Privacy (D15)
+- Aadhaar numbers are masked as `XXXXXXXX1234` and PAN numbers as `XXXXXX234X` on screen, in party lookups, and on printed invoices.
+- Full reveal is restricted to operators holding the `txn.kyc-reveal` permission, and every reveal action is recorded in `public.audit_logs`.
+
+
 

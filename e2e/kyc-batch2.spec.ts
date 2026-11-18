@@ -270,7 +270,7 @@ test.describe('KYC Tab Batch 2 E2E Tests (Storage, Metadata, Masking & Front/Bac
     await page.waitForTimeout(400);
 
     // 3. Save / Book
-    await page.getByRole('button', { name: /Save|Update/i }).first().click();
+    await page.locator('button').filter({ hasText: /^(Save|Update)$/ }).first().click();
     await expect(page.locator('li[data-sonner-toast]').filter({ hasText: /AWB.*(booked|created|saved|updated)/i }).first()).toBeVisible({ timeout: 30000 });
 
     // 4. Verify in database: file_url has storage path in tenant-files

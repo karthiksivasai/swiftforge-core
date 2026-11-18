@@ -35,6 +35,7 @@ supabase/.env
 # Local database backups
 backups/
 *.dump
+scratch_payload.json
 
 # Real courier import files (zone linking, rate sheets). Never commit.
 imports/

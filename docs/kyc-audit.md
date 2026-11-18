@@ -32,13 +32,13 @@ A comprehensive code and live browser/DB audit was conducted on the **KYC Tab** 
 |---|---|---|---|---|---|---|---|---|
 | **KYC-01** | Document Hydration & Retrieval | **CRITICAL** | **FIXED & VERIFIED (Batch 1)** | **LIVE (Browser & DB Verified)** | `withStoredKyc` calls `get_shipment_document(shipmentId, "KYC")` which queries `where document_type = 'KYC' order by version desc limit 1` (`awb-entry.tsx:5614-5642`, `0145_awb_series...sql:329-336`). | When reopening a shipment with multiple KYC files, all files must be fully hydrated with their download capabilities. | Resolved in Batch 1 via `list_shipment_document_bytes` and updated hydration loop. Verified in `e2e/kyc-batch1.spec.ts`. | Fixed: Multi-document bytes retrieved and hydrated with active Download buttons. |
 | **KYC-02** | Master Categorization | **HIGH** | **FIXED & VERIFIED (Batch 1)** | **LIVE (DB Query Verified)** | `saveShipmentBooking` explicitly hardcodes `documentType: "KYC"` when inserting into `public.shipment_documents` (`awb-entry.tsx:4061`). | Document row in `shipment_documents` should record the specific document type (e.g., `AADHAAR`, `PASSPORT`, `PAN`, `GSTIN`, `IEC`). | Resolved in Batch 1 via `raw_meta->>'kycDocType'`. Verified in `e2e/kyc-batch1.spec.ts`. | Fixed: Specific document classification preserved in `raw_meta`. |
-| **KYC-03** | Regulatory Compliance Gate | **HIGH** | **PLANNED (Batch 3)** | **LIVE (Browser & DB Verified)** | Neither client validator (`validateAwbEntry`) nor server RPC (`book_awb_shipment`, `app.awb_field_errors`) validates that KYC is attached (`awb-entry.tsx:3860-3920`). | International shipments (especially CSB IV & CSB V NDOX) require mandatory shipper KYC before booking or manifesting under CBIC rules. | D11 decision: Non-blocking warning banner at booking; enforcement will occur at Manifest/Dispatch screen. | Show clear "KYC pending" banner and store `kyc_status` (Batch 3). |
+| **KYC-03** | Regulatory Compliance Gate | **HIGH** | **FIXED & VERIFIED (Batch 3)** | **LIVE (Browser & DB Verified)** | Neither client validator (`validateAwbEntry`) nor server RPC (`book_awb_shipment`, `app.awb_field_errors`) validates that KYC is attached (`awb-entry.tsx:3860-3920`). | International shipments (especially CSB IV & CSB V NDOX) require mandatory shipper KYC before booking or manifesting under CBIC rules. | D11 decision: Non-blocking warning banner at booking; enforcement will occur at Manifest/Dispatch screen. Stored `kyc_status` (PENDING/COMPLETE). Verified in `e2e/kyc-batch3.spec.ts`. | Fixed: Non-blocking banner with "Go to KYC tab" and `kyc_status` tracking. |
 | **KYC-04** | Upload Security & File Handling | **MEDIUM** | **FIXED & VERIFIED (Batch 2)** | **LIVE (Browser & DOM Verified)** | `<input ref={kycFileRef} type="file" className="hidden">` had no `accept` attribute and no size validation. | File upload must restrict allowed MIME types (`image/jpeg,image/png,application/pdf`) and enforce 5MB size limit. | Added `accept="image/jpeg,image/png,application/pdf"`, extension & MIME check, and 5MB validation with toast alerts. Verified in `e2e/kyc-batch2.spec.ts`. | Fixed: Invalid formats (.exe) and oversized files (>5MB) rejected with toast alerts. |
 | **KYC-05** | Storage Architecture | **MEDIUM** | **FIXED & VERIFIED (Batch 2)** | **LIVE (Browser & Storage Verified)** | Uploaded KYC files were stored as Base64 strings directly in PostgreSQL. | Documents must be stored in private Supabase Storage (`tenant-files` bucket) with 300s expiring signed URLs. | Implemented private Storage upload under `tenants/{tenant_id}/kyc/{shipment_id}/...`, migrated existing DB rows, and wired 300s signed URLs for downloads. Verified in `e2e/kyc-batch2.spec.ts`. | Fixed: Migrated to private Storage bucket with secure signed URLs. |
 | **KYC-06** | Document Deletion & Resurrection | **HIGH** | **FIXED & VERIFIED (Batch 1)** | **LIVE (Browser & DB Verified)** | `removeKycDocument` only filtered the React array and never soft-deleted records in `shipment_documents`. | Deleting a KYC document on the form should mark the corresponding `shipment_documents` row as deleted (`deleted_at = now()`). | Fixed in Batch 1 via `deleteShipmentDocument` RPC and resurrection prevention on reload. Verified in `e2e/kyc-batch1.spec.ts`. | Fixed: Soft-delete persisted in DB; no resurrection on reopen. |
-| **KYC-07** | Master Data Reuse | **MEDIUM** | **PLANNED (Batch 3)** | **CODE-ONLY** | KYC documents are linked exclusively to `shipment_id`. | D14: On booking, if shipper has saved KYC in `shipper_kyc_documents`, offer "Use saved KYC". | Not yet wired to master. Planned for Batch 3. | Wire `shipper_kyc_documents` reuse in Batch 3. |
+| **KYC-07** | Master Data Reuse | **MEDIUM** | **FIXED & VERIFIED (Batch 3)** | **LIVE (Browser & DB Verified)** | KYC documents were linked exclusively to `shipment_id`. | D14: On booking, if shipper has saved KYC in `shipper_kyc_documents`, offer "Use saved KYC", and allow saving new uploads to Shipper Master via checkbox. | Implemented `get_shipper_saved_kyc` RPC and "Use saved KYC" card on KYC tab, plus "Save KYC to Shipper Master" checkbox. Verified in `e2e/kyc-batch3.spec.ts`. | Fixed: Master KYC reuse and save-to-master functional. |
 | **KYC-08** | Document Metadata Omission | **MEDIUM** | **FIXED & VERIFIED (Batch 2)** | **LIVE (Browser & DB Verified)** | KYC tab lacked Document No, Document Side, and Expiry Date. | Customs requires knowing Document ID, Side (Front/Back/Single), and Expiry Date. | Added Document No, Side selector (Front, Back, Single/Both), and Expiry Date with expired date warnings. Verified in `e2e/kyc-batch2.spec.ts`. | Fixed: Document No, Side, and Expiry Date added and persisted in metadata. |
-| **KYC-09** | Dead UI Elements | **LOW** | **PLANNED (Batch 3)** | **LIVE (Browser DOM Verified)** | Settings, Info, List buttons show placeholder toast messages. | Toolbar buttons should perform functional actions or be cleanly hidden. | Planned for cleanup in Batch 3. | Streamline toolbar in Batch 3. |
+| **KYC-09** | Dead UI Elements | **LOW** | **FIXED & VERIFIED (Batch 3)** | **LIVE (Browser & DOM Verified)** | Settings, Info, List buttons showed placeholder toast messages. | Toolbar buttons should perform functional actions or be cleanly hidden. | Implemented functional Settings modal, Info guidance drawer, and List view sheet. Verified in `e2e/kyc-batch3.spec.ts`. | Fixed: Toolbar buttons fully wired and interactive. |
 | **KYC-10** | Data Privacy & Compliance | **HIGH** | **FIXED & VERIFIED (Batch 2)** | **LIVE (Browser & DB Verified)** | Full 12-digit Aadhaar and 10-digit PAN numbers were displayed in cleartext on screen, lookups, and printed invoices. | Sensitive identity numbers must be masked (Aadhaar: `XXXXXXXX1234`, PAN: `XXXXXX234X`). Unmasking requires permission and must be audited. | D15 masking implemented across UI, party lookups, and prints. Reveal toggle gated by `txn.kyc-reveal` permission and audits each reveal to `public.audit_logs`. Verified in `e2e/kyc-batch2.spec.ts`. | Fixed: Masking & audited reveal button strictly enforced. |
 | **KYC-11** | Lock Enforcement Gap | **MEDIUM** | **FIXED & VERIFIED (Batch 1)** | **LIVE (Browser & DB Verified)** | `app.save_shipment_document` did not check `shipments.is_locked`. | Locked shipments must reject document insertions or deletions. | Migration `0177` added `is_locked` checks to RPCs; UI fieldset disables upload/delete when locked. Verified in `e2e/kyc-batch1.spec.ts`. | Fixed: Server-side and UI fieldset lock enforced. |
 | **KYC-12** | Audit Trail Omission | **MEDIUM** | **FIXED & VERIFIED (Batch 1)** | **LIVE (Browser & DB Verified)** | Document creation and deletion were not recorded in `public.audit_logs`. | KYC document modifications must write audit records. | Migration `0177` emits audit logs for document CREATE and DELETE. Verified in `e2e/kyc-batch1.spec.ts`. | Fixed: Audit trail captures all KYC document mutations. |
@@ -159,26 +159,32 @@ A dedicated Playwright test suite (`e2e/kyc-audit.spec.ts`) was executed against
 
 ---
 
-## 6. Proposed Fix Batches
+## 6. Implementation & Verification Status — Complete
 
-### Batch 1: Critical & High Severity Bugs (Hydration, DB Type, Deletion & Lock)
-- **Fix KYC-01**: Update document retrieval so that all KYC documents attached to a shipment are fetched with their byte payloads, enabling the Download button for all uploaded files.
-- **Fix KYC-02**: Pass and persist the specific document classification (e.g. `Aadhaar Number`, `Passport Number`) in `shipment_documents.document_type` or `raw_meta->>'kycDocType'` instead of flattening to generic `'KYC'`.
-- **Fix KYC-06**: Implement soft-deletion (`deleted_at = now()`) on `public.shipment_documents` when an operator removes a KYC document, preventing deleted documents from resurrecting.
-- **Fix KYC-11**: Add server-side check in `app.save_shipment_document` to strictly reject document mutations when `shipments.is_locked = true`.
-- **Fix KYC-12**: Emit audit log events in `public.audit_logs` when KYC documents are uploaded or deleted.
+All three batches have been fully implemented, migrated on DEV database (`0177_kyc_hardening_and_storage.sql`, `0178_kyc_batch2_storage_and_masking.sql`, `0179_kyc_batch3_reuse_and_status.sql`), and 100% verified via automated Playwright E2E suites:
 
-### Batch 2: Security, Data Privacy & Validation
-- **Fix KYC-04**: Restrict file input to `accept="image/jpeg,image/png,application/pdf"` and validate `file.size <= 5MB` with an operator-friendly error alert.
-- **Fix KYC-10**: Implement UI masking for sensitive identity numbers (Aadhaar: `XXXX-XXXX-1234`, PAN: `XXXXX1234X`). Provide a reveal/toggle button visible only to authorized roles.
-- **Fix KYC-08**: Add `Document No` and `Expiry Date` fields to the KYC upload drawer/form.
-- **Fix KYC-03**: Enforce KYC booking/manifesting rules based on the owner's policy decision (D11).
+### Batch 1: Critical & High Severity Bugs (Hydration, DB Type, Deletion & Lock) — VERIFIED
+- **Fixed KYC-01**: Hydration loop fetches multi-document payloads; download button is fully functional for all uploaded files.
+- **Fixed KYC-02**: Passes and persists document classification (e.g. `Aadhaar Number`, `PAN Number`) in `raw_meta->>'kycDocType'`.
+- **Fixed KYC-06**: Implemented soft-deletion (`deleted_at = now()`) on `public.shipment_documents` and prevents resurrection on reload.
+- **Fixed KYC-11**: Added server-side check in `app.save_shipment_document` to reject document mutations when `shipments.is_locked = true`. KYC tab wrapped in disabled `<fieldset>`.
+- **Fixed KYC-12**: Emits audit records in `public.audit_logs` for KYC document CREATE and DELETE.
+- *Test Evidence*: `e2e/kyc-batch1.spec.ts` (6/6 tests passed).
 
-### Batch 3: Usability, Master Reuse & Polish
-- **Fix KYC-07**: Link uploaded KYC to the Shipper/Customer contact record so subsequent bookings for the same party can reuse existing verified documents.
-- **Fix KYC-09**: Remove dummy action buttons (Settings, Info, List) or replace them with functional guidelines/views. Wire the search toolbar to search customer KYC records.
-- **Fix KYC-13**: Auto-sync `kycDocType` from `form.shipper.documentType` when the operator enters the KYC tab.
-- **Fix KYC-14**: Correct typo `"Performa Invoice"` to `"Proforma Invoice"`.
+### Batch 2: Security, Data Privacy & Validation — VERIFIED
+- **Fixed KYC-04**: Restricts file input to `accept="image/jpeg,image/png,application/pdf"` and enforces 5MB size limit with toast validation.
+- **Fixed KYC-05 & D13**: Private Supabase Storage bucket (`tenant-files/tenants/{tenant_id}/kyc/{shipment_id}/...`) with 300s expiring signed URLs for secure downloads.
+- **Fixed KYC-10 & D15**: Aadhaar masked as `XXXXXXXX1234` and PAN masked as `XXXXXX234X`. Audited reveal button gated by `txn.kyc-reveal` permission.
+- **Fixed KYC-08 & D12**: Added Document No, Front/Back/Single side selector, and Expiry Date with expired warnings.
+- **Fixed KYC-13**: Two-way synchronization between Shipper document fields on AWB tab and KYC tab.
+- **Fixed KYC-14**: Corrected typo `"Performa Invoice"` to `"Proforma Invoice"`.
+- *Test Evidence*: `e2e/kyc-batch2.spec.ts` (5/5 tests passed).
+
+### Batch 3: Usability, Master Reuse & Regulatory Status — VERIFIED
+- **Fixed KYC-03 & D11**: Prominent non-blocking "KYC pending" banner on AWB form and status strip for international shipments without KYC; tracks `kyc_status` (`PENDING` / `COMPLETE`) in database.
+- **Fixed KYC-07 & D14**: Master Shipper KYC reuse via `get_shipper_saved_kyc` RPC ("Use saved KYC" card) and "Save KYC to Shipper Master" checkbox on upload.
+- **Fixed KYC-09**: Replaced dummy toast buttons with functional Settings modal, Info guidelines drawer, and searchable KYC List view sheet.
+- *Test Evidence*: `e2e/kyc-batch3.spec.ts` (5/5 tests passed).
 
 ---
 

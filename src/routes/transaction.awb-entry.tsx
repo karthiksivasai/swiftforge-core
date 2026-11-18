@@ -20,6 +20,7 @@ import {
   Loader2,
   Check,
   AlertTriangle,
+  FileCheck,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -181,6 +182,9 @@ import {
   revokeDocumentObjectUrl,
   saveShipmentDocument,
   uploadKycFileToStorage,
+  getShipperSavedKyc,
+  saveKycToShipperMaster,
+  type ShipperSavedKycItem,
   type ShipmentDocumentItem,
 } from "@/lib/transactions/shipmentDocuments";
 import {
@@ -2009,6 +2013,31 @@ function AwbEntryPage() {
   const [kycDocSide, setKycDocSide] = useState<"FRONT" | "BACK" | "BOTH">("FRONT");
   const [revealedKycIds, setRevealedKycIds] = useState<Set<string>>(new Set());
   const [shipperDocMasked, setShipperDocMasked] = useState(true);
+  const [saveToShipperMaster, setSaveToShipperMaster] = useState(true);
+  const [kycInfoOpen, setKycInfoOpen] = useState(false);
+
+  const { data: savedShipperKyc = [], refetch: refetchSavedShipperKyc } = useQuery({
+    queryKey: [
+      "shipper-saved-kyc",
+      form.shipper.companyName.id,
+      form.shipper.companyName.code,
+      form.shipper.mobileNo,
+      form.shipper.companyName.name,
+    ],
+    queryFn: () =>
+      getShipperSavedKyc({
+        shipperId: form.shipper.companyName.id,
+        shipperCode: form.shipper.companyName.code,
+        mobile: form.shipper.mobileNo,
+        shipperName: form.shipper.companyName.name || form.shipper.contactName,
+      }),
+    enabled: !!(
+      form.shipper.companyName.id ||
+      form.shipper.companyName.code ||
+      form.shipper.mobileNo ||
+      form.shipper.companyName.name
+    ),
+  });
 
   useEffect(() => {
     if (activeTab === "kyc") {
@@ -3786,7 +3815,9 @@ function AwbEntryPage() {
     setVendorOtpError(null);
     setVendorBookingBusy(false);
     allowLeaveRef.current = true;
-    if (view === "form") window.history.back();
+    if (view === "form") {
+      void navigate({ search: { view: undefined, fresh: undefined } });
+    }
   };
 
   const requestCloseForm = () => {
@@ -5680,13 +5711,10 @@ function AwbEntryPage() {
     const withStoredKyc = async (shipmentId: string, source: AwbFullForm): Promise<AwbFullForm> => {
       try {
         const storedList = await listShipmentDocumentBytes(shipmentId, "KYC").catch(() => []);
-        if (!storedList || storedList.length === 0) return source;
-        const docs = source.kyc.documents;
-
-        if (docs.length === 0) {
+        if (storedList && storedList.length > 0) {
           const documents: KycDocument[] = storedList.map((s) => ({
             id: s.id || crypto.randomUUID(),
-            fileName: s.fileName || "kyc",
+            fileName: s.fileName || (s.rawMeta?.fileName as string) || "kyc",
             entryType: (s.rawMeta?.kycDocType as string) || "KYC",
             entryDate: s.createdAt ? s.createdAt.slice(0, 10) : "",
             contentB64: s.contentB64 ?? undefined,
@@ -5699,40 +5727,7 @@ function AwbEntryPage() {
           }));
           return { ...source, kyc: { documents } };
         }
-
-        const usedIds = new Set<string>();
-        const documents: KycDocument[] = docs.map((doc) => {
-          const match =
-            storedList.find(
-              (s) => !!s.id && !usedIds.has(s.id) && (s.id === doc.id || s.fileName === doc.fileName),
-            ) ??
-            storedList.find(
-              (s) =>
-                !!s.id &&
-                !usedIds.has(s.id) &&
-                Boolean(s.rawMeta?.kycDocType) &&
-                s.rawMeta?.kycDocType === doc.entryType,
-            ) ??
-            storedList.find((s) => !!s.id && !usedIds.has(s.id));
-
-          if (match) {
-            if (match.id) usedIds.add(match.id);
-            return {
-              ...doc,
-              id: match.id || doc.id || crypto.randomUUID(),
-              fileName: doc.fileName || match.fileName || "kyc",
-              contentB64: match.contentB64 ?? doc.contentB64,
-              fileUrl: match.url ?? doc.fileUrl,
-              documentNo: doc.documentNo || (match.rawMeta?.documentNo as string) || undefined,
-              expiryDate: doc.expiryDate || (match.rawMeta?.expiryDate as string) || undefined,
-              side: doc.side || (match.rawMeta?.side as "FRONT" | "BACK" | "BOTH") || undefined,
-              mimeType: match.mimeType || doc.mimeType || "application/octet-stream",
-              uploaded: true,
-            };
-          }
-          return doc;
-        });
-        return { ...source, kyc: { documents } };
+        return { ...source, kyc: { documents: [] } };
       } catch {
         return source;
       }
@@ -5785,6 +5780,51 @@ function AwbEntryPage() {
     };
     setForm((f) => ({ ...f, kyc: { documents: [...f.kyc.documents, doc] } }));
     toast.success("KYC document added");
+
+    if (
+      saveToShipperMaster &&
+      (form.shipper.companyName.id ||
+        form.shipper.companyName.code ||
+        form.shipper.mobileNo ||
+        form.shipper.companyName.name)
+    ) {
+      void saveKycToShipperMaster({
+        doc: {
+          entryType: kycDocType,
+          fileName: file.name,
+          documentNo: kycDocNo.trim() || undefined,
+          side: kycDocSide,
+          expiryDate: kycExpiryDate.trim() || undefined,
+          mimeType: file.type || "application/octet-stream",
+          fileSize: file.size,
+        },
+        shipperId: form.shipper.companyName.id,
+        shipperCode: form.shipper.companyName.code,
+        mobile: form.shipper.mobileNo,
+        shipperName: form.shipper.companyName.name || form.shipper.contactName,
+      }).then((res) => {
+        if (res.ok) {
+          void refetchSavedShipperKyc();
+          toast.success("Saved to Shipper Master for future reuse");
+        }
+      });
+    }
+  };
+
+  const attachSavedShipperDoc = (savedDoc: ShipperSavedKycItem) => {
+    const doc: KycDocument = {
+      id: crypto.randomUUID(),
+      fileName: savedDoc.file_name || `${savedDoc.kyc_type}.pdf`,
+      entryType: savedDoc.kyc_type,
+      entryDate: formatDisplayDate(todayIso()),
+      documentNo: savedDoc.document_no || undefined,
+      expiryDate: savedDoc.expiry_date || undefined,
+      side: (savedDoc.side as "FRONT" | "BACK" | "BOTH") || "BOTH",
+      fileUrl: savedDoc.storage_path || undefined,
+      uploaded: true,
+    };
+    setForm((f) => ({ ...f, kyc: { documents: [...f.kyc.documents, doc] } }));
+    toast.success(`Attached saved ${savedDoc.kyc_type} from Shipper Master`);
   };
 
   const handleKycFile = (fileList: FileList | null) => {
@@ -5824,6 +5864,15 @@ function AwbEntryPage() {
     if (editing?.id && docToRemove && (docToRemove.uploaded || docToRemove.id)) {
       try {
         await deleteShipmentDocument(editing.id, docToRemove.id);
+        const { data: fresh } = await supabase
+          .from("shipments")
+          .select("row_version")
+          .eq("id", editing.id)
+          .single();
+        if (fresh?.row_version != null) {
+          setEditing((prev) => (prev ? { ...prev, rowVersion: fresh.row_version } : null));
+        }
+        toast.info("Document removed");
       } catch (err) {
         console.warn("Could not soft-delete document in backend:", err);
       }
@@ -6022,9 +6071,22 @@ function AwbEntryPage() {
       const displayDebitNoteNo = awbStatusQuery.data?.debitNoteNo ?? form.debitNoteNo ?? "0";
       const displayCreditNoteNo = awbStatusQuery.data?.creditNoteNo ?? form.creditNoteNo ?? "0";
       const displayFlightNo = awbStatusQuery.data?.flightNo || form.flightNo || "";
-      const awbStatusItems: { label: string; value: string }[] = [
+      const kycComplete = (form.kyc?.documents || []).length > 0;
+      const awbStatusItems: { label: string; value: React.ReactNode }[] = [
         { label: "AWB No:", value: form.awbNo },
         { label: "Status:", value: editing?.status ?? "" },
+        {
+          label: "KYC:",
+          value: kycComplete ? (
+            <Badge variant="outline" className="h-4 px-1 text-[10px] text-emerald-700 border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300">
+              COMPLETE
+            </Badge>
+          ) : (
+            <Badge variant="destructive" className="h-4 px-1 text-[10px] bg-amber-500 hover:bg-amber-600 text-white">
+              PENDING
+            </Badge>
+          ),
+        },
         { label: "AWB UserID:", value: displayAwbUserId },
         { label: "POD UserID:", value: displayPodUserId },
         { label: "Manifest No:", value: displayManifestNo },
@@ -6061,7 +6123,16 @@ function AwbEntryPage() {
                         {tab === "awb"
                           ? "AWB"
                           : tab === "kyc"
-                            ? "KYC"
+                            ? (
+                              <span className="flex items-center gap-1.5">
+                                KYC
+                                {!kycComplete ? (
+                                  <span className="inline-block h-2 w-2 rounded-full bg-amber-500" title="KYC Pending" />
+                                ) : (
+                                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" title="KYC Complete" />
+                                )}
+                              </span>
+                            )
                             : tab.charAt(0).toUpperCase() + tab.slice(1)}
                       </TabsTrigger>
                     ))}
@@ -6144,6 +6215,28 @@ function AwbEntryPage() {
                           </span>
                         ))}
                       </section>
+                      {!kycComplete ? (
+                        <div
+                          role="status"
+                          className="mx-2 mt-2 flex items-center justify-between gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200"
+                        >
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                            <span>
+                              <strong>KYC Pending:</strong> Shipper KYC identification has not been uploaded. International customs requires shipper KYC before manifest and dispatch.
+                            </span>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-6 shrink-0 border-amber-400 bg-amber-100 text-[11px] text-amber-900 hover:bg-amber-200 dark:border-amber-700 dark:bg-amber-900/50 dark:text-amber-100"
+                            onClick={() => setActiveTab("kyc")}
+                          >
+                            Upload KYC
+                          </Button>
+                        </div>
+                      ) : null}
                       <fieldset disabled={entryLocked} className="min-w-0 border-0 p-0 disabled:opacity-90">
                         <div className="p-2 md:p-2.5">
                           <div className="mb-2 rounded border border-border bg-card p-2 pt-2.5">
@@ -8068,25 +8161,19 @@ function AwbEntryPage() {
                               <TooltipProvider delayDuration={200}>
                                 <IconButton
                                   label="Settings"
-                                  onClick={() =>
-                                    toast.info("KYC settings will be enabled with backend wiring")
-                                  }
+                                  onClick={openFormSetup}
                                 >
                                   <Settings className="h-4 w-4" />
                                 </IconButton>
                                 <IconButton
                                   label="Info"
-                                  onClick={() =>
-                                    toast.info("KYC document guidelines will be enabled with backend wiring")
-                                  }
+                                  onClick={() => setKycInfoOpen(true)}
                                 >
                                   <Info className="h-4 w-4" />
                                 </IconButton>
                                 <IconButton
                                   label="List"
-                                  onClick={() =>
-                                    toast.info("KYC list view will be enabled with backend wiring")
-                                  }
+                                  onClick={requestCloseForm}
                                 >
                                   <List className="h-4 w-4" />
                                 </IconButton>
@@ -8113,6 +8200,78 @@ function AwbEntryPage() {
                                 <Search className="h-4 w-4" />
                               </Button>
                             </div>
+
+                            {savedShipperKyc.length > 0 ? (
+                              <div className="rounded-md border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
+                                <div className="mb-2 flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <FileCheck className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                    <span className="text-xs font-semibold text-blue-950 dark:text-blue-200">
+                                      Saved Shipper KYC Available ({savedShipperKyc.length})
+                                    </span>
+                                  </div>
+                                  <span className="text-[11px] text-muted-foreground">
+                                    Shipper: {form.shipper.companyName.name || form.shipper.contactName || "Selected Shipper"}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                  {savedShipperKyc.map((savedDoc) => {
+                                    const isAlreadyAttached = (form.kyc.documents || []).some(
+                                      (d) =>
+                                        d.entryType === savedDoc.kyc_type &&
+                                        (d.documentNo === savedDoc.document_no ||
+                                          d.fileName === savedDoc.file_name)
+                                    );
+                                    const expired = isDocExpired(savedDoc.expiry_date);
+                                    return (
+                                      <div
+                                        key={savedDoc.id}
+                                        className="flex flex-col justify-between rounded border bg-card p-2.5 text-xs shadow-sm"
+                                      >
+                                        <div>
+                                          <div className="flex items-center justify-between gap-1">
+                                            <span className="font-semibold truncate">{savedDoc.kyc_type}</span>
+                                            <div className="flex items-center gap-1">
+                                              <Badge variant="outline" className="text-[10px]">
+                                                {savedDoc.side || "Single/Both"}
+                                              </Badge>
+                                              {expired ? (
+                                                <Badge variant="destructive" className="h-4 px-1 text-[9px]">
+                                                  Expired
+                                                </Badge>
+                                              ) : null}
+                                            </div>
+                                          </div>
+                                          <div className="mt-1 text-[11px] text-muted-foreground">
+                                            Doc No: {maskDocumentNumber(savedDoc.kyc_type, savedDoc.document_no || "") || "—"}
+                                          </div>
+                                          {savedDoc.file_name ? (
+                                            <div className="mt-0.5 truncate text-[10px] text-muted-foreground/80">
+                                              File: {savedDoc.file_name}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                        <div className="mt-2.5 flex items-center justify-end">
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant={isAlreadyAttached ? "secondary" : "default"}
+                                            disabled={isAlreadyAttached || entryLocked}
+                                            className={cn(
+                                              "h-7 text-xs",
+                                              !isAlreadyAttached && "bg-blue-600 text-white hover:bg-blue-700"
+                                            )}
+                                            onClick={() => attachSavedShipperDoc(savedDoc)}
+                                          >
+                                            {isAlreadyAttached ? "Attached" : "Use saved KYC"}
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ) : null}
 
                             <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(240px,300px)_1fr]">
                               <fieldset disabled={entryLocked} className={cn("flex flex-col gap-3 border-0 p-0", entryLocked && "opacity-80")}>
@@ -8203,6 +8362,23 @@ function AwbEntryPage() {
                                     PDF, JPG, PNG (Max 5MB)
                                   </span>
                                 </button>
+
+                                <div className="flex items-center space-x-2 pt-1">
+                                  <input
+                                    type="checkbox"
+                                    id="saveToShipper"
+                                    checked={saveToShipperMaster}
+                                    onChange={(e) => setSaveToShipperMaster(e.target.checked)}
+                                    disabled={entryLocked}
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                                  />
+                                  <label
+                                    htmlFor="saveToShipper"
+                                    className="text-xs font-medium cursor-pointer text-muted-foreground select-none"
+                                  >
+                                    Save KYC to Shipper Master (for future reuse)
+                                  </label>
+                                </div>
                               </fieldset>
 
                               <div className="overflow-x-auto">
@@ -8525,6 +8701,54 @@ function AwbEntryPage() {
                   </div>
                 </DialogContent>
               </Dialog>
+              <Dialog open={kycInfoOpen} onOpenChange={setKycInfoOpen}>
+                <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0 sm:max-w-2xl">
+                  <div className="bg-sidebar px-4 py-3">
+                    <DialogTitle className="text-base font-semibold text-sidebar-foreground">
+                      Indian Customs Shipper KYC Guidelines (CBIC)
+                    </DialogTitle>
+                  </div>
+                  <div className="max-h-[70vh] overflow-auto p-5 text-xs text-foreground space-y-4">
+                    <div className="rounded border border-blue-200 bg-blue-50/60 p-3 text-blue-950 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-200">
+                      <p className="font-semibold text-sm">Mandatory Regulatory Requirement</p>
+                      <p className="mt-1 leading-relaxed">
+                        Under CBIC Circular No. 09/2010-Customs and Public Notice No. 24/2011, authorized express couriers are legally required to verify the identity and bona fides of consignors before transporting international outbound cargo.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-sm">1. Document Requirements by Shipper Type</h4>
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li><strong>Individual / Low Value Gift (CSB IV):</strong> Aadhaar Card, Passport, Voter ID, or Driving License. Both Front and Back image copies must be captured for photo identity cards.</li>
+                        <li><strong>Commercial Exports (CSB V):</strong> Import Export Code (IEC) certificate, GSTIN Certificate, and Company PAN Card.</li>
+                        <li><strong>Document Shipments (DOX):</strong> Basic identification proof required; exempted from formal commercial customs invoices.</li>
+                      </ul>
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-sm">2. Data Privacy & Aadhaar Masking Policy (UIDAI)</h4>
+                      <p className="leading-relaxed">
+                        In accordance with UIDAI regulations, 12-digit Aadhaar numbers are masked on all screens and invoices as <code>XXXXXXXX1234</code>. Revealing the full number requires <code>txn.kyc-reveal</code> permission and creates an immutable audit trail.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-sm">3. Technical & Storage Specifications</h4>
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li><strong>Allowed Formats:</strong> PDF, JPG, PNG only. Executable or archive files are strictly blocked.</li>
+                        <li><strong>File Size Limit:</strong> Maximum 5 MB per document.</li>
+                        <li><strong>Storage Security:</strong> Uploads are encrypted and stored in tenant-isolated Supabase Storage buckets, accessed via 5-minute expiring signed URLs.</li>
+                        <li><strong>Master Reuse:</strong> Check &quot;Save KYC to Shipper Master&quot; to allow future international bookings for this shipper to reuse verified documents without re-scanning.</li>
+                      </ul>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 border-t bg-muted/20 px-6 py-3">
+                    <Button onClick={() => setKycInfoOpen(false)}>
+                      Close
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </Card>
           ) : (
             <>
@@ -8740,6 +8964,19 @@ function AwbEntryPage() {
                                       className="text-[10px]"
                                     >
                                       {r.status}
+                                    </Badge>
+                                  ) : null}
+                                  {(r as any).kyc_status ? (
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "text-[9px] h-4 px-1 font-medium",
+                                        (r as any).kyc_status === "COMPLETE"
+                                          ? "border-emerald-300 text-emerald-700 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                          : "border-amber-300 text-amber-700 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                                      )}
+                                    >
+                                      {(r as any).kyc_status === "COMPLETE" ? "KYC OK" : "KYC Pending"}
                                     </Badge>
                                   ) : null}
                                 </div>
